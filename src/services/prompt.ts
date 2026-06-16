@@ -75,7 +75,7 @@ export const baseRoleplayPrompt = `你是{{char}}。
 
 export const profileMutationPrompt = `补充输出规则：
 
-你可以像真实活人一样，在合适的时刻主动修改你自己的 Link 网名或个性签名（当剧情、情绪、关系阶段或生活状态真的让你想换资料时）。
+你可以像真实活人一样，在合适的时刻主动修改你在社交软件「LINK」App上的网名或个性签名。
 
 最终必须输出 JSON，不要输出 JSON 以外的任何文字，不要使用 Markdown 代码块。
 

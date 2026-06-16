@@ -784,6 +784,7 @@ export const useAppStore = defineStore('app', () => {
     const conversation = conversations.value.find((entry) => entry.charId === characterId);
     const relatedPosts = voomPosts.value.filter((post) => post.charId === characterId || post.conversationId === conversation?.id);
     const relatedMessages = conversation ? messages.value.filter((message) => message.conversationId === conversation.id) : [];
+    const relatedLocalWorldBooks = worldBooks.value.filter((book) => book.scope === 'local' && character.localWorldBookIds.includes(book.id));
     const owner = userById(character.boundUserId);
 
     characters.value = characters.value.filter((entry) => entry.id !== characterId);
@@ -792,6 +793,25 @@ export const useAppStore = defineStore('app', () => {
       messages.value = messages.value.filter((message) => message.conversationId !== conversation.id);
     }
     voomPosts.value = voomPosts.value.filter((post) => post.charId !== characterId && post.conversationId !== conversation?.id);
+    worldBooks.value = worldBooks.value.filter((book) => !relatedLocalWorldBooks.some((relatedBook) => relatedBook.id === book.id));
+
+    if (relatedLocalWorldBooks.length) {
+      const relatedLocalWorldBookIds = new Set(relatedLocalWorldBooks.map((book) => book.id));
+      const affectedCharacters = characters.value.filter((entry) => entry.localWorldBookIds.some((id) => relatedLocalWorldBookIds.has(id)));
+      if (affectedCharacters.length) {
+        await Promise.all(
+          affectedCharacters.map((entry) => {
+            const nextCharacter = {
+              ...entry,
+              localWorldBookIds: entry.localWorldBookIds.filter((id) => !relatedLocalWorldBookIds.has(id))
+            };
+            const characterIndex = characters.value.findIndex((item) => item.id === nextCharacter.id);
+            if (characterIndex >= 0) characters.value[characterIndex] = nextCharacter;
+            return putEntity('characters', nextCharacter);
+          })
+        );
+      }
+    }
 
     await deleteEntity('characters', characterId);
 
@@ -805,7 +825,8 @@ export const useAppStore = defineStore('app', () => {
     await Promise.all([
       ...(conversation ? [deleteEntity('conversations', conversation.id)] : []),
       ...relatedMessages.map((message) => deleteEntity('messages', message.id)),
-      ...relatedPosts.map((post) => deleteEntity('voomPosts', post.id))
+      ...relatedPosts.map((post) => deleteEntity('voomPosts', post.id)),
+      ...relatedLocalWorldBooks.map((book) => deleteEntity('worldBooks', book.id))
     ]);
   }
 

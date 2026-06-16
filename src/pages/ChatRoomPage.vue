@@ -65,6 +65,10 @@
           <ContactRound :size="20" />
           <span>角色主页</span>
         </button>
+        <button class="danger-menu-action" type="button" @click="openDeleteFriendConfirm">
+          <UserMinus :size="20" />
+          <span>删除好友</span>
+        </button>
         <button type="button" @click="openModelSwitch">
           <SlidersHorizontal :size="20" />
           <span>模型切换</span>
@@ -134,6 +138,17 @@
       </section>
     </AppModal>
 
+    <AppModal v-model="showDeleteFriendConfirm" title="确认删除" :show-header="false" variant="ins">
+      <section class="delete-confirm-sheet">
+        <h3>删除好友？</h3>
+        <p>会同时删除与 {{ characterDisplayName }} 的聊天记录、线下 RP、关联 VOOM，以及角色当前绑定的所有局部世界书，删除后不可恢复。</p>
+        <div class="delete-confirm-actions">
+          <button class="secondary-action" type="button" :disabled="deletingFriend" @click="showDeleteFriendConfirm = false">取消</button>
+          <button class="danger-action" type="button" :disabled="deletingFriend" @click="confirmDeleteFriend">{{ deletingFriend ? '删除中' : '删除好友' }}</button>
+        </div>
+      </section>
+    </AppModal>
+
     <AppModal v-model="showOfflineConfirm" title="进入线下模式" :show-header="false" variant="ins">
       <section class="offline-confirm">
         <h3>进入线下模式？</h3>
@@ -161,7 +176,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
-import { CheckSquare, ContactRound, Copy, Grid3X3, Pencil, Quote, RefreshCw, RotateCcw, SlidersHorizontal, Sparkles, Trash2, UserRound, X } from 'lucide-vue-next';
+import { CheckSquare, ContactRound, Copy, Grid3X3, Pencil, Quote, RefreshCw, RotateCcw, SlidersHorizontal, Sparkles, Trash2, UserMinus, UserRound, X } from 'lucide-vue-next';
 import AppModal from '@/components/common/AppModal.vue';
 import ChatHeader from '@/components/chat/ChatHeader.vue';
 import ChatModelSwitchPanel from '@/components/chat/ChatModelSwitchPanel.vue';
@@ -190,7 +205,9 @@ const showStickers = ref(false);
 const showMessageMenu = ref(false);
 const showEditModal = ref(false);
 const showDeleteConfirm = ref(false);
+const showDeleteFriendConfirm = ref(false);
 const generatingVoom = ref(false);
+const deletingFriend = ref(false);
 const messageListRef = ref<HTMLElement | null>(null);
 const activeMessage = ref<ChatMessage | null>(null);
 const selectionMode = ref(false);
@@ -202,6 +219,7 @@ const pendingDeleteFromSelection = ref(false);
 
 const conversation = computed(() => store.conversationById(props.id));
 const character = computed(() => (conversation.value ? store.characterById(conversation.value.charId) : undefined));
+const characterDisplayName = computed(() => character.value?.nickname || character.value?.name || '该好友');
 const boundUser = computed(() => (character.value ? store.userById(character.value.boundUserId) : null));
 const chatSettings = computed(() => store.settingsForConversation(props.id));
 const onlineMessages = computed(() => {
@@ -427,6 +445,25 @@ async function openCharacterProfile() {
 function openModelSwitch() {
   showActionMenu.value = false;
   showModelSwitch.value = true;
+}
+
+function openDeleteFriendConfirm() {
+  showActionMenu.value = false;
+  showDeleteFriendConfirm.value = true;
+}
+
+async function confirmDeleteFriend() {
+  const currentCharacter = character.value;
+  if (!currentCharacter || deletingFriend.value) return;
+  deletingFriend.value = true;
+  try {
+    await store.deleteCharacterProfile(currentCharacter.id);
+    showDeleteFriendConfirm.value = false;
+    store.showConfigAlert('已删除好友。', '删除完成');
+    await router.replace({ name: 'chats' });
+  } finally {
+    deletingFriend.value = false;
+  }
 }
 
 function openChatSettings() {
@@ -684,9 +721,17 @@ async function enterOffline() {
   opacity: 0.5;
 }
 
+.action-menu .danger-menu-action {
+  color: #e5484d;
+}
+
 .action-menu svg {
   flex: 0 0 auto;
   color: #141414;
+}
+
+.action-menu .danger-menu-action svg {
+  color: #e5484d;
 }
 
 .offline-confirm {
