@@ -1,0 +1,1034 @@
+import { unzipSync } from 'fflate';
+import type { ApiVendor, AppSettings, CharacterProfile, GenerateReplyInput, ImageProviderType, PromptContext, UserProfile, VoomComment, VoomPost } from '@/types/domain';
+import { createId } from '@/utils/id';
+import { getCharacterVoomAuthorName } from '@/utils/character';
+import { getPreferredVoomImageProvider, getResolvedApiConfig, getResolvedOpenAiImageConfig } from '@/utils/settings';
+import { buildMomentPrompt, buildPrompt } from './prompt';
+
+const modelSelectionSeparator = '::';
+const imageModelSelectionSeparator = '::';
+
+export interface ImageGenerationResult {
+  imageUrl: string;
+  provider: ImageProviderType;
+}
+
+export interface RoleplayQuoteAction {
+  messageId: string;
+  replyIndex: number;
+}
+
+export interface RoleplayMessageActions {
+  recallMessageIds: string[];
+  quotes: RoleplayQuoteAction[];
+}
+
+export interface RoleplayReplyResult {
+  reply: string;
+  replies?: string[];
+  replyTranslations?: string[];
+  stickers?: string[];
+  messageActions?: RoleplayMessageActions;
+  profileUpdate: null | {
+    nickname: string;
+    signature: string;
+    narration: string;
+  };
+}
+
+export interface VoomCommentReplyResult {
+  authorName: string;
+  content: string;
+  contentTranslation?: string;
+  parentId?: string;
+  draftId?: string;
+}
+
+export type UserVoomCommentResult = Pick<VoomComment, 'authorName' | 'authorId' | 'content' | 'contentTranslation' | 'parentId'>;
+
+export interface ImageGenerationOverrides {
+  positivePrompt?: string;
+  negativePrompt?: string;
+  width?: number;
+  height?: number;
+  size?: string;
+  model?: string;
+  seed?: string;
+}
+
+function sanitizePrompt(positivePrompt: string, negativePrompt = '') {
+  const positive = positivePrompt.trim();
+  const negative = negativePrompt.trim();
+  if (!positive) return '';
+  if (!negative) return positive;
+  return `${positive}\n\nAvoid: ${negative}`;
+}
+
+function toDataUrlFromBase64(base64: string, mimeType = 'image/png') {
+  return `data:${mimeType};base64,${base64}`;
+}
+
+function uint8ArrayToBase64(bytes: Uint8Array) {
+  let binary = '';
+  const chunkSize = 0x8000;
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    const chunk = bytes.subarray(index, Math.min(index + chunkSize, bytes.length));
+    binary += String.fromCharCode(...chunk);
+  }
+  return btoa(binary);
+}
+
+function arrayBufferToDataUrl(buffer: ArrayBuffer, mimeType = 'image/png') {
+  return toDataUrlFromBase64(uint8ArrayToBase64(new Uint8Array(buffer)), mimeType);
+}
+
+function extractImageFromArchive(buffer: ArrayBuffer) {
+  const files = unzipSync(new Uint8Array(buffer));
+  const fileEntry = Object.entries(files).find(([name]) => /\.(png|jpg|jpeg|webp)$/i.test(name))
+    ?? Object.entries(files)[0];
+
+  if (!fileEntry) {
+    throw new Error('NovelAI returned an empty image archive.');
+  }
+
+  const [name, bytes] = fileEntry;
+  const mimeType = /\.jpe?g$/i.test(name)
+    ? 'image/jpeg'
+    : /\.webp$/i.test(name)
+      ? 'image/webp'
+      : 'image/png';
+
+  return arrayBufferToDataUrl(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength), mimeType);
+}
+
+function parseSeed(seed: string) {
+  const trimmed = seed.trim();
+  if (!trimmed) return Math.floor(Math.random() * 2_147_483_647);
+  const numericSeed = Number(trimmed);
+  return Number.isFinite(numericSeed) ? Math.floor(numericSeed) : Math.floor(Math.random() * 2_147_483_647);
+}
+
+function normalizeBaseUrl(url: string) {
+  return url.trim().replace(/\/+$/, '');
+}
+
+function splitModelSelection(selection = '') {
+  const trimmed = selection.trim();
+  if (!trimmed.includes(modelSelectionSeparator)) {
+    return {
+      vendorId: '',
+      model: trimmed
+    };
+  }
+  const [vendorId, ...modelParts] = trimmed.split(modelSelectionSeparator);
+  return {
+    vendorId: vendorId.trim(),
+    model: modelParts.join(modelSelectionSeparator).trim()
+  };
+}
+
+function splitImageModelSelection(selection = '') {
+  const trimmed = selection.trim();
+  if (!trimmed.includes(imageModelSelectionSeparator)) {
+    return {
+      vendorId: '',
+      model: trimmed
+    };
+  }
+
+  const [vendorId, ...modelParts] = trimmed.split(imageModelSelectionSeparator);
+  return {
+    vendorId: vendorId.trim(),
+    model: modelParts.join(imageModelSelectionSeparator).trim()
+  };
+}
+
+function extractJsonContent(content: string) {
+  const trimmed = content.trim();
+  const fenced = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
+  if (fenced) return fenced[1].trim();
+
+  if (trimmed.startsWith('{') && trimmed.endsWith('}')) return trimmed;
+
+  const firstBrace = trimmed.indexOf('{');
+  const lastBrace = trimmed.lastIndexOf('}');
+  if (firstBrace >= 0 && lastBrace > firstBrace) {
+    return trimmed.slice(firstBrace, lastBrace + 1).trim();
+  }
+
+  return trimmed;
+}
+
+function normalizeTextFragments(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.flatMap((item) => normalizeTextFragments(item));
+  }
+  if (typeof value === 'string' || typeof value === 'number') {
+    const content = String(value).trim();
+    return content ? [content] : [];
+  }
+  if (value && typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    const candidates = [record.content, record.text, record.message, record.reply];
+    for (const candidate of candidates) {
+      const fragments = normalizeTextFragments(candidate);
+      if (fragments.length) return fragments;
+    }
+  }
+  return [];
+}
+
+function normalizeReplyMessages(payload: unknown) {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return normalizeTextFragments(payload);
+  }
+
+  const record = payload as Record<string, unknown>;
+  const candidates = [record.replies, record.reply, record.messages, record.content, record.message, record.text, record.response, record.output];
+  for (const candidate of candidates) {
+    const replies = normalizeTextFragments(candidate);
+    if (replies.length) return replies;
+  }
+  return [];
+}
+
+function normalizeTranslationMessages(payload: unknown) {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return normalizeTextFragments(payload);
+  }
+
+  const record = payload as Record<string, unknown>;
+  const candidates = [record.replyTranslations, record.translations, record.translationTexts, record.chineseTranslations, record.translation, record.contentTranslation];
+  for (const candidate of candidates) {
+    const translations = normalizeTextFragments(candidate);
+    if (translations.length) return translations;
+  }
+  return [];
+}
+
+function normalizeStickerSelections(value: unknown): string[] {
+  if (Array.isArray(value)) return value.flatMap((item) => normalizeStickerSelections(item));
+  if (typeof value === 'string' || typeof value === 'number') {
+    const content = String(value).trim();
+    return content ? [content] : [];
+  }
+  if (value && typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    const candidates = [record.stickerId, record.id, record.description, record.name, record.label, record.text];
+    for (const candidate of candidates) {
+      const selections = normalizeStickerSelections(candidate);
+      if (selections.length) return selections;
+    }
+    return normalizeStickerSelections(record.stickers ?? record.stickerIds ?? record.sticker);
+  }
+  return [];
+}
+
+function normalizeMessageIds(value: unknown): string[] {
+  if (Array.isArray(value)) return value.flatMap((item) => normalizeMessageIds(item));
+  if (typeof value === 'string' || typeof value === 'number') {
+    return String(value)
+      .split(/[\s,，、]+/)
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+  if (value && typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    const candidates = [record.messageId, record.targetMessageId, record.quoteMessageId, record.recalledMessageId, record.id];
+    for (const candidate of candidates) {
+      const ids = normalizeMessageIds(candidate);
+      if (ids.length) return ids;
+    }
+  }
+  return [];
+}
+
+function normalizeReplyIndex(value: unknown, fallback = 0) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return fallback;
+  return Math.max(0, Math.floor(numeric));
+}
+
+function normalizeQuoteActions(value: unknown): RoleplayQuoteAction[] {
+  if (Array.isArray(value)) return value.flatMap((item) => normalizeQuoteActions(item));
+  if (typeof value === 'string' || typeof value === 'number') {
+    return normalizeMessageIds(value).map((messageId) => ({ messageId, replyIndex: 0 }));
+  }
+  if (!value || typeof value !== 'object') return [];
+
+  const record = value as Record<string, unknown>;
+  const messageId = normalizeMessageIds(record.messageId ?? record.targetMessageId ?? record.quoteMessageId ?? record.id)[0];
+  if (!messageId) return [];
+  const replyNumber = Number(record.replyNumber ?? record.replyNo ?? record.messageNumber);
+  const replyIndex = Number.isFinite(replyNumber)
+    ? Math.max(0, Math.floor(replyNumber) - 1)
+    : normalizeReplyIndex(record.replyIndex ?? record.index ?? record.reply, 0);
+  return [{ messageId, replyIndex }];
+}
+
+function normalizeRoleplayMessageActions(record: Record<string, unknown>): RoleplayMessageActions {
+  const actionRecord = record.messageActions && typeof record.messageActions === 'object'
+    ? record.messageActions as Record<string, unknown>
+    : record.actions && typeof record.actions === 'object'
+      ? record.actions as Record<string, unknown>
+      : {};
+  const recallMessageIds = [...new Set([
+    ...normalizeMessageIds(record.recallMessageIds),
+    ...normalizeMessageIds(record.recalledMessageIds),
+    ...normalizeMessageIds(record.withdrawMessageIds),
+    ...normalizeMessageIds(record.withdrawnMessageIds),
+    ...normalizeMessageIds(record.recalls),
+    ...normalizeMessageIds(record.withdrawals),
+    ...normalizeMessageIds(actionRecord.recallMessageIds),
+    ...normalizeMessageIds(actionRecord.recalledMessageIds),
+    ...normalizeMessageIds(actionRecord.withdrawMessageIds),
+    ...normalizeMessageIds(actionRecord.withdrawnMessageIds),
+    ...normalizeMessageIds(actionRecord.recalls),
+    ...normalizeMessageIds(actionRecord.withdrawals)
+  ])];
+  const quotes = [
+    ...normalizeQuoteActions(record.quotes),
+    ...normalizeQuoteActions(record.quoteReplies),
+    ...normalizeQuoteActions(record.references),
+    ...normalizeQuoteActions(actionRecord.quotes),
+    ...normalizeQuoteActions(actionRecord.quoteReplies),
+    ...normalizeQuoteActions(actionRecord.references)
+  ];
+  return { recallMessageIds, quotes };
+}
+
+function normalizeRawOnlineReply(content: string) {
+  const trimmed = content.trim();
+  if (!trimmed) return [];
+
+  const lines = trimmed.split(/\r?\n+/).map((line) => line.trim()).filter(Boolean);
+  const explicitFragments = lines
+    .map((line) => line.replace(/^(?:[-*•]|\d+[.)、]|(?:消息|气泡)\s*\d+[:：]?)\s*/, '').trim())
+    .filter(Boolean);
+
+  if (lines.length > 1 && explicitFragments.length === lines.length) {
+    const allLinesLookSplit = lines.every((line) => /^(?:[-*•]|\d+[.)、]|(?:消息|气泡)\s*\d+[:：]?)/.test(line));
+    const allLinesLookShort = lines.every((line) => line.length <= 80);
+    if (allLinesLookSplit || allLinesLookShort) return explicitFragments;
+  }
+
+  return [trimmed];
+}
+
+interface TextApiContentPart {
+  type: 'text' | 'image_url';
+  text?: string;
+  image_url?: { url: string };
+}
+
+function getStickerImageParts(input: GenerateReplyInput): TextApiContentPart[] {
+  if (!input.stickerVisionEnabled) return [];
+  return input.messages
+    .slice(-12)
+    .filter((message) => message.sender === 'user' && message.sticker?.imageUrl)
+    .slice(-4)
+    .flatMap((message) => [
+      {
+        type: 'text' as const,
+        text: `Sticker image for "${message.sticker?.description ?? 'Sticker'}":`
+      },
+      {
+        type: 'image_url' as const,
+        image_url: { url: message.sticker?.imageUrl ?? '' }
+      }
+    ]);
+}
+
+interface VoomMomentPayload {
+  content: string;
+  imageDescription: string;
+  likes: string[];
+  comments: Array<Pick<VoomComment, 'authorName' | 'content' | 'parentId'>>;
+}
+
+function createFallbackVoomImageDescription(context: PromptContext, content: string) {
+  const source = `${context.character.id}:${content}:${context.messages.length}`;
+  const hash = Array.from(source).reduce((total, char) => total + char.charCodeAt(0), 0);
+  const options = [
+    `和这条动态相配的一张生活随手拍，画面里有${context.character.nickname}最近状态里的细节。`,
+    `一张方形社交配图，记录${context.character.nickname}当天看到的小场景，氛围自然日常。`,
+    '一张像朋友圈随手发布的生活照片，画面简单，重点是当下的物品、光线和环境。',
+    '一张和动态内容相呼应的日常配图，构图干净，像手机相册里刚拍下来的照片。'
+  ];
+  return options[Math.abs(hash) % options.length];
+}
+
+function normalizeVoomMomentComments(input: unknown): VoomMomentPayload['comments'] {
+  if (!Array.isArray(input)) return [];
+  const comments: VoomMomentPayload['comments'] = [];
+  for (const comment of input) {
+    if (!comment || typeof comment !== 'object') continue;
+    const entry = comment as Partial<VoomComment>;
+    const authorName = String(entry.authorName ?? '').trim();
+    const content = String(entry.content ?? '').trim();
+    const parentId = String(entry.parentId ?? '').trim();
+    if (!authorName || !content) continue;
+    comments.push({ authorName, content, parentId });
+  }
+  return comments;
+}
+
+function parseVoomMomentPayload(rawContent: string, context: PromptContext): VoomMomentPayload {
+  const fallbackContent = context.mode === 'offline' ? '回去路上有点安静。' : '刚刚看到自动贩卖机出了新口味。';
+  const trimmed = rawContent.trim();
+
+  if (!trimmed) {
+    return {
+      content: fallbackContent,
+      imageDescription: createFallbackVoomImageDescription(context, fallbackContent),
+      likes: [],
+      comments: []
+    };
+  }
+
+  try {
+    const parsed = JSON.parse(extractJsonContent(trimmed)) as Partial<VoomMomentPayload>;
+    const content = String(parsed.content ?? '').trim() || fallbackContent;
+    const imageDescription = String(parsed.imageDescription ?? '').trim() || createFallbackVoomImageDescription(context, content);
+    const likes = Array.isArray(parsed.likes)
+      ? [...new Set(parsed.likes.map((item) => String(item ?? '').trim()).filter(Boolean))]
+      : [];
+    return {
+      content,
+      imageDescription,
+      likes,
+      comments: normalizeVoomMomentComments(parsed.comments)
+    };
+  } catch {
+    return {
+      content: trimmed,
+      imageDescription: createFallbackVoomImageDescription(context, trimmed),
+      likes: [],
+      comments: []
+    };
+  }
+}
+
+function buildVoomImagePrompt(context: PromptContext, content: string, imageDescription: string) {
+  const recentMessages = context.messages
+    .slice(-6)
+    .map((message) => message.content.trim())
+    .filter(Boolean)
+    .join(' / ')
+    .slice(0, 280);
+
+  return [
+    'Square LINK VOOM social feed image, candid mobile photo style, realistic composition, natural light, no text overlay',
+    `image description: ${imageDescription}`,
+    `character: ${context.character.nickname}, ${context.character.description || context.character.signature}`,
+    `post text context: ${content}`,
+    recentMessages ? `recent chat context: ${recentMessages}` : ''
+  ].filter(Boolean).join(', ');
+}
+
+function normalizeVoomCommentReplies(input: unknown, fallbackAuthorName: string, post: VoomPost, blockedAuthorNames: string[] = []): VoomCommentReplyResult[] {
+  const replySource = Array.isArray(input)
+    ? input
+    : typeof input === 'object' && input && Array.isArray((input as { replies?: unknown }).replies)
+      ? (input as { replies: unknown[] }).replies
+      : [];
+  const commentIds = new Set(post.comments.map((comment) => comment.id));
+  const blockedAuthors = new Set(blockedAuthorNames.map((name) => name.trim().toLocaleLowerCase()).filter(Boolean));
+  const candidates: Array<VoomCommentReplyResult & { rawParentId?: string }> = [];
+
+  for (const entry of replySource) {
+    if (candidates.length >= 6 || !entry || typeof entry !== 'object') continue;
+    const reply = entry as Record<string, unknown>;
+    const authorName = String(reply.authorName ?? '').trim() || fallbackAuthorName;
+    if (blockedAuthors.has(authorName.toLocaleLowerCase())) continue;
+
+    const content = String(reply.content ?? '').trim();
+    if (!content) continue;
+
+    const contentTranslation = String(reply.contentTranslation ?? reply.translation ?? reply.translationZh ?? reply.chineseTranslation ?? '').trim();
+    const draftId = String(reply.id ?? reply.draftId ?? reply.tempId ?? '').trim();
+    candidates.push({
+      authorName,
+      content,
+      ...(contentTranslation ? { contentTranslation } : {}),
+      ...(draftId ? { draftId } : {}),
+      rawParentId: String(reply.parentId ?? '').trim()
+    });
+  }
+
+  const draftIds = new Set(candidates.map((reply) => reply.draftId).filter(Boolean));
+  const replies: VoomCommentReplyResult[] = [];
+
+  for (const reply of candidates) {
+    const parentId = reply.rawParentId ?? '';
+    replies.push({
+      authorName: reply.authorName,
+      content: reply.content,
+      ...(reply.contentTranslation ? { contentTranslation: reply.contentTranslation } : {}),
+      ...(reply.draftId ? { draftId: reply.draftId } : {}),
+      ...(parentId && (commentIds.has(parentId) || draftIds.has(parentId)) ? { parentId } : {})
+    });
+  }
+
+  return replies;
+}
+
+function getResolvedTextApiConfig(settings: AppSettings | undefined, modelOverride = '') {
+  const selection = splitModelSelection(modelOverride);
+  if (selection.vendorId) {
+    const vendor = settings?.apiVendors.find((item) => item.id === selection.vendorId);
+    if (vendor) {
+      return {
+        endpoint: `${normalizeBaseUrl(vendor.apiUrl)}/${vendor.apiPath.trim().replace(/^\/+/, '')}`,
+        apiKey: vendor.apiKey,
+        model: selection.model || vendor.models.find((model) => model.selected)?.id || vendor.models[0]?.id || ''
+      };
+    }
+  }
+
+  const resolved = getResolvedApiConfig(settings);
+  return {
+    ...resolved,
+    model: selection.model || resolved.model
+  };
+}
+
+export function hasTextGenerationConfig(settings: AppSettings | undefined, modelOverride = '') {
+  const resolved = getResolvedTextApiConfig(settings, modelOverride);
+  return Boolean(resolved.endpoint.trim() && resolved.model.trim());
+}
+
+function requireTextGenerationConfig(settings: AppSettings | undefined, modelOverride = '', target = 'AI 回复') {
+  if (hasTextGenerationConfig(settings, modelOverride)) return;
+  throw new Error(`请先配置可用的 API 模型后再使用${target}。`);
+}
+
+async function callTextApi(settings: AppSettings | undefined, prompt: string, modelOverride = '', imageParts: TextApiContentPart[] = []) {
+  const resolved = getResolvedTextApiConfig(settings, modelOverride);
+  if (!resolved.endpoint.trim()) return '';
+
+  const content = imageParts.length
+    ? [{ type: 'text' as const, text: prompt }, ...imageParts]
+    : prompt;
+
+  const response = await fetch(resolved.endpoint, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(resolved.apiKey ? { Authorization: `Bearer ${resolved.apiKey}` } : {})
+    },
+    body: JSON.stringify({
+      model: resolved.model,
+      messages: [{ role: 'user', content }],
+      temperature: 0.9
+    })
+  });
+
+  if (!response.ok) {
+    throw new Error(`API request failed: ${response.status}`);
+  }
+
+  const data = await response.json();
+  return String(data.choices?.[0]?.message?.content ?? data.choices?.[0]?.text ?? data.content ?? '').trim();
+}
+
+export async function fetchVendorModels(vendor: Pick<ApiVendor, 'apiUrl' | 'apiKey'>): Promise<string[]> {
+  const modelsEndpoint = `${vendor.apiUrl.trim().replace(/\/+$/, '')}/models`;
+  if (!vendor.apiUrl.trim()) return [];
+
+  const response = await fetch(modelsEndpoint, {
+    headers: {
+      'Content-Type': 'application/json',
+      ...(vendor.apiKey ? { Authorization: `Bearer ${vendor.apiKey}` } : {})
+    }
+  });
+
+  if (!response.ok) {
+    throw new Error(`Model request failed: ${response.status}`);
+  }
+
+  const data = await response.json();
+  const list: Array<Record<string, unknown>> = Array.isArray(data.data)
+    ? data.data
+    : Array.isArray(data.models)
+      ? data.models
+      : [];
+
+  return list
+    .map((item) => String(item?.id ?? item?.name ?? '').trim())
+    .filter(Boolean);
+}
+
+export async function generateOpenAiImage(settings: AppSettings, overrides: ImageGenerationOverrides = {}): Promise<ImageGenerationResult> {
+  const resolved = getResolvedOpenAiImageConfig(settings);
+  const positivePrompt = overrides.positivePrompt ?? settings.imageOpenAi.positivePrompt;
+  const negativePrompt = overrides.negativePrompt ?? settings.imageOpenAi.negativePrompt;
+  const prompt = sanitizePrompt(positivePrompt, negativePrompt);
+
+  if (!resolved.endpoint.trim() || !resolved.apiKey.trim()) {
+    throw new Error('请先在 GPT-Image 模块里配置可用的 OpenAI 兼容供应商和 API Key。');
+  }
+
+  if (!prompt) {
+    throw new Error('请先填写正向提示词。');
+  }
+
+  const response = await fetch(resolved.endpoint, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${resolved.apiKey}`
+    },
+    body: JSON.stringify({
+      model: overrides.model ?? resolved.model,
+      prompt,
+      size: overrides.size ?? resolved.size,
+      n: 1,
+      response_format: 'b64_json'
+    })
+  });
+
+  if (!response.ok) {
+    const reason = await response.text();
+    throw new Error(`GPT-Image 请求失败：${response.status} ${reason}`.trim());
+  }
+
+  const data = await response.json();
+  const imagePayload = Array.isArray(data.data) ? data.data[0] : null;
+  const imageUrl = String(imagePayload?.url ?? '').trim();
+  const base64Image = String(imagePayload?.b64_json ?? '').trim();
+
+  if (!imageUrl && !base64Image) {
+    throw new Error('GPT-Image 返回里没有可用图片。');
+  }
+
+  return {
+    imageUrl: imageUrl || toDataUrlFromBase64(base64Image),
+    provider: 'openai'
+  };
+}
+
+export async function generateNovelAiImage(settings: AppSettings, overrides: ImageGenerationOverrides = {}): Promise<ImageGenerationResult> {
+  const config = settings.imageNovelAi;
+  const positivePrompt = overrides.positivePrompt ?? config.positivePrompt;
+  const negativePrompt = overrides.negativePrompt ?? config.negativePrompt;
+  const endpointBase = normalizeBaseUrl(config.proxyUrl || config.apiUrl);
+
+  if (!endpointBase) {
+    throw new Error('请先填写 NovelAI 的接口地址或代理地址。');
+  }
+
+  if (!config.apiKey.trim()) {
+    throw new Error('请先填写 NovelAI Token。');
+  }
+
+  if (!positivePrompt.trim()) {
+    throw new Error('请先填写正向提示词。');
+  }
+
+  const response = await fetch(`${endpointBase}/ai/generate-image`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${config.apiKey.trim()}`
+    },
+    body: JSON.stringify({
+      action: 'generate',
+      input: positivePrompt.trim(),
+      model: overrides.model ?? config.model,
+      parameters: {
+        negative_prompt: negativePrompt.trim(),
+        width: Math.max(320, Math.floor(overrides.width ?? config.width)),
+        height: Math.max(320, Math.floor(overrides.height ?? config.height)),
+        scale: config.guidance,
+        sampler: config.sampler,
+        steps: config.steps,
+        seed: parseSeed(overrides.seed ?? config.seed),
+        n_samples: 1,
+        ucPreset: 0,
+        qualityToggle: true,
+        sm: false,
+        sm_dyn: false,
+        dynamic_thresholding: false,
+        legacy: false,
+        add_original_image: false,
+        uncond_scale: 1,
+        cfg_rescale: 0,
+        noise_schedule: 'native'
+      }
+    })
+  });
+
+  if (!response.ok) {
+    const reason = await response.text();
+    throw new Error(`NovelAI 请求失败：${response.status} ${reason}`.trim());
+  }
+
+  const contentType = response.headers.get('content-type') || 'application/octet-stream';
+  const buffer = await response.arrayBuffer();
+
+  return {
+    imageUrl: /zip|octet-stream/i.test(contentType)
+      ? extractImageFromArchive(buffer)
+      : arrayBufferToDataUrl(buffer, contentType.startsWith('image/') ? contentType : 'image/png'),
+    provider: 'novelai'
+  };
+}
+
+export async function generatePollinationsImage(settings: AppSettings, overrides: ImageGenerationOverrides = {}): Promise<ImageGenerationResult> {
+  const config = settings.imagePollinations;
+  const positivePrompt = overrides.positivePrompt ?? config.positivePrompt;
+  const negativePrompt = overrides.negativePrompt ?? config.negativePrompt;
+
+  if (!config.apiKey.trim()) {
+    throw new Error('请先填写 Pollinations Token。可在 auth.pollinations.ai 创建后填入。');
+  }
+
+  if (!positivePrompt.trim()) {
+    throw new Error('请先填写正向提示词。');
+  }
+
+  const promptPath = encodeURIComponent(positivePrompt.trim());
+  const url = new URL(`https://image.pollinations.ai/prompt/${promptPath}`);
+  url.searchParams.set('model', overrides.model ?? config.model);
+  url.searchParams.set('width', String(Math.max(320, Math.floor(overrides.width ?? config.width))));
+  url.searchParams.set('height', String(Math.max(320, Math.floor(overrides.height ?? config.height))));
+  url.searchParams.set('enhance', String(config.enhance));
+  url.searchParams.set('nologo', String(config.nologo));
+  url.searchParams.set('private', String(config.private));
+  if (config.referrer.trim()) {
+    url.searchParams.set('referrer', config.referrer.trim());
+  }
+  if ((overrides.seed ?? config.seed).trim()) {
+    url.searchParams.set('seed', String(parseSeed(overrides.seed ?? config.seed)));
+  }
+  if (negativePrompt.trim()) {
+    url.searchParams.set('negative', negativePrompt.trim());
+  }
+
+  const response = await fetch(url.toString(), {
+    headers: {
+      Authorization: `Bearer ${config.apiKey.trim()}`
+    }
+  });
+
+  if (!response.ok) {
+    const reason = await response.text();
+    throw new Error(`Pollinations 请求失败：${response.status} ${reason}`.trim());
+  }
+
+  const contentType = response.headers.get('content-type') || 'image/jpeg';
+  const buffer = await response.arrayBuffer();
+
+  return {
+    imageUrl: arrayBufferToDataUrl(buffer, contentType.startsWith('image/') ? contentType : 'image/jpeg'),
+    provider: 'pollinations'
+  };
+}
+
+export async function generateImageByProvider(
+  provider: ImageProviderType,
+  settings: AppSettings,
+  overrides: ImageGenerationOverrides = {}
+): Promise<ImageGenerationResult> {
+  if (provider === 'openai') return generateOpenAiImage(settings, overrides);
+  if (provider === 'novelai') return generateNovelAiImage(settings, overrides);
+  return generatePollinationsImage(settings, overrides);
+}
+
+export async function generateRoleplayReply(input: GenerateReplyInput): Promise<string> {
+  requireTextGenerationConfig(input.settings, input.modelOverride, '角色回复');
+  const prompt = buildPrompt(input);
+  const apiReply = await callTextApi(input.settings, prompt, input.modelOverride, getStickerImageParts(input));
+  if (apiReply) {
+    try {
+      const parsed = JSON.parse(extractJsonContent(apiReply)) as unknown;
+      const parsedRecord = parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+        ? parsed as Partial<RoleplayReplyResult>
+        : {};
+      const replies = normalizeReplyMessages(parsed);
+      const parsedRecordAny = parsedRecord as Record<string, unknown>;
+      const replyTranslations = normalizeTranslationMessages(parsed);
+      const messageActions = normalizeRoleplayMessageActions(parsedRecordAny);
+      const stickers = [...new Set([
+        ...normalizeStickerSelections(parsedRecord.stickers),
+        ...normalizeStickerSelections(parsedRecordAny.stickerIds),
+        ...normalizeStickerSelections(parsedRecordAny.sticker),
+        ...normalizeStickerSelections(parsedRecordAny.messages),
+        ...normalizeStickerSelections(parsedRecord.replies)
+      ].map((item) => item.trim()).filter(Boolean))];
+      return JSON.stringify({
+        reply: replies[0] ?? '',
+        replies,
+        replyTranslations,
+        stickers,
+        messageActions,
+        profileUpdate: parsedRecord.profileUpdate && typeof parsedRecord.profileUpdate === 'object'
+          ? {
+              nickname: String(parsedRecord.profileUpdate.nickname ?? '').trim(),
+              signature: String(parsedRecord.profileUpdate.signature ?? '').trim(),
+              narration: String(parsedRecord.profileUpdate.narration ?? '').trim()
+            }
+          : null
+      } satisfies RoleplayReplyResult);
+    } catch {
+      const replies = input.mode === 'online' ? normalizeRawOnlineReply(apiReply) : [apiReply];
+      return JSON.stringify({ reply: replies[0] ?? '', replies, stickers: [], profileUpdate: null } satisfies RoleplayReplyResult);
+    }
+  }
+  throw new Error('角色回复模型没有返回内容。');
+}
+
+export async function generateVoomPost(context: PromptContext, settings?: AppSettings, modelOverride = ''): Promise<Omit<VoomPost, 'id' | 'createdAt'>> {
+  const prompt = buildMomentPrompt(context);
+  const apiReply = await callTextApi(settings, prompt, modelOverride);
+
+  await new Promise((resolve) => window.setTimeout(resolve, 500));
+
+  const { content, imageDescription, likes, comments } = parseVoomMomentPayload(apiReply, context);
+  const imagePrompt = buildVoomImagePrompt(context, content, imageDescription);
+  const imageProvider = getPreferredVoomImageProvider(settings);
+  let imageResult: ImageGenerationResult | null = null;
+
+  if (settings && imageProvider) {
+    let imageSettings = settings;
+    const imageOverrides: ImageGenerationOverrides = {
+      positivePrompt: imagePrompt,
+      size: '1024x1024',
+      width: 1024,
+      height: 1024
+    };
+
+    if (imageProvider === 'openai') {
+      const selected = splitImageModelSelection(settings.voomImageModel);
+      if (selected.vendorId) {
+        imageSettings = {
+          ...settings,
+          imageOpenAi: {
+            ...settings.imageOpenAi,
+            activeVendorId: selected.vendorId
+          }
+        };
+      }
+      if (selected.model) imageOverrides.model = selected.model;
+    } else if (settings.voomImageModel.trim()) {
+      imageOverrides.model = settings.voomImageModel.trim();
+    }
+
+    try {
+      imageResult = await generateImageByProvider(imageProvider, imageSettings, imageOverrides);
+    } catch {
+      imageResult = null;
+    }
+  }
+
+  return {
+    charId: context.character.id,
+    conversationId: context.messages[0]?.conversationId,
+    authorName: context.character.nickname,
+    authorAvatar: context.character.avatar,
+    content,
+    image: imageResult?.imageUrl,
+    imageDescription,
+    imageProvider: imageResult?.provider ?? 'mock',
+    likes,
+    comments: comments.map((comment) => ({
+      id: createId('comment'),
+      authorName: comment.authorName,
+      content: comment.content,
+      parentId: comment.parentId || undefined
+    }))
+  };
+}
+
+function normalizeUserVoomComments(input: unknown, targetCharacters: CharacterProfile[]): UserVoomCommentResult[] {
+  const source = Array.isArray(input)
+    ? input
+    : input && typeof input === 'object' && Array.isArray((input as { comments?: unknown }).comments)
+      ? (input as { comments: unknown[] }).comments
+      : [];
+  const characterAliases = new Map<string, CharacterProfile>();
+  for (const character of targetCharacters) {
+    [character.id, character.nickname, character.name, getCharacterVoomAuthorName(character)]
+      .map((name) => name.trim().toLocaleLowerCase())
+      .filter(Boolean)
+      .forEach((name) => characterAliases.set(name, character));
+  }
+
+  const comments: UserVoomCommentResult[] = [];
+  for (const entry of source) {
+    if (comments.length >= 6 || !entry || typeof entry !== 'object') continue;
+    const record = entry as Record<string, unknown>;
+    const content = String(record.content ?? record.text ?? record.comment ?? '').trim();
+    if (!content) continue;
+
+    const requestedAuthorKey = String(record.authorId ?? record.characterId ?? record.authorName ?? '').trim().toLocaleLowerCase();
+    const character = characterAliases.get(requestedAuthorKey) ?? targetCharacters[comments.length % targetCharacters.length];
+    if (!character) continue;
+
+    const contentTranslation = String(record.contentTranslation ?? record.translation ?? record.translationZh ?? record.chineseTranslation ?? '').trim();
+    comments.push({
+      authorName: getCharacterVoomAuthorName(character),
+      authorId: character.id,
+      content,
+      ...(contentTranslation ? { contentTranslation } : {})
+    });
+  }
+  return comments;
+}
+
+export async function generateUserVoomComments(input: {
+  author: UserProfile;
+  content: string;
+  imageDescription?: string;
+  targetCharacters: CharacterProfile[];
+  settings?: AppSettings;
+  modelOverride?: string;
+}): Promise<UserVoomCommentResult[]> {
+  if (!input.targetCharacters.length) return [];
+  requireTextGenerationConfig(input.settings, input.modelOverride, '用户 VOOM 评论生成');
+
+  const targetCharacterText = input.targetCharacters
+    .map((character) => [
+      `id: ${character.id}`,
+      `VOOM 昵称: ${getCharacterVoomAuthorName(character)}`,
+      `角色名: ${character.name}`,
+      `主页签名: ${character.signature || '无'}`,
+      `角色设定: ${character.description || '无'}`
+    ].join('；'))
+    .join('\n');
+  const prompt = [
+    '你要模拟 LINK VOOM 里，角色们看到用户发出的动态后留下的自然评论。只输出 JSON，不要输出 JSON 以外的文字。',
+    `用户昵称：${input.author.nickname || input.author.name}`,
+    `用户设定：${input.author.description || '无'}`,
+    `用户动态正文：\n${input.content}`,
+    input.imageDescription ? `配图描述：${input.imageDescription}` : '',
+    `可评论角色：\n${targetCharacterText}`,
+    `输出格式：
+{
+  "comments": [
+    { "authorId": "从可评论角色 id 中选择", "content": "评论内容", "contentTranslation": "如原文不是中文则给中文翻译，可留空" }
+  ]
+}`,
+    '要求：1. 输出 0-6 条；2. authorId 必须来自可评论角色；3. 不要代替用户本人评论；4. 评论要短、自然、有社交软件感；5. 不要使用“NPC”“朋友A”“路人”这类占位名。'
+  ].filter(Boolean).join('\n\n');
+
+  const apiReply = await callTextApi(input.settings, prompt, input.modelOverride);
+  if (!apiReply) return [];
+
+  try {
+    return normalizeUserVoomComments(JSON.parse(extractJsonContent(apiReply)), input.targetCharacters);
+  } catch {
+    const content = apiReply.trim();
+    const character = input.targetCharacters[0];
+    return content && character
+      ? [{ authorName: getCharacterVoomAuthorName(character), authorId: character.id, content }]
+      : [];
+  }
+}
+
+export async function generateVoomCommentReplies(input: {
+  context: PromptContext;
+  post: VoomPost;
+  userComments: VoomComment[];
+  settings?: AppSettings;
+  modelOverride?: string;
+}): Promise<VoomCommentReplyResult[]> {
+  requireTextGenerationConfig(input.settings, input.modelOverride, 'VOOM 评论回复');
+  const fallbackAuthorName = input.context.character.nickname;
+  const targetComments = input.userComments.length ? input.userComments : input.post.comments.slice(-2);
+  const blockedAuthorNames = [input.context.boundUser.nickname, input.context.boundUser.name, input.context.user.nickname, input.context.user.name]
+    .map((name) => name.trim())
+    .filter(Boolean);
+  const prompt = [
+    buildPrompt(input.context),
+    '现在你要模拟这条 VOOM 的真实评论区继续发展。只输出 JSON，不要输出 JSON 以外的任何文字。',
+    `VOOM 正文：\n${input.post.content}`,
+    `评论区：\n${input.post.comments.map((comment) => `${comment.id}｜${comment.authorName}: ${comment.content}`).join('\n') || '暂无评论。'}`,
+    `优先关注这些评论：\n${targetComments.map((comment) => `${comment.id}｜${comment.authorName}: ${comment.content}`).join('\n') || '没有指定评论，可根据正文补一条自然评论。'}`,
+    `不要使用这些作者名发言：${blockedAuthorNames.join('、') || '当前用户'}`,
+    `输出格式：
+{
+  "replies": [
+    { "id": "r1", "authorName": "${fallbackAuthorName}", "content": "回复内容", "parentId": "被回复评论ID，可留空" },
+    { "id": "r2", "authorName": "NPC网名", "content": "自然评论或回复", "parentId": "已有评论ID或本次前面输出的id，可留空" }
+  ]
+}`,
+    '要求：1. 输出 0-6 条；2. authorName 可以是角色昵称，也可以是角色社交圈里真实感的 NPC 网名；3. 角色可以回复用户或其他人的评论，NPC 也可以发新评论、回复角色或互相回复；4. parentId 留空表示新评论，填写已有评论 ID 或本次前面输出的 id 表示回复；5. 不要代替用户发言，不要使用“NPC”“路人”“朋友A”这类占位名；6. 内容像真实社交软件评论区，短、自然、有上下文，不要解释设定。'
+  ].join('\n\n');
+
+  const apiReply = await callTextApi(input.settings, prompt, input.modelOverride);
+  if (apiReply) {
+    try {
+      const parsed = JSON.parse(extractJsonContent(apiReply));
+      const replies = normalizeVoomCommentReplies(parsed, fallbackAuthorName, input.post, blockedAuthorNames);
+      if (replies.length) return replies;
+    } catch {
+      const content = apiReply.trim();
+      if (content) {
+        return [{
+          authorName: fallbackAuthorName,
+          content,
+          parentId: targetComments[0]?.id
+        }];
+      }
+    }
+  }
+  throw new Error('评论区回复模型没有返回内容。');
+}
+
+export async function generateConversationSummary(input: {
+  messages: string;
+  previousSummary: string;
+  settings?: AppSettings;
+  modelOverride?: string;
+  promptOverride?: string;
+  perspectiveInstruction?: string;
+}) {
+  const prompt = [
+    input.promptOverride?.trim() || '请把下面聊天楼层总结成可供角色扮演继续读取的记忆手册。要求：保留人物关系变化、承诺、偏好、冲突、时间顺序和未解决事项；不要评价用户；用中文输出。',
+    input.perspectiveInstruction?.trim(),
+    input.previousSummary ? `已有长期/短期记忆：\n${input.previousSummary}` : '已有长期/短期记忆：暂无。',
+    `待总结聊天：\n${input.messages}`
+  ].filter(Boolean).join('\n\n');
+  const apiReply = await callTextApi(input.settings, prompt, input.modelOverride);
+  return apiReply || input.messages.slice(0, 1400);
+}
+
+export function shouldAutoGenerateMoment(frequency: 'low' | 'medium' | 'high') {
+  const chance = { low: 0.12, medium: 0.25, high: 0.42 }[frequency];
+  return Math.random() < chance;
+}
+
+export async function generateEmbeddingVector(input: {
+  text: string;
+  settings?: AppSettings;
+  modelOverride?: string;
+}) {
+  const resolved = getResolvedTextApiConfig(input.settings, input.modelOverride);
+  if (!resolved.endpoint.trim() || !resolved.model.trim() || !input.text.trim()) return [];
+
+  const embeddingsEndpoint = resolved.endpoint.replace(/\/chat\/completions\/?$/i, '/embeddings');
+  try {
+    const response = await fetch(embeddingsEndpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(resolved.apiKey ? { Authorization: `Bearer ${resolved.apiKey}` } : {})
+      },
+      body: JSON.stringify({
+        model: resolved.model,
+        input: input.text
+      })
+    });
+
+    if (!response.ok) return [];
+    const data = await response.json();
+    const embedding = Array.isArray(data.data?.[0]?.embedding) ? data.data[0].embedding : [];
+    return embedding
+      .map((value: unknown) => Number(value))
+      .filter((value: number) => Number.isFinite(value));
+  } catch {
+    return [];
+  }
+}

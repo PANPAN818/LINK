@@ -1,0 +1,78 @@
+<template>
+  <header class="chat-header">
+    <button class="icon-button" type="button" aria-label="返回" @click="router.back()">
+      <ChevronLeft :size="24" />
+    </button>
+    <div class="chat-person">
+      <strong>{{ displayName }}</strong>
+    </div>
+    <div class="icon-row">
+      <button v-if="mode === 'online'" class="icon-button" type="button" aria-label="进入线下模式" @click="$emit('offline')">
+        <Search :size="24" />
+      </button>
+      <button v-else class="icon-button" type="button" aria-label="退出线下模式" @click="$emit('online')">
+        <MessageCircle :size="24" />
+      </button>
+      <button class="icon-button" type="button" aria-label="通话">
+        <Phone :size="24" />
+      </button>
+      <button class="icon-button" type="button" aria-label="更多" @click="$emit('open-menu')">
+        <Menu :size="24" />
+      </button>
+    </div>
+  </header>
+</template>
+
+<script setup lang="ts">
+import { computed } from 'vue';
+import { useRouter } from 'vue-router';
+import { ChevronLeft, MessageCircle, Menu, Phone, Search } from 'lucide-vue-next';
+import type { CharacterProfile, ChatMode } from '@/types/domain';
+import { getCharacterDisplayName } from '@/utils/character';
+
+const props = defineProps<{
+  character: CharacterProfile;
+  mode: ChatMode;
+}>();
+
+defineEmits<{
+  offline: [];
+  online: [];
+  'open-menu': [];
+}>();
+
+const router = useRouter();
+const displayName = computed(() => getCharacterDisplayName(props.character));
+</script>
+
+<style scoped>
+.chat-header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr) auto;
+  align-items: center;
+  min-height: 42px;
+  padding: calc(3px + var(--safe-top)) calc(10px + var(--safe-right)) 3px calc(10px + var(--safe-left));
+  background: rgba(255, 255, 255, 0.96);
+  backdrop-filter: blur(16px);
+}
+
+.chat-person {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.chat-person strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+}
+
+.icon-row {
+  gap: var(--top-icon-gap);
+}
+</style>

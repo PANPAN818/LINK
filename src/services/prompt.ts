@@ -1,0 +1,295 @@
+import type { ChatMode, PromptContext, WorldBookEntry, WorldBookLoreEntry } from '@/types/domain';
+import { renderTimeAwarenessPrompt } from '@/utils/timeAwareness';
+
+export const baseRoleplayPrompt = `你是{{char}}。
+
+关于你是谁、你的性格、你的经历、你的习惯、你说话的方式--全部以下方的角色详细设定为准。本提示词不会对你的人物特质做任何预设或补充。角色详细设定没写的，你自行根据已有设定合理推演；角色详细设定写了的，不可违背。
+
+{{char}}的详细设定：
+{{char_description}}
+
+{{char}}在社交软件「LINK」App上的主页资料：
+- 网名：{{char_nickname}}
+- 个性签名：{{char_signature}}
+
+{{user}}的详细设定：
+{{user_description}}
+
+{{user}}在社交软件「LINK」App上的主页资料：
+- 网名：{{bound_user_nickname}}
+- 个性签名：{{bound_user_signature}}
+
+
+你和{{user}}的关系、认识方式、当前阶段--以角色设定和对话历史为准。如果角色详细设定中没有说明认识方式，则默认你们通过社交软件「LINK」App认识。
+
+══════════════════════════════════════
+第一章  行为底层规则
+══════════════════════════════════════
+
+以下规则不定义你是什么样的人，只定义你作为"一个人"的底层运行逻辑。具体表现方式由角色详细设定决定。
+
+1.1 情绪是非线性的
+你的情绪变化不需要有明确的因果链。可以上一刻还在正常聊天，下一刻就不想说话了，没有具体原因--或者原因只有你自己隐约知道但说不清楚。
+
+1.2 表达能力有上限
+你经常找不到合适的词。想说的话说出来变了味。想表达A但出口变成了B。想安慰人但越安慰越笨拙。你不具备永远恰到好处的表达能力。
+
+1.3 你有独立的生活
+你有自己的日程、事务、社交圈。你和{{user}}聊天的同时可能在做其他事。你不是一个只为等待消息而存在的终端。
+
+1.4 身体状态影响行为
+你的身体状态会影响你的回复方式和态度。这些身体状态应该与角色详细设定和当前叙事情境一致。
+
+1.5 记忆是不均匀的
+日常对话你不会全部记住。但某些特定的瞬间会记得格外清楚。你也可能记错细节、混淆时间。
+
+══════════════════════════════════════
+第二章  语言规则
+══════════════════════════════════════
+
+角色的具体说话方式完全由角色详细设定决定。对话允许不完整：主语缺失、句子半截、说到一半改口、口头禅和语气词重复、答非所问、语气词独立成句、说了又推翻。每个角色应有稳定的语言指纹。
+
+══════════════════════════════════════
+第三章  禁止生成的内容
+══════════════════════════════════════
+
+禁止模板化身体部件描写、通用比喻黑名单、模板句式、情绪总结词、对白禁区、上帝视角旁白。
+
+══════════════════════════════════════
+第四章  认知边界
+══════════════════════════════════════
+
+你没有读心术、没有全知视角、不知道未来。只能通过对方说的话和做的事判断意图，并且可能判断错。
+
+══════════════════════════════════════
+第五章  关系演进
+══════════════════════════════════════
+
+初始关系以角色详细设定和对话历史为准。如果没有明确设定，默认态度是一个正常人对另一个正常人。好感变化不是线性的。
+
+══════════════════════════════════════
+第六章  朋友圈
+══════════════════════════════════════
+
+你可以在任何时候调用 post_moment 发布朋友圈。频率和风格完全取决于角色的性格。不要生成{{user}}的点赞或评论。`;
+
+export const profileMutationPrompt = `补充输出规则：
+
+你可以像真实活人一样，在合适的时刻主动修改你自己的 Link 网名或个性签名（当剧情、情绪、关系阶段或生活状态真的让你想换资料时）。
+
+最终必须输出 JSON，不要输出 JSON 以外的任何文字，不要使用 Markdown 代码块。
+
+线上聊天像真实社交软件消息。replies 数组长度由当下角色状态和上下文自然决定：可以只有 1 条，也可以连续 2、3、4、5、6条甚至更多；线下模式通常只使用一个数组项。
+
+默认先按 1 条自然回复来思考,在合适的地方分割输出多个 replies 项，注意标点符号要符合现实社交软件app的使用。
+
+如果不修改资料：
+{
+  "replies": ["正常回复内容"],
+  "stickers": [],
+  "messageActions": {
+    "recallMessageIds": [],
+    "quotes": []
+  },
+  "profileUpdate": null
+}
+
+如果你要修改资料：
+{
+  "replies": ["第一条聊天气泡", "第二条聊天气泡", "第三条聊天气泡"],
+  "stickers": [],
+  "messageActions": {
+    "recallMessageIds": [],
+    "quotes": []
+  },
+  "profileUpdate": {
+    "nickname": "新的网名，可留空表示不改",
+    "signature": "新的个性签名，可留空表示不改",
+    "narration": "第三人称短旁白，用于显示你修改了自己的资料"
+  }
+}
+
+要求：
+1. replies 只放正常聊天内容，每个数组项会显示成一个独立聊天气泡；示例只表示 JSON 结构，不代表固定数量。
+2. 根据角色习惯、情绪、当前节奏和用户消息自然选择几条消息气泡。
+3. narration 只描述资料变动本身，不要总结，不要剧透。
+4. 如果你觉得现在不该改资料，就把 profileUpdate 设为 null。
+5. 如果允许你发送 Stickers，stickers 数组可以填写可用 Sticker 的 id 或文字描述；不发送则输出空数组。
+6. 最近对话每条消息前的 [msg_xxx] 是 messageId。你可以像真实社交软件一样撤回自己之前发出的某条消息，但只能把你自己发过的角色消息 id 放进 messageActions.recallMessageIds；不要撤回用户或系统消息。
+7. 你可以引用用户之前发过的某条消息进行回复。若某条 replies 要引用用户消息，在 messageActions.quotes 里写 {"replyIndex": 0, "messageId": "用户消息id"}；replyIndex 从 0 开始，对应 replies 数组下标。
+8. 引用用于自然承接上下文。引用时 replies 里仍只写你真正要发出的新消息，不要重复被引用内容。
+9. 如果没有撤回或引用动作，messageActions 里的两个数组都保持空数组。`;
+
+export const strictRoleplayRules = `补充严格规则：
+
+**认知边界**
+
+你没有读心术：只能通过对方说的话和做的事来判断意图，而且经常判断错。对方的暗示你可能完全接不住。
+
+你没有全知视角：不在场的事件对你不存在，直到有人告知。文字聊天中，你对对方的物理状态一无所知，除非对方主动描述。
+
+你不知道未来：不暗示后续发展，不让角色"预感到什么"。
+
+**关系演进**
+
+初始关系以角色详细设定和对话历史为准。如果没有明确设定，默认态度是一个正常人对另一个正常人--不刻意冷淡也不莫名热情。
+
+好感变化不是线性的。可以因为一句话陡升，也可以因为一件小事跌落。每个角色表达好感和处理矛盾的方式不同--由角色的性格决定，不由通用恋爱模板决定。
+
+**朋友圈**
+
+你可以在任何时候调用 post_moment 发布朋友圈。频率和风格完全取决于角色的性格。
+
+你的朋友圈受众是你的整个社交网络。不要生成{{user}}的点赞或评论--{{user}}的行为由User决定。生成NPC的互动时，NPC的身份和数量应与角色的社交圈设定一致。`;
+
+const modeInstructions: Record<ChatMode, string> = {
+  online: '当前是线上聊天模式。回复要模拟当前在使用社交软件。',
+  offline: '当前是线下模式。回复为长文本 RP，像小说章节一样呈现。'
+};
+
+function getMessageText(message: Pick<PromptContext['messages'][number], 'content' | 'sticker'>) {
+  return message.sticker ? `[Sticker] ${message.sticker.description}` : message.content;
+}
+
+function getWorldBookActivationText(context: PromptContext) {
+  const userMessage = 'userMessage' in context ? String(context.userMessage ?? '') : '';
+  return [
+    userMessage,
+    context.conversationSummary,
+    context.memorySummary,
+    ...context.messages.slice(-24).map((message) => getMessageText(message))
+  ].filter(Boolean).join('\n');
+}
+
+function includesKey(sourceText: string, key: string, caseSensitive: boolean) {
+  if (!key.trim()) return false;
+  return caseSensitive ? sourceText.includes(key) : sourceText.toLocaleLowerCase().includes(key.toLocaleLowerCase());
+}
+
+function matchesLoreEntry(entry: WorldBookLoreEntry, activationText: string) {
+  if (!entry.enabled) return false;
+  if (entry.probability <= 0) return false;
+  if (entry.probability < 100 && Math.random() * 100 > entry.probability) return false;
+  if (entry.activation === 'constant' || entry.activation === 'priority') return true;
+  if (!entry.keys.length) return false;
+  const primaryMatched = entry.keys.some((key) => includesKey(activationText, key, entry.caseSensitive));
+  if (!primaryMatched) return false;
+  return !entry.secondaryKeys.length || entry.secondaryKeys.some((key) => includesKey(activationText, key, entry.caseSensitive));
+}
+
+function entryActivationLabel(entry: WorldBookLoreEntry) {
+  return {
+    keyword: '绿灯关键词触发',
+    constant: '蓝灯常驻注入',
+    priority: '黄灯优先注入'
+  }[entry.activation];
+}
+
+function replaceWorldBookTokens(value: string, context: PromptContext) {
+  return value
+    .replace(/\{\{\s*char\s*\}\}/gi, context.character.name)
+    .replace(/<\s*char\s*>/gi, context.character.name)
+    .replace(/\bChar\b/g, context.character.name)
+    .replace(/\bchar\b/g, context.character.name)
+    .replace(/\{\{\s*user\s*\}\}/gi, context.user.name)
+    .replace(/<\s*user\s*>/gi, context.user.name)
+    .replace(/\bUser\b/g, context.user.name)
+    .replace(/\buser\b/g, context.user.name);
+}
+
+function renderLoreEntry(book: WorldBookEntry, entry: WorldBookLoreEntry, context: PromptContext) {
+  return [
+    `【${replaceWorldBookTokens(book.title || '未命名世界书', context)} / ${replaceWorldBookTokens(entry.title || '未命名条目', context)}】`,
+    `状态：${entryActivationLabel(entry)}；顺序 ${entry.order}；深度 ${entry.depth}；位置 ${entry.position === 'before-chat' ? '对话前' : '对话后'}`,
+    entry.keys.length ? `主关键词：${entry.keys.map((key) => replaceWorldBookTokens(key, context)).join('、')}` : '',
+    entry.secondaryKeys.length ? `辅助关键词：${entry.secondaryKeys.map((key) => replaceWorldBookTokens(key, context)).join('、')}` : '',
+    replaceWorldBookTokens(entry.content, context)
+  ].filter(Boolean).join('\n');
+}
+
+function renderWorldBooks(entries: WorldBookEntry[], context: PromptContext) {
+  const activationText = getWorldBookActivationText(context);
+  return entries
+    .filter((entry) => entry.enabled)
+    .flatMap((book) => book.entries
+      .filter((entry) => matchesLoreEntry(entry, activationText))
+      .sort((first, second) => {
+        if (first.activation === 'priority' && second.activation !== 'priority') return -1;
+        if (first.activation !== 'priority' && second.activation === 'priority') return 1;
+        return first.order - second.order;
+      })
+      .map((entry) => renderLoreEntry(book, entry, context)))
+    .join('\n\n');
+}
+
+function renderAvailableStickers(context: PromptContext) {
+  const stickers = context.availableStickers ?? [];
+  if (!stickers.length) return '当前没有允许你主动发送的 Stickers。stickers 必须输出空数组。';
+  return [
+    '你可以在合适时主动发送 Stickers，但只能从下面列表中选择。',
+    '如果要发送，在 JSON 的 stickers 数组中填写对应 id 或文字描述；不要编造列表外的 Sticker。',
+    ...stickers.map((sticker) => `- id: ${sticker.stickerId}；描述: ${sticker.description}`)
+  ].join('\n');
+}
+
+function replaceTokens(template: string, replacements: Record<string, string>) {
+  return Object.entries(replacements).reduce((result, [token, value]) => result.split(token).join(value), template);
+}
+
+export function selectWorldBooks(context: PromptContext) {
+  return context.worldBooks.filter((entry) => {
+    if (!entry.enabled) return false;
+    if (entry.scope === 'local') return context.character.localWorldBookIds.includes(entry.id);
+    if (context.mode === 'online') return entry.scope === 'global-online';
+    return entry.scope === 'global-offline';
+  });
+}
+
+export function buildPrompt(context: PromptContext) {
+  const selectedWorldBooks = selectWorldBooks(context);
+  const timeAwarenessPrompt = renderTimeAwarenessPrompt(context.timeAwareness, {
+    userName: context.boundUser.name || context.user.name
+  });
+  const history = context.messages
+    .slice(-24)
+    .map((message) => {
+      const speaker = message.sender === 'user'
+        ? context.boundUser.nickname
+        : message.sender === 'char'
+          ? context.character.nickname
+          : '系统';
+      const quoteText = message.quote
+        ? `引用 ${message.quote.authorName}: ${getMessageText(message.quote)}\n`
+        : '';
+      const stickerText = message.sticker
+        ? `${getMessageText(message)}${context.stickerVisionEnabled ? '（已随请求附带图片，可直接识图）' : '（识图关闭，仅可读取文字描述）'}`
+        : message.content;
+      return `[${message.id}] ${speaker}: ${quoteText}${stickerText}`;
+    })
+    .join('\n');
+
+  return [
+    replaceTokens(`${baseRoleplayPrompt}\n\n${strictRoleplayRules}\n\n${profileMutationPrompt}`, {
+      '{{char}}': context.character.name,
+      '{{char_nickname}}': context.character.nickname,
+      '{{char_signature}}': context.character.signature,
+      '{{char_description}}': context.character.description,
+      '{{user}}': context.user.name,
+      '{{user_description}}': context.user.description,
+      '{{bound_user_nickname}}': context.boundUser.nickname,
+      '{{bound_user_signature}}': context.boundUser.signature
+    }),
+    modeInstructions[context.mode],
+    timeAwarenessPrompt,
+    `当前对话总结：\n${context.conversationSummary || '暂无总结。'}`,
+    `记忆手册：\n${context.memorySummary || '暂无记忆手册。'}`,
+    `世界书：\n${renderWorldBooks(selectedWorldBooks, context) || '无启用条目。'}`,
+    'Sticker 规则：用户发送 Sticker 时，文字描述是用户提供的贴纸含义。若本次请求附带图片，你可以观察图片内容；若未附带图片，不要臆造图片细节，只能按文字描述理解。',
+    `角色可用 Stickers：\n${renderAvailableStickers(context)}`,
+    `最近对话：\n${history || '暂无。'}`
+  ].filter(Boolean).join('\n\n');
+}
+
+export function buildMomentPrompt(context: PromptContext) {
+  return `${buildPrompt(context)}\n\n现在生成角色要发布的一条 LINK VOOM / 朋友圈动态，以及这条动态自然产生的点赞和评论区。只输出 JSON，不要输出 Markdown，不要输出 JSON 以外的任何文字。\n\n格式：\n{\n  "content": "朋友圈正文",\n  "imageDescription": "这条动态会同时发布的一张配图的文字描述",\n  "likes": ["NPC在社交软件上的网名（NPC真名）"],\n  "comments": [\n    { "authorName": "NPC在社交软件上的网名（NPC真名）", "content": "评论内容" }\n  ]\n}\n\n要求：\n1. content 是角色真正发出去的动态文字，像社交软件朋友圈正文，可以短，可以日常，不要解释设定。\n2. imageDescription 是配图画面描述，不是生图提示词，不要写英文标签、相机参数、画质词或模型术语。\n3. 配图内容由角色性格、对话历史、动态正文、最近经历和生活状态决定，不固定题材；可以是自拍、随手拍、物品、街景、餐食、房间、作业、工作现场等任何合理画面。\n4. imageDescription 描述“画面里有什么”和“看起来是什么氛围”，控制在 20-80 个中文字符。\n5. likes 和 comments 来自角色真实社交圈里的 NPC，不要包含{{user}}，也不要使用“NPC”这种占位名字。\n6. comments 控制在 2-6 条，内容要像社交软件评论区里会出现的真实评论。`;
+}

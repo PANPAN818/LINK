@@ -1,0 +1,436 @@
+:root {
+  color: #111111;
+  background: #f4f5f6;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  --app-height: 100vh;
+  --app-height: 100svh;
+  --app-height: 100dvh;
+  --link-green: #06c755;
+  --ink: #111111;
+  --muted: #8f9297;
+  --hairline: #eceff1;
+  --surface: #ffffff;
+  --soft: #f3f4f5;
+  --danger: #ef445a;
+  --compact-page-font-size: 13px;
+  --compact-copy-font-size: 12px;
+  --compact-label-font-size: 11px;
+  --compact-heading-font-size: 17px;
+  --compact-control-font-size: 13px;
+  --ios-control-font-size: 16px;
+  --top-title-size: 22px;
+  --top-icon-size: 22px;
+  --top-icon-button-width: 28px;
+  --top-icon-button-height: 32px;
+  --top-icon-gap: 2px;
+  --safe-top: 0px;
+  --safe-top: env(safe-area-inset-top);
+  --safe-right: 0px;
+  --safe-right: env(safe-area-inset-right);
+  --safe-bottom: 0px;
+  --safe-bottom: env(safe-area-inset-bottom);
+  --keyboard-inset: 0px;
+  --safe-left: 0px;
+  --safe-left: env(safe-area-inset-left);
+  --tab-height: 54px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  width: 100%;
+  min-height: var(--app-height);
+  height: var(--app-height);
+  margin: 0;
+}
+
+html {
+  overflow: hidden;
+  background: var(--surface);
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  overscroll-behavior: none;
+}
+
+body {
+  min-width: 320px;
+  overflow: hidden;
+  font-size: var(--compact-page-font-size);
+  overscroll-behavior: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+#app {
+  position: relative;
+  isolation: isolate;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+button {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+input,
+textarea,
+select {
+  width: 100%;
+  border: 0;
+  outline: 0;
+  background: transparent;
+}
+
+html.is-ios :is(input:not([type='button']):not([type='checkbox']):not([type='color']):not([type='file']):not([type='hidden']):not([type='image']):not([type='radio']):not([type='range']):not([type='reset']):not([type='submit']), textarea, select) {
+  font-size: var(--ios-control-font-size) !important;
+}
+
+html.is-ios .confirm-field textarea {
+  line-height: 1.5 !important;
+}
+
+html.is-ios .composer-input input {
+  line-height: 1.2 !important;
+}
+
+html.is-ios .modal-panel .modal-body input,
+html.is-ios .modal-panel .modal-body textarea,
+html.is-ios .modal-panel .modal-body select {
+  line-height: 1.35 !important;
+}
+
+html.is-ios .modal-panel .modal-body .field input,
+html.is-ios .modal-panel .modal-body .field select,
+html.is-ios .modal-panel .modal-body .field textarea,
+html.is-ios .modal-panel .modal-body .editor-field input,
+html.is-ios .modal-panel .modal-body .editor-field textarea,
+html.is-ios .modal-panel .modal-body .confirm-field textarea {
+  min-height: 36px !important;
+  padding: 7px 9px !important;
+}
+
+html.is-ios .modal-panel .modal-body .field textarea,
+html.is-ios .modal-panel .modal-body .editor-field textarea,
+html.is-ios .modal-panel .modal-body .confirm-field textarea {
+  min-height: 72px !important;
+}
+
+html.is-ios .modal-panel .modal-body .edit-message-sheet textarea {
+  line-height: 1.45 !important;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.screen {
+  min-height: 0;
+  height: 100%;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  background: var(--surface);
+  padding-bottom: calc(var(--tab-height) + var(--safe-bottom));
+}
+
+.screen.no-tabs {
+  padding-bottom: var(--safe-bottom);
+}
+
+.top-bar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 56px;
+  padding: calc(8px + var(--safe-top)) calc(16px + var(--safe-right)) 8px calc(16px + var(--safe-left));
+  background: rgba(255, 255, 255, 0.96);
+  backdrop-filter: blur(16px);
+}
+
+.top-title {
+  margin: 0;
+  font-size: var(--top-title-size);
+  line-height: 1.05;
+  font-weight: 800;
+  letter-spacing: 0;
+}
+
+.icon-row {
+  display: flex;
+  align-items: center;
+  gap: var(--top-icon-gap);
+}
+
+.icon-button {
+  display: grid;
+  place-items: center;
+  width: var(--top-icon-button-width);
+  height: var(--top-icon-button-height);
+  border-radius: 8px;
+  color: #141414;
+}
+
+.icon-button:active {
+  background: var(--soft);
+}
+
+.icon-button svg {
+  width: var(--top-icon-size);
+  height: var(--top-icon-size);
+}
+
+.avatar {
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: var(--soft);
+}
+
+.search-box {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 38px;
+  margin: 4px 16px 10px;
+  padding: 0 12px;
+  border-radius: 8px;
+  background: var(--soft);
+  color: #9a9da1;
+  font-size: 15px;
+}
+
+.search-box svg {
+  width: 18px;
+  height: 18px;
+}
+
+.section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px 8px;
+  font-weight: 800;
+  font-size: 15px;
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.primary-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 36px;
+  padding: 0 12px;
+  border-radius: 8px;
+  background: var(--link-green);
+  color: #ffffff;
+  font-weight: 700;
+}
+
+.secondary-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 36px;
+  padding: 0 12px;
+  border-radius: 8px;
+  background: var(--soft);
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.list-row {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  min-height: 64px;
+  padding: 8px 16px;
+}
+
+.row-main {
+  min-width: 0;
+  flex: 1;
+}
+
+.row-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.row-subtitle {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.form-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.field {
+  display: grid;
+  gap: 5px;
+}
+
+.field > span {
+  font-size: 12px;
+  color: #686b70;
+  font-weight: 700;
+}
+
+.field input,
+.field textarea,
+.field select {
+  min-height: 38px;
+  border-radius: 8px;
+  background: var(--soft);
+  padding: 8px 10px;
+}
+
+.field textarea {
+  min-height: 84px;
+  resize: vertical;
+}
+
+.empty-state {
+  display: grid;
+  place-items: center;
+  min-height: 40vh;
+  padding: 30px 22px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+@media (max-width: 639px) {
+  #app .mobile-shell,
+  #app .mobile-shell .screen {
+    font-size: var(--compact-page-font-size);
+    line-height: 1.45;
+  }
+
+  #app .mobile-shell :is(button, a, [role='button'], input, textarea, select) {
+    touch-action: manipulation;
+  }
+
+  #app .mobile-shell .screen .top-title {
+    font-size: var(--top-title-size);
+  }
+
+  #app .mobile-shell .screen :is(input, textarea, select) {
+    font-size: var(--compact-control-font-size) !important;
+  }
+
+  html.is-ios #app .mobile-shell .screen :is(input:not([type='button']):not([type='checkbox']):not([type='color']):not([type='file']):not([type='hidden']):not([type='image']):not([type='radio']):not([type='range']):not([type='reset']):not([type='submit']), textarea, select),
+  html.is-ios :is(input:not([type='button']):not([type='checkbox']):not([type='color']):not([type='file']):not([type='hidden']):not([type='image']):not([type='radio']):not([type='range']):not([type='reset']):not([type='submit']), textarea, select) {
+    font-size: var(--ios-control-font-size) !important;
+  }
+
+  #app .mobile-shell .screen :is(h1:not(.top-title), h2, h3, .memory-hero strong, .publisher-copy strong, .picker-copy strong, .sheet-copy strong, .offline-confirm h3, .delete-confirm-sheet h3) {
+    font-size: var(--compact-heading-font-size);
+    line-height: 1.2;
+  }
+
+  #app .mobile-shell .screen :is(p, li, label, .field-hint, .panel-copy, .module-description, .placeholder-panel p, .publisher-copy span, .picker-copy span, .offline-confirm p, .delete-confirm-sheet p) {
+    font-size: var(--compact-copy-font-size);
+    line-height: 1.45;
+  }
+
+  #app .mobile-shell .screen :is(.primary-action, .secondary-action, .danger-action, .ghost-button, .save-button, .switch-button, .footer-button, .action-menu button) {
+    font-size: var(--compact-copy-font-size);
+  }
+
+  #app .mobile-shell .screen :is(.search-box, .section-heading, .primary-action, .secondary-action, .chat-filter button) {
+    font-size: var(--compact-page-font-size);
+  }
+
+  #app .mobile-shell .screen :is(.row-title, .conversation-top strong, .chat-person strong) {
+    font-size: 14px;
+  }
+
+  #app .mobile-shell .screen :is(.row-subtitle, .conversation-bottom, .empty-state) {
+    font-size: var(--compact-copy-font-size);
+  }
+
+  #app .mobile-shell .screen :is(.field > span, small, time) {
+    font-size: var(--compact-label-font-size);
+  }
+
+  #app .mobile-shell .screen :is(h2, h3) {
+    font-size: var(--compact-heading-font-size);
+    line-height: 1.2;
+  }
+
+  #app .modal-panel .modal-body :is(input:not([type='button']):not([type='checkbox']):not([type='color']):not([type='file']):not([type='hidden']):not([type='image']):not([type='radio']):not([type='range']):not([type='reset']):not([type='submit']), textarea, select) {
+    font-size: var(--compact-control-font-size) !important;
+  }
+
+  html.is-ios #app .modal-panel .modal-body :is(input:not([type='button']):not([type='checkbox']):not([type='color']):not([type='file']):not([type='hidden']):not([type='image']):not([type='radio']):not([type='range']):not([type='reset']):not([type='submit']), textarea, select),
+  html.is-ios .modal-panel .modal-body :is(input:not([type='button']):not([type='checkbox']):not([type='color']):not([type='file']):not([type='hidden']):not([type='image']):not([type='radio']):not([type='range']):not([type='reset']):not([type='submit']), textarea, select) {
+    font-size: var(--ios-control-font-size) !important;
+  }
+
+  #app .mobile-shell :is(.top-bar, .chat-header) .icon-button svg {
+    width: var(--top-icon-size);
+    height: var(--top-icon-size);
+  }
+}
+
+@media (min-width: 640px) {
+  body {
+    display: grid;
+    place-items: center;
+    background: #dfe3e6;
+  }
+
+  #app {
+    width: min(100%, 414px);
+    height: min(var(--app-height), 900px);
+    min-height: min(var(--app-height), 900px);
+    border-radius: 24px;
+    overflow: hidden;
+    box-shadow: 0 20px 70px rgba(12, 18, 24, 0.18);
+  }
+}
+
+@media (display-mode: standalone) {
+  body {
+    background: var(--surface);
+  }
+
+  #app {
+    width: 100%;
+    max-width: none;
+    border-radius: 0;
+    box-shadow: none;
+  }
+}

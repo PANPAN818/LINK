@@ -1,0 +1,232 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
+    <meta name="theme-color" content="#ffffff" />
+    <meta name="format-detection" content="telephone=no, date=no, email=no, address=no" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="Link" />
+    <link rel="icon" href="%BASE_URL%link-icon.png" type="image/png" />
+    <link rel="apple-touch-icon" href="%BASE_URL%link-icon.png" />
+    <style>
+      :root {
+        color: #111111;
+        background: #ffffff;
+      }
+
+      html,
+      body {
+        width: 100%;
+        height: 100%;
+        margin: 0;
+      }
+
+      body {
+        background: #ffffff;
+      }
+
+      #boot-loader {
+        position: fixed;
+        inset: 0;
+        z-index: 9999;
+        display: grid;
+        place-items: center;
+        background: #ffffff;
+        transition: opacity 280ms ease, visibility 280ms ease;
+      }
+
+      #boot-loader.is-hidden {
+        opacity: 0;
+        visibility: hidden;
+        pointer-events: none;
+      }
+
+      .boot-loader__inner {
+        display: grid;
+        place-items: center;
+        width: min(220px, calc(100vw - 72px));
+        aspect-ratio: 1;
+      }
+
+      .boot-loader__link {
+        width: 100%;
+        height: 100%;
+        overflow: visible;
+      }
+
+      .boot-loader__route,
+      .boot-loader__route-glow {
+        stroke: #06c755;
+        stroke-width: 5;
+        stroke-linecap: round;
+        fill: none;
+      }
+
+      .boot-loader__route-glow {
+        opacity: 0.14;
+        stroke-width: 17;
+      }
+
+      .boot-loader__route {
+        stroke-dasharray: 14 16;
+        animation: boot-link-route 1.25s linear infinite;
+      }
+
+      .boot-loader__bubble {
+        transform-box: fill-box;
+        transform-origin: center;
+        animation: boot-bubble 1.85s ease-in-out infinite;
+      }
+
+      .boot-loader__bubble--center {
+        animation-delay: 120ms;
+      }
+
+      .boot-loader__bubble--right {
+        animation-delay: 240ms;
+      }
+
+      .boot-loader__bubble-shell,
+      .boot-loader__bubble-tail {
+        fill: #ffffff;
+        stroke: #111111;
+        stroke-width: 4;
+      }
+
+      .boot-loader__bubble-shell--green,
+      .boot-loader__bubble-tail--green {
+        fill: #06c755;
+        stroke: #06c755;
+        stroke-width: 4;
+      }
+
+      .boot-loader__dot {
+        animation: boot-dot 1.35s ease-in-out infinite;
+        transform-box: fill-box;
+        transform-origin: center;
+      }
+
+      .boot-loader__dot:nth-of-type(2) {
+        animation-delay: 120ms;
+      }
+
+      .boot-loader__dot:nth-of-type(3) {
+        animation-delay: 240ms;
+      }
+
+      .boot-loader__scan {
+        stroke: #06c755;
+        stroke-width: 4;
+        stroke-linecap: round;
+        fill: none;
+        opacity: 0;
+        transform-origin: 110px 110px;
+        animation: boot-scan 2.4s ease-in-out infinite;
+      }
+
+      @keyframes boot-link-route {
+        to {
+          stroke-dashoffset: -30;
+        }
+      }
+
+      @keyframes boot-bubble {
+        0%,
+        100% {
+          transform: translateY(0) scale(1);
+        }
+
+        50% {
+          transform: translateY(-7px) scale(1.025);
+        }
+      }
+
+      @keyframes boot-dot {
+        0% {
+          opacity: 0.34;
+          transform: scale(0.72);
+        }
+
+        45% {
+          opacity: 1;
+          transform: scale(1.08);
+        }
+
+        100% {
+          opacity: 0.34;
+          transform: scale(0.72);
+        }
+      }
+
+      @keyframes boot-scan {
+        0%,
+        18%,
+        100% {
+          opacity: 0;
+          transform: rotate(-8deg) scale(0.82);
+        }
+
+        42% {
+          opacity: 0.42;
+          transform: rotate(0deg) scale(1);
+        }
+
+        68% {
+          opacity: 0;
+          transform: rotate(8deg) scale(1.12);
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .boot-loader__route,
+        .boot-loader__bubble,
+        .boot-loader__dot,
+        .boot-loader__scan {
+          animation: none;
+        }
+      }
+    </style>
+    <title>Link</title>
+  </head>
+  <body>
+    <div id="boot-loader" aria-hidden="true">
+      <div class="boot-loader__inner">
+        <svg class="boot-loader__link" viewBox="0 0 220 220" role="presentation" aria-hidden="true">
+          <path class="boot-loader__route-glow" d="M58 118 C72 74 101 54 132 70 C157 82 164 115 187 130" />
+          <path class="boot-loader__route" d="M58 118 C72 74 101 54 132 70 C157 82 164 115 187 130" />
+          <path class="boot-loader__scan" d="M65 162 C92 184 134 184 162 162" />
+          <path class="boot-loader__scan" d="M49 45 C82 17 138 17 171 45" />
+
+          <g class="boot-loader__bubble boot-loader__bubble--left">
+            <path class="boot-loader__bubble-tail" d="M55 136 L43 151 L47 128 Z" />
+            <rect class="boot-loader__bubble-shell" x="26" y="95" width="70" height="48" rx="20" />
+            <circle class="boot-loader__dot" cx="50" cy="119" r="5" fill="#06c755" />
+            <circle class="boot-loader__dot" cx="62" cy="119" r="5" fill="#06c755" />
+            <circle class="boot-loader__dot" cx="74" cy="119" r="5" fill="#06c755" />
+          </g>
+
+          <g class="boot-loader__bubble boot-loader__bubble--center">
+            <path class="boot-loader__bubble-tail--green" d="M118 103 L108 120 L105 101 Z" />
+            <rect class="boot-loader__bubble-shell--green" x="82" y="54" width="72" height="54" rx="22" />
+            <circle class="boot-loader__dot" cx="106" cy="81" r="5" fill="#ffffff" />
+            <circle class="boot-loader__dot" cx="119" cy="81" r="5" fill="#ffffff" />
+            <circle class="boot-loader__dot" cx="132" cy="81" r="5" fill="#ffffff" />
+          </g>
+
+          <g class="boot-loader__bubble boot-loader__bubble--right">
+            <path class="boot-loader__bubble-tail" d="M167 143 L181 158 L177 136 Z" />
+            <rect class="boot-loader__bubble-shell" x="135" y="105" width="64" height="46" rx="19" />
+            <circle class="boot-loader__dot" cx="157" cy="128" r="5" fill="#06c755" />
+            <circle class="boot-loader__dot" cx="169" cy="128" r="5" fill="#06c755" />
+            <circle class="boot-loader__dot" cx="181" cy="128" r="5" fill="#06c755" />
+          </g>
+        </svg>
+      </div>
+    </div>
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
