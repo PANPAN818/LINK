@@ -1,5 +1,11 @@
 import type { ChatMessage } from '@/types/domain';
 
+export function isVoomNarrationMessage(message: ChatMessage) {
+  return message.sender === 'system'
+    && message.displayStyle === 'narration'
+    && (Boolean(message.voomEventType) || Boolean(message.voomPostId) || Boolean(message.voomCommentId));
+}
+
 function isVoomLikeMessage(message: ChatMessage) {
   return message.sender === 'system'
     && message.voomEventType === 'like'

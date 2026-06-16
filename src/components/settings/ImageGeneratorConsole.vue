@@ -381,6 +381,8 @@ async function triggerPreview(moduleId: ImageModuleId) {
   color: var(--muted);
   font-size: 12px;
   line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .module-feedback.error {

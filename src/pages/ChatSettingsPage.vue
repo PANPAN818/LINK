@@ -78,19 +78,20 @@ function openTab(tab: PanelTab) {
 .chat-settings-page {
   display: flex;
   flex-direction: column;
+  height: 100%;
   padding-bottom: 0;
   background:
-    radial-gradient(circle at 0% 0%, rgba(255, 218, 227, 0.42), transparent 30%),
-    radial-gradient(circle at 96% 4%, rgba(6, 199, 85, 0.16), transparent 26%),
+    radial-gradient(circle at 8% 0%, rgba(255, 218, 227, 0.58), transparent 30%),
+    radial-gradient(circle at 96% 8%, rgba(6, 199, 85, 0.16), transparent 28%),
     linear-gradient(180deg, #fbfcfb 0%, #f5f7f6 54%, #edf3f1 100%);
 }
 
 .chat-settings-topbar {
   align-items: center;
-  justify-content: flex-start;
-  gap: 12px;
-  background: rgba(251, 252, 251, 0.82);
-  backdrop-filter: blur(20px);
+  justify-content: space-between;
+  background: rgba(251, 252, 251, 0.9);
+  -webkit-backdrop-filter: blur(18px);
+  backdrop-filter: blur(18px);
 }
 
 .chat-settings-title-button {
@@ -110,12 +111,12 @@ function openTab(tab: PanelTab) {
   flex: 1;
   min-height: 0;
   width: 100%;
-  max-width: 760px;
+  max-width: 720px;
   margin: 0 auto;
   overflow-y: auto;
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
-  padding: 12px calc(14px + var(--safe-right)) 18px calc(14px + var(--safe-left));
+  padding: 10px calc(16px + var(--safe-right)) 16px calc(16px + var(--safe-left));
 }
 
 .chat-settings-panel {
@@ -139,6 +140,7 @@ function openTab(tab: PanelTab) {
   padding: 8px calc(12px + var(--safe-right)) calc(10px + var(--safe-bottom)) calc(12px + var(--safe-left));
   border-top: 1px solid rgba(17, 17, 17, 0.05);
   background: rgba(255, 255, 255, 0.96);
+  -webkit-backdrop-filter: blur(18px);
   backdrop-filter: blur(18px);
 }
 
@@ -146,12 +148,16 @@ function openTab(tab: PanelTab) {
   display: grid;
   justify-items: center;
   gap: 4px;
+  min-width: 0;
   min-height: 48px;
   padding: 6px 4px;
   border-radius: 14px;
   color: var(--muted);
   font-size: 10px;
   font-weight: 800;
+  line-height: 1.1;
+  overflow: hidden;
+  white-space: nowrap;
   touch-action: manipulation;
 }
 
@@ -161,13 +167,36 @@ function openTab(tab: PanelTab) {
 }
 
 .chat-settings-tab svg {
+  flex: 0 0 auto;
   width: 20px;
   height: 20px;
+}
+
+.chat-settings-tab span {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 @media (max-width: 420px) {
   .chat-settings-main {
     padding-inline: 12px;
+  }
+}
+
+@media (max-width: 360px) {
+  .chat-settings-tabs {
+    gap: 3px;
+    padding-inline: calc(8px + var(--safe-left));
+    padding-right: calc(8px + var(--safe-right));
+  }
+
+  .chat-settings-tab {
+    min-height: 46px;
+    border-radius: 12px;
+    font-size: 9px;
   }
 }
 </style>

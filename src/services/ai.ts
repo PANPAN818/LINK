@@ -1,8 +1,10 @@
 import { unzipSync } from 'fflate';
-import type { ApiVendor, AppSettings, CharacterProfile, GenerateReplyInput, ImageProviderType, PromptContext, UserProfile, VoomComment, VoomPost } from '@/types/domain';
+import type { ApiVendor, AppSettings, CharacterProfile, GenerateReplyInput, ImageProviderType, PromptContext, UserProfile, VoomComment, VoomFrequency, VoomPost } from '@/types/domain';
 import { createId } from '@/utils/id';
 import { getCharacterVoomAuthorName } from '@/utils/character';
 import { getPreferredVoomImageProvider, getResolvedApiConfig, getResolvedOpenAiImageConfig } from '@/utils/settings';
+import { normalizeTranslationText } from '@/utils/translation';
+import { getVoomFrequencyChance } from '@/utils/voom';
 import { buildMomentPrompt, buildPrompt } from './prompt';
 
 const modelSelectionSeparator = '::';
@@ -27,12 +29,14 @@ export interface RoleplayReplyResult {
   reply: string;
   replies?: string[];
   replyTranslations?: string[];
+  narrations?: string[];
   stickers?: string[];
   messageActions?: RoleplayMessageActions;
   profileUpdate: null | {
     nickname: string;
     signature: string;
     narration: string;
+    innerMonologue: string[];
   };
 }
 
@@ -110,6 +114,32 @@ function parseSeed(seed: string) {
 
 function normalizeBaseUrl(url: string) {
   return url.trim().replace(/\/+$/, '');
+}
+
+function formatApiErrorPayload(payload: string) {
+  const trimmed = payload.trim();
+  if (!trimmed) return '';
+
+  try {
+    return JSON.stringify(JSON.parse(trimmed), null, 2);
+  } catch {
+    return trimmed;
+  }
+}
+
+async function createApiErrorMessage(response: Response, title: string) {
+  let details = '';
+  try {
+    details = formatApiErrorPayload(await response.text());
+  } catch (error) {
+    details = `读取后台日志失败：${error instanceof Error ? error.message : String(error)}`;
+  }
+
+  const status = [response.status, response.statusText].filter(Boolean).join(' ');
+  return [
+    `${title}：${status || '请求失败'}`,
+    details ? `后台日志：\n${details}` : ''
+  ].filter(Boolean).join('\n\n');
 }
 
 function splitModelSelection(selection = '') {
@@ -192,15 +222,54 @@ function normalizeReplyMessages(payload: unknown) {
   return [];
 }
 
+function normalizeTranslationFragments(value: unknown): string[] {
+  if (Array.isArray(value)) return value.flatMap((item) => normalizeTranslationFragments(item));
+  if (typeof value === 'string' || typeof value === 'number') {
+    const content = normalizeTranslationText(value);
+    return content ? [content] : [];
+  }
+  if (value && typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    const candidates = [record.contentTranslation, record.translation, record.translationZh, record.chineseTranslation, record.chinese, record.zh, record.cn, record.translatedContent];
+    for (const candidate of candidates) {
+      const fragments = normalizeTranslationFragments(candidate);
+      if (fragments.length) return fragments;
+    }
+  }
+  return [];
+}
+
+function normalizeTranslationSlot(value: unknown) {
+  return normalizeTranslationFragments(value).join('\n');
+}
+
+function normalizeTranslationList(value: unknown) {
+  if (Array.isArray(value)) return value.map((item) => normalizeTranslationSlot(item));
+  const translation = normalizeTranslationSlot(value);
+  return translation ? [translation] : [];
+}
+
+function normalizeNestedTranslationFragments(value: unknown): string[] {
+  if (Array.isArray(value)) return value.map((item) => normalizeTranslationSlot(item));
+  if (value && typeof value === 'object') return normalizeTranslationList(value);
+  return [];
+}
+
 function normalizeTranslationMessages(payload: unknown) {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
-    return normalizeTextFragments(payload);
+    return normalizeTranslationFragments(payload);
   }
 
   const record = payload as Record<string, unknown>;
   const candidates = [record.replyTranslations, record.translations, record.translationTexts, record.chineseTranslations, record.translation, record.contentTranslation];
   for (const candidate of candidates) {
-    const translations = normalizeTextFragments(candidate);
+    const translations = normalizeTranslationList(candidate);
+    if (translations.length) return translations;
+  }
+
+  const nestedCandidates = [record.replies, record.messages, record.reply, record.content, record.message, record.text];
+  for (const candidate of nestedCandidates) {
+    const translations = normalizeNestedTranslationFragments(candidate);
     if (translations.length) return translations;
   }
   return [];
@@ -220,6 +289,44 @@ function normalizeStickerSelections(value: unknown): string[] {
       if (selections.length) return selections;
     }
     return normalizeStickerSelections(record.stickers ?? record.stickerIds ?? record.sticker);
+  }
+  return [];
+}
+
+function normalizeInnerMonologueLines(value: unknown): string[] {
+  if (Array.isArray(value)) return value.flatMap((item) => normalizeInnerMonologueLines(item));
+  if (typeof value === 'string' || typeof value === 'number') {
+    return String(value)
+      .split(/\r?\n/)
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+  if (value && typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    const candidates = [record.innerMonologue, record.innerThoughts, record.thoughts, record.statusLines, record.lines, record.content, record.text];
+    for (const candidate of candidates) {
+      const lines = normalizeInnerMonologueLines(candidate);
+      if (lines.length) return lines;
+    }
+  }
+  return [];
+}
+
+function normalizeNarrationLines(value: unknown): string[] {
+  if (Array.isArray(value)) return value.flatMap((item) => normalizeNarrationLines(item));
+  if (typeof value === 'string' || typeof value === 'number') {
+    return String(value)
+      .split(/\r?\n/)
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+  if (value && typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    const candidates = [record.narration, record.content, record.text, record.message, record.description];
+    for (const candidate of candidates) {
+      const lines = normalizeNarrationLines(candidate);
+      if (lines.length) return lines;
+    }
   }
   return [];
 }
@@ -341,9 +448,10 @@ function getStickerImageParts(input: GenerateReplyInput): TextApiContentPart[] {
 
 interface VoomMomentPayload {
   content: string;
+  contentTranslation?: string;
   imageDescription: string;
   likes: string[];
-  comments: Array<Pick<VoomComment, 'authorName' | 'content' | 'parentId'>>;
+  comments: Array<Pick<VoomComment, 'authorName' | 'content' | 'contentTranslation' | 'parentId'>>;
 }
 
 function createFallbackVoomImageDescription(context: PromptContext, content: string) {
@@ -363,12 +471,18 @@ function normalizeVoomMomentComments(input: unknown): VoomMomentPayload['comment
   const comments: VoomMomentPayload['comments'] = [];
   for (const comment of input) {
     if (!comment || typeof comment !== 'object') continue;
-    const entry = comment as Partial<VoomComment>;
+    const entry = comment as Record<string, unknown>;
     const authorName = String(entry.authorName ?? '').trim();
     const content = String(entry.content ?? '').trim();
+    const contentTranslation = normalizeTranslationText(entry.contentTranslation ?? entry.translation ?? entry.translationZh ?? entry.chineseTranslation);
     const parentId = String(entry.parentId ?? '').trim();
     if (!authorName || !content) continue;
-    comments.push({ authorName, content, parentId });
+    comments.push({
+      authorName,
+      content,
+      ...(contentTranslation ? { contentTranslation } : {}),
+      parentId
+    });
   }
   return comments;
 }
@@ -387,14 +501,16 @@ function parseVoomMomentPayload(rawContent: string, context: PromptContext): Voo
   }
 
   try {
-    const parsed = JSON.parse(extractJsonContent(trimmed)) as Partial<VoomMomentPayload>;
+    const parsed = JSON.parse(extractJsonContent(trimmed)) as Partial<VoomMomentPayload> & Record<string, unknown>;
     const content = String(parsed.content ?? '').trim() || fallbackContent;
+    const contentTranslation = normalizeTranslationText(parsed.contentTranslation ?? parsed.translation ?? parsed.translationZh ?? parsed.chineseTranslation);
     const imageDescription = String(parsed.imageDescription ?? '').trim() || createFallbackVoomImageDescription(context, content);
     const likes = Array.isArray(parsed.likes)
       ? [...new Set(parsed.likes.map((item) => String(item ?? '').trim()).filter(Boolean))]
       : [];
     return {
       content,
+      ...(contentTranslation ? { contentTranslation } : {}),
       imageDescription,
       likes,
       comments: normalizeVoomMomentComments(parsed.comments)
@@ -445,7 +561,7 @@ function normalizeVoomCommentReplies(input: unknown, fallbackAuthorName: string,
     const content = String(reply.content ?? '').trim();
     if (!content) continue;
 
-    const contentTranslation = String(reply.contentTranslation ?? reply.translation ?? reply.translationZh ?? reply.chineseTranslation ?? '').trim();
+    const contentTranslation = normalizeTranslationText(reply.contentTranslation ?? reply.translation ?? reply.translationZh ?? reply.chineseTranslation);
     const draftId = String(reply.id ?? reply.draftId ?? reply.tempId ?? '').trim();
     candidates.push({
       authorName,
@@ -525,7 +641,7 @@ async function callTextApi(settings: AppSettings | undefined, prompt: string, mo
   });
 
   if (!response.ok) {
-    throw new Error(`API request failed: ${response.status}`);
+    throw new Error(await createApiErrorMessage(response, '文本模型 API 请求失败'));
   }
 
   const data = await response.json();
@@ -544,7 +660,7 @@ export async function fetchVendorModels(vendor: Pick<ApiVendor, 'apiUrl' | 'apiK
   });
 
   if (!response.ok) {
-    throw new Error(`Model request failed: ${response.status}`);
+    throw new Error(await createApiErrorMessage(response, '模型列表 API 请求失败'));
   }
 
   const data = await response.json();
@@ -589,8 +705,7 @@ export async function generateOpenAiImage(settings: AppSettings, overrides: Imag
   });
 
   if (!response.ok) {
-    const reason = await response.text();
-    throw new Error(`GPT-Image 请求失败：${response.status} ${reason}`.trim());
+    throw new Error(await createApiErrorMessage(response, 'GPT-Image 请求失败'));
   }
 
   const data = await response.json();
@@ -660,8 +775,7 @@ export async function generateNovelAiImage(settings: AppSettings, overrides: Ima
   });
 
   if (!response.ok) {
-    const reason = await response.text();
-    throw new Error(`NovelAI 请求失败：${response.status} ${reason}`.trim());
+    throw new Error(await createApiErrorMessage(response, 'NovelAI 请求失败'));
   }
 
   const contentType = response.headers.get('content-type') || 'application/octet-stream';
@@ -713,8 +827,7 @@ export async function generatePollinationsImage(settings: AppSettings, overrides
   });
 
   if (!response.ok) {
-    const reason = await response.text();
-    throw new Error(`Pollinations 请求失败：${response.status} ${reason}`.trim());
+    throw new Error(await createApiErrorMessage(response, 'Pollinations 请求失败'));
   }
 
   const contentType = response.headers.get('content-type') || 'image/jpeg';
@@ -749,7 +862,13 @@ export async function generateRoleplayReply(input: GenerateReplyInput): Promise<
       const replies = normalizeReplyMessages(parsed);
       const parsedRecordAny = parsedRecord as Record<string, unknown>;
       const replyTranslations = normalizeTranslationMessages(parsed);
+      const narrations = input.mode === 'online' && input.narrationModeEnabled
+        ? normalizeNarrationLines(parsedRecordAny.narrations ?? parsedRecordAny.narrationMessages ?? parsedRecordAny.actionNarrations ?? parsedRecordAny.actions)
+        : [];
       const messageActions = normalizeRoleplayMessageActions(parsedRecordAny);
+      const profileUpdateRecord = parsedRecord.profileUpdate && typeof parsedRecord.profileUpdate === 'object'
+        ? parsedRecord.profileUpdate as Record<string, unknown>
+        : null;
       const stickers = [...new Set([
         ...normalizeStickerSelections(parsedRecord.stickers),
         ...normalizeStickerSelections(parsedRecordAny.stickerIds),
@@ -761,19 +880,26 @@ export async function generateRoleplayReply(input: GenerateReplyInput): Promise<
         reply: replies[0] ?? '',
         replies,
         replyTranslations,
+        narrations: narrations.slice(0, 3),
         stickers,
         messageActions,
-        profileUpdate: parsedRecord.profileUpdate && typeof parsedRecord.profileUpdate === 'object'
+        profileUpdate: profileUpdateRecord
           ? {
-              nickname: String(parsedRecord.profileUpdate.nickname ?? '').trim(),
-              signature: String(parsedRecord.profileUpdate.signature ?? '').trim(),
-              narration: String(parsedRecord.profileUpdate.narration ?? '').trim()
+              nickname: String(profileUpdateRecord.nickname ?? '').trim(),
+              signature: String(profileUpdateRecord.signature ?? '').trim(),
+              narration: String(profileUpdateRecord.narration ?? '').trim(),
+              innerMonologue: normalizeInnerMonologueLines(
+                profileUpdateRecord.innerMonologue
+                ?? profileUpdateRecord.innerThoughts
+                ?? profileUpdateRecord.thoughts
+                ?? profileUpdateRecord.statusLines
+              ).slice(0, 5)
             }
           : null
       } satisfies RoleplayReplyResult);
     } catch {
       const replies = input.mode === 'online' ? normalizeRawOnlineReply(apiReply) : [apiReply];
-      return JSON.stringify({ reply: replies[0] ?? '', replies, stickers: [], profileUpdate: null } satisfies RoleplayReplyResult);
+      return JSON.stringify({ reply: replies[0] ?? '', replies, narrations: [], stickers: [], messageActions: { recallMessageIds: [], quotes: [] }, profileUpdate: null } satisfies RoleplayReplyResult);
     }
   }
   throw new Error('角色回复模型没有返回内容。');
@@ -785,7 +911,7 @@ export async function generateVoomPost(context: PromptContext, settings?: AppSet
 
   await new Promise((resolve) => window.setTimeout(resolve, 500));
 
-  const { content, imageDescription, likes, comments } = parseVoomMomentPayload(apiReply, context);
+  const { content, contentTranslation, imageDescription, likes, comments } = parseVoomMomentPayload(apiReply, context);
   const imagePrompt = buildVoomImagePrompt(context, content, imageDescription);
   const imageProvider = getPreferredVoomImageProvider(settings);
   let imageResult: ImageGenerationResult | null = null;
@@ -828,6 +954,7 @@ export async function generateVoomPost(context: PromptContext, settings?: AppSet
     authorName: context.character.nickname,
     authorAvatar: context.character.avatar,
     content,
+    contentTranslation,
     image: imageResult?.imageUrl,
     imageDescription,
     imageProvider: imageResult?.provider ?? 'mock',
@@ -836,6 +963,7 @@ export async function generateVoomPost(context: PromptContext, settings?: AppSet
       id: createId('comment'),
       authorName: comment.authorName,
       content: comment.content,
+      contentTranslation: comment.contentTranslation,
       parentId: comment.parentId || undefined
     }))
   };
@@ -866,7 +994,7 @@ function normalizeUserVoomComments(input: unknown, targetCharacters: CharacterPr
     const character = characterAliases.get(requestedAuthorKey) ?? targetCharacters[comments.length % targetCharacters.length];
     if (!character) continue;
 
-    const contentTranslation = String(record.contentTranslation ?? record.translation ?? record.translationZh ?? record.chineseTranslation ?? '').trim();
+    const contentTranslation = normalizeTranslationText(record.contentTranslation ?? record.translation ?? record.translationZh ?? record.chineseTranslation);
     comments.push({
       authorName: getCharacterVoomAuthorName(character),
       authorId: character.id,
@@ -907,10 +1035,10 @@ export async function generateUserVoomComments(input: {
     `输出格式：
 {
   "comments": [
-    { "authorId": "从可评论角色 id 中选择", "content": "评论内容", "contentTranslation": "如原文不是中文则给中文翻译，可留空" }
+    { "authorId": "从可评论角色 id 中选择", "content": "评论内容", "contentTranslation": "如 content 不是自然标准普通话，则给普通话译文；否则留空" }
   ]
 }`,
-    '要求：1. 输出 0-6 条；2. authorId 必须来自可评论角色；3. 不要代替用户本人评论；4. 评论要短、自然、有社交软件感；5. 不要使用“NPC”“朋友A”“路人”这类占位名。'
+    '要求：1. 输出 0-6 条；2. authorId 必须来自可评论角色；3. 不要代替用户本人评论；4. 评论要短、自然、有社交软件感；5. 不要使用“NPC”“朋友A”“路人”这类占位名；6. contentTranslation 规则：除了自然标准普通话以外都要翻译成自然现代简体普通话，包括外语、粤语、方言、繁体中文、文言/古风表达、网络混写等；不要加“翻译：”前缀。'
   ].filter(Boolean).join('\n\n');
 
   const apiReply = await callTextApi(input.settings, prompt, input.modelOverride);
@@ -950,11 +1078,11 @@ export async function generateVoomCommentReplies(input: {
     `输出格式：
 {
   "replies": [
-    { "id": "r1", "authorName": "${fallbackAuthorName}", "content": "回复内容", "parentId": "被回复评论ID，可留空" },
-    { "id": "r2", "authorName": "NPC网名", "content": "自然评论或回复", "parentId": "已有评论ID或本次前面输出的id，可留空" }
+    { "id": "r1", "authorName": "${fallbackAuthorName}", "content": "回复内容", "contentTranslation": "如 content 不是自然标准普通话，则给普通话译文；否则留空", "parentId": "被回复评论ID，可留空" },
+    { "id": "r2", "authorName": "NPC网名", "content": "自然评论或回复", "contentTranslation": "如 content 不是自然标准普通话，则给普通话译文；否则留空", "parentId": "已有评论ID或本次前面输出的id，可留空" }
   ]
 }`,
-    '要求：1. 输出 0-6 条；2. authorName 可以是角色昵称，也可以是角色社交圈里真实感的 NPC 网名；3. 角色可以回复用户或其他人的评论，NPC 也可以发新评论、回复角色或互相回复；4. parentId 留空表示新评论，填写已有评论 ID 或本次前面输出的 id 表示回复；5. 不要代替用户发言，不要使用“NPC”“路人”“朋友A”这类占位名；6. 内容像真实社交软件评论区，短、自然、有上下文，不要解释设定。'
+    '要求：1. 输出 0-6 条；2. authorName 可以是角色昵称，也可以是角色社交圈里真实感的 NPC 网名；3. 角色可以回复用户或其他人的评论，NPC 也可以发新评论、回复角色或互相回复；4. parentId 留空表示新评论，填写已有评论 ID 或本次前面输出的 id 表示回复；5. 不要代替用户发言，不要使用“NPC”“路人”“朋友A”这类占位名；6. 内容像真实社交软件评论区，短、自然、有上下文，不要解释设定；7. contentTranslation 规则：除了自然标准普通话以外都要翻译成自然现代简体普通话，包括外语、粤语、方言、繁体中文、文言/古风表达、网络混写等；不要加“翻译：”前缀。'
   ].join('\n\n');
 
   const apiReply = await callTextApi(input.settings, prompt, input.modelOverride);
@@ -995,9 +1123,8 @@ export async function generateConversationSummary(input: {
   return apiReply || input.messages.slice(0, 1400);
 }
 
-export function shouldAutoGenerateMoment(frequency: 'low' | 'medium' | 'high') {
-  const chance = { low: 0.12, medium: 0.25, high: 0.42 }[frequency];
-  return Math.random() < chance;
+export function shouldAutoGenerateMoment(frequency: VoomFrequency) {
+  return Math.random() < getVoomFrequencyChance(frequency);
 }
 
 export async function generateEmbeddingVector(input: {

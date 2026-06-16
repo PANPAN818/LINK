@@ -1,15 +1,10 @@
-const nonChineseTextPattern = /[A-Za-z\u00c0-\u024f\u0370-\u03ff\u0400-\u04ff\u3040-\u30ff\u31f0-\u31ff\uac00-\ud7af\u0e00-\u0e7f]/;
-
 export function normalizeTranslationText(value: unknown) {
   return String(value ?? '')
     .trim()
+    .replace(/^(?:普通话翻译|中文翻译|简体中文翻译|简中翻译|翻译|译文|释义)\s*[:：]\s*/i, '')
     .replace(/^[（(]\s*/, '')
     .replace(/\s*[）)]$/, '')
     .trim();
-}
-
-export function hasNonChineseText(value: string) {
-  return nonChineseTextPattern.test(value);
 }
 
 export function shouldShowChineseTranslation(content: string, translation?: string) {
@@ -18,7 +13,6 @@ export function shouldShowChineseTranslation(content: string, translation?: stri
   return Boolean(
     normalizedContent
     && normalizedTranslation
-    && hasNonChineseText(normalizedContent)
     && normalizedTranslation !== normalizedContent
   );
 }

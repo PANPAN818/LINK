@@ -1,6 +1,7 @@
 import type { ChatMemorySettings, ChatMessage, ChatMode, ConversationMemoryRecord, ConversationSettings, SummaryPerspective } from '@/types/domain';
 import { createId } from './id';
 import { defaultTimeAwarenessSettings, normalizeTimeAwarenessSettings } from './timeAwareness';
+import { normalizeVoomFrequency } from './voom';
 
 export const summaryPerspectiveOptions: Array<{
   value: SummaryPerspective;
@@ -23,8 +24,8 @@ export const defaultChatMemorySettings: ChatMemorySettings = {
   summarizeEvery: 100,
   summaryModel: '',
   summaryPerspective: 'omniscient-third',
-  summaryPrompt: '请把下面聊天楼层总结成可供角色扮演继续读取的记忆手册。保留人物关系变化、承诺、偏好、冲突、时间顺序和未解决事项；不要评价用户；用中文输出。',
-  mergeSummaryPrompt: '请把下面多段已总结记忆合并成一份更高层级的大总结。保留稳定事实、长期关系变化、重要承诺、偏好、冲突和未解决事项；去除重复内容；用中文输出。',
+  summaryPrompt: '请把下面聊天楼层总结成可供角色扮演继续读取的记忆手册。保留人物关系变化、承诺、偏好、冲突、时间顺序和未解决事项；不要评价用户；用中文输出，直接开始输出内容。',
+  mergeSummaryPrompt: '请把下面多段已总结记忆合并成一份更高层级的大总结。保留稳定事实、长期关系变化、重要承诺、偏好、冲突和未解决事项；去除重复内容；用中文输出，直接开始输出内容。',
   vectorMemoryEnabled: true,
   hideSummarizedMessages: true
 };
@@ -82,8 +83,11 @@ export const defaultConversationSettings: Omit<ConversationSettings, 'conversati
     characterBubbleColor: '#ffffff',
     characterTextColor: '#111111',
     showMessageTime: true,
-    showReadStatus: false
+    showReadStatus: true,
+    showOnlyFirstAvatarInReply: true,
+    hideVoomNarration: false
   },
+  narrationModeEnabled: false,
   autoGenerateVoom: true,
   voomFrequency: 'medium',
   stickerVisionEnabled: true,
@@ -104,9 +108,7 @@ export function normalizeConversationSettings(settings: Partial<ConversationSett
     activeBackgroundImage,
     ...(Array.isArray(appearance.backgroundImages) ? appearance.backgroundImages : [])
   ].map((image) => String(image ?? '').trim()).filter(Boolean);
-  const voomFrequency = settings?.voomFrequency === 'low' || settings?.voomFrequency === 'high' || settings?.voomFrequency === 'medium'
-    ? settings.voomFrequency
-    : defaultConversationSettings.voomFrequency;
+  const voomFrequency = normalizeVoomFrequency(settings?.voomFrequency, defaultConversationSettings.voomFrequency);
 
   return {
     conversationId,
@@ -135,8 +137,11 @@ export function normalizeConversationSettings(settings: Partial<ConversationSett
       characterBubbleColor: String(appearance.characterBubbleColor ?? defaultConversationSettings.appearance.characterBubbleColor).trim() || defaultConversationSettings.appearance.characterBubbleColor,
       characterTextColor: String(appearance.characterTextColor ?? defaultConversationSettings.appearance.characterTextColor).trim() || defaultConversationSettings.appearance.characterTextColor,
       showMessageTime: appearance.showMessageTime ?? defaultConversationSettings.appearance.showMessageTime,
-      showReadStatus: appearance.showReadStatus ?? defaultConversationSettings.appearance.showReadStatus
+      showReadStatus: appearance.showReadStatus ?? defaultConversationSettings.appearance.showReadStatus,
+      showOnlyFirstAvatarInReply: appearance.showOnlyFirstAvatarInReply ?? defaultConversationSettings.appearance.showOnlyFirstAvatarInReply,
+      hideVoomNarration: appearance.hideVoomNarration ?? defaultConversationSettings.appearance.hideVoomNarration
     },
+    narrationModeEnabled: settings?.narrationModeEnabled ?? defaultConversationSettings.narrationModeEnabled,
     autoGenerateVoom: settings?.autoGenerateVoom ?? defaultConversationSettings.autoGenerateVoom,
     voomFrequency,
     stickerVisionEnabled: settings?.stickerVisionEnabled ?? defaultConversationSettings.stickerVisionEnabled,

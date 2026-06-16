@@ -107,7 +107,6 @@
           <label class="field perspective-select-field">
             <span>记忆叙述方式</span>
             <div class="perspective-select-shell">
-              <strong>{{ selectedSummaryPerspective?.target }}</strong>
               <select v-model="draft.memory.summaryPerspective" @change="saveDraft">
                 <option v-for="option in summaryPerspectiveOptions" :key="option.value" :value="option.value">
                   {{ option.target }} / {{ option.label }}
@@ -255,6 +254,27 @@
               <strong>显示气泡外时间</strong>
             </div>
           </label>
+          <label class="switch-card wide">
+            <input v-model="draft.appearance.showOnlyFirstAvatarInReply" type="checkbox" @change="saveDraft" />
+            <span class="switch-track"></span>
+            <div>
+              <strong>连续角色消息仅首条头像</strong>
+            </div>
+          </label>
+          <label class="switch-card wide">
+            <input v-model="draft.narrationModeEnabled" type="checkbox" @change="saveDraft" />
+            <span class="switch-track"></span>
+            <div>
+              <strong>旁白模式</strong>
+            </div>
+          </label>
+          <label class="switch-card wide">
+            <input v-model="draft.appearance.hideVoomNarration" type="checkbox" @change="saveDraft" />
+            <span class="switch-track"></span>
+            <div>
+              <strong>隐藏 VOOM 旁白</strong>
+            </div>
+          </label>
         </section>
       </section>
 
@@ -305,6 +325,29 @@
             <textarea v-model="characterDraft.description" @change="saveCharacterDraft"></textarea>
           </label>
         </section>
+        <section class="settings-block local-book-bind" aria-labelledby="profile-local-world-book-title">
+          <header class="section-header local-book-header">
+            <div>
+              <span>Local lore</span>
+              <strong id="profile-local-world-book-title">绑定局部世界书</strong>
+            </div>
+            <span v-if="localWorldBooks.length">{{ characterDraft.localWorldBookIds.length }}/{{ localWorldBooks.length }}</span>
+          </header>
+          <div class="local-book-actions">
+            <button class="secondary-action" type="button" @click="createLocalWorldBook">新增局部世界书</button>
+          </div>
+          <div v-if="localWorldBooks.length" class="local-book-list">
+            <article v-for="book in localWorldBooks" :key="book.id" class="local-book-card" :class="{ selected: characterDraft.localWorldBookIds.includes(book.id) }">
+              <label class="local-book-row">
+                <input :checked="characterDraft.localWorldBookIds.includes(book.id)" type="checkbox" @change="toggleLocalWorldBook(book.id, $event)" />
+                <span class="book-check" aria-hidden="true"></span>
+                <span>{{ book.title }}</span>
+              </label>
+              <button class="local-book-edit" type="button" @click="editLocalWorldBook(book.id)">修改</button>
+            </article>
+          </div>
+          <p v-else class="local-book-empty">暂无局部世界书，可以先新增一本。</p>
+        </section>
       </section>
 
       <section v-else class="panel-section other-panel">
@@ -347,19 +390,16 @@
             </div>
           </header>
           <label class="switch-card wide">
-            <input v-model="draft.autoGenerateVoom" type="checkbox" @change="saveDraft" />
+            <input :checked="draft.autoGenerateVoom" type="checkbox" @change="updateAutoGenerateVoom" />
             <span class="switch-track"></span>
             <div>
               <strong>允许 AI 回复时自动生成 VOOM</strong>
-              <span>这是当前角色独立设置，不再只依赖 settings 的 More 页面。</span>
             </div>
           </label>
           <label class="field frequency-field">
             <span>该角色 VOOM 频率</span>
-            <select v-model="draft.voomFrequency" @change="saveDraft">
-              <option value="low">低</option>
-              <option value="medium">中</option>
-              <option value="high">高</option>
+            <select :value="draft.voomFrequency" @change="updateVoomFrequency">
+              <option v-for="option in voomFrequencyOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
             </select>
           </label>
         </section>
@@ -375,7 +415,6 @@
             <span class="switch-track"></span>
             <div>
               <strong>开启时间感知</strong>
-              <span>向角色提供当前设备/浏览器的本地日期、时间和时区。</span>
             </div>
           </label>
           <section v-if="draft.timeAwareness.enabled" class="time-awareness-note">
@@ -391,11 +430,13 @@
 <script setup lang="ts">
 import { ChevronDown } from 'lucide-vue-next';
 import { computed, reactive, ref, watch } from 'vue';
+import { useRouter } from 'vue-router';
 import AvatarCropperModal from '@/components/image/AvatarCropperModal.vue';
 import { useAppStore } from '@/stores/appStore';
 import type { CharacterProfile, ConversationMemoryRecord, ConversationSettings } from '@/types/domain';
 import { readImageFileFromInput } from '@/utils/imageFile';
 import { estimateTokenCount, normalizeConversationSettings, summaryPerspectiveOptions } from '@/utils/memory';
+import { normalizeVoomFrequency, voomFrequencyOptions } from '@/utils/voom';
 
 const props = defineProps<{
   conversationId: string;
@@ -404,6 +445,7 @@ const props = defineProps<{
 }>();
 
 const store = useAppStore();
+const router = useRouter();
 export type PanelTab = 'memory' | 'beauty' | 'profile' | 'other';
 
 const activeTab = computed(() => props.activeTab);
@@ -442,6 +484,7 @@ const mergedMemories = computed(() => memories.value.filter((memory) => memory.i
 const characterDraftNickname = computed(() => characterDraft.nickname || 'new.friend');
 const selectedSummaryPerspective = computed(() => summaryPerspectiveOptions.find((option) => option.value === draft.memory.summaryPerspective) ?? summaryPerspectiveOptions[0]);
 const backgroundImageOptions = computed(() => draft.appearance.backgroundImages);
+const localWorldBooks = computed(() => store.worldBooks.filter((book) => book.scope === 'local'));
 const bubblePreviewStyle = computed(() => ({
   backgroundColor: draft.appearance.backgroundColor,
   backgroundImage: draft.appearance.backgroundImage ? `url(${draft.appearance.backgroundImage})` : 'none'
@@ -512,6 +555,16 @@ watch(
 
 function saveDraft() {
   void store.saveConversationSettings({ ...draft, conversationId: props.conversationId });
+}
+
+function updateAutoGenerateVoom(event: Event) {
+  draft.autoGenerateVoom = (event.target as HTMLInputElement).checked;
+  saveDraft();
+}
+
+function updateVoomFrequency(event: Event) {
+  draft.voomFrequency = normalizeVoomFrequency((event.target as HTMLSelectElement).value, draft.voomFrequency);
+  saveDraft();
 }
 
 function normalizeSelectedStickerGroupIds(groupIds: string[]) {
@@ -652,6 +705,23 @@ function selectedModelMeta(value: string) {
 
 function saveCharacterDraft() {
   void store.saveCharacter({ ...characterDraft, localWorldBookIds: [...characterDraft.localWorldBookIds] });
+}
+
+function toggleLocalWorldBook(bookId: string, event: Event) {
+  const checked = event.target instanceof HTMLInputElement ? event.target.checked : false;
+  const ids = new Set(characterDraft.localWorldBookIds);
+  if (checked) ids.add(bookId);
+  else ids.delete(bookId);
+  characterDraft.localWorldBookIds = localWorldBooks.value.map((book) => book.id).filter((id) => ids.has(id));
+  saveCharacterDraft();
+}
+
+function createLocalWorldBook() {
+  void router.push({ name: 'world-book-new', query: { scope: 'local' } });
+}
+
+function editLocalWorldBook(bookId: string) {
+  void router.push({ name: 'world-book-edit', params: { id: bookId } });
 }
 
 function readFileAsDataUrl(file: File) {
@@ -2111,10 +2181,130 @@ function applyEditedAvatar(value: string) {
   min-height: 86px;
 }
 
+.local-book-bind {
+  gap: 10px;
+}
+
+.local-book-header {
+  align-items: center;
+}
+
+.local-book-header > span,
+.local-book-empty {
+  color: #69736f;
+  font-size: 11px;
+  font-weight: 850;
+}
+
+.local-book-actions {
+  display: grid;
+}
+
+.local-book-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px;
+}
+
+.local-book-card {
+  display: grid;
+  gap: 8px;
+  padding: 9px;
+  border: 1px solid rgba(42, 75, 60, 0.08);
+  border-radius: 16px;
+  background: rgba(250, 252, 250, 0.96);
+  box-shadow: 0 8px 18px rgba(30, 55, 45, 0.04), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  transition: border-color 0.18s ease, background 0.18s ease, box-shadow 0.18s ease;
+}
+
+.local-book-card.selected {
+  border-color: rgba(6, 199, 85, 0.24);
+  background: linear-gradient(135deg, rgba(237, 252, 242, 0.98), rgba(255, 246, 249, 0.96));
+  box-shadow: 0 10px 24px rgba(31, 120, 74, 0.09), inset 0 1px 0 rgba(255, 255, 255, 0.92);
+}
+
+.local-book-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 36px;
+  color: #33393d;
+  font-size: 12px;
+  font-weight: 850;
+  touch-action: manipulation;
+}
+
+.local-book-card.selected .local-book-row {
+  color: #1f5f3d;
+}
+
+.local-book-row input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.book-check {
+  position: relative;
+  width: 22px;
+  height: 22px;
+  flex: 0 0 22px;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: inset 0 0 0 1.5px rgba(104, 119, 111, 0.35);
+}
+
+.book-check::after {
+  content: '';
+  position: absolute;
+  left: 7px;
+  top: 4px;
+  width: 6px;
+  height: 10px;
+  border: solid #ffffff;
+  border-width: 0 2px 2px 0;
+  opacity: 0;
+  transform: rotate(45deg) scale(0.7);
+  transition: opacity 0.18s ease, transform 0.18s ease;
+}
+
+.local-book-card.selected .book-check {
+  background: var(--link-green);
+  box-shadow: inset 0 0 0 1px rgba(6, 199, 85, 0.7), 0 6px 14px rgba(6, 199, 85, 0.22);
+}
+
+.local-book-card.selected .book-check::after {
+  opacity: 1;
+  transform: rotate(45deg) scale(1);
+}
+
+.local-book-row span:last-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.local-book-edit {
+  min-height: 32px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.78);
+  color: #31373a;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.local-book-empty {
+  margin: 0;
+  line-height: 1.5;
+}
+
 @media (max-width: 360px) {
   .memory-toggle-grid,
   .range-grid,
   .color-grid,
+  .local-book-list,
   .profile-avatar-stack {
     grid-template-columns: 1fr;
   }
@@ -2122,5 +2312,862 @@ function applyEditedAvatar(value: string) {
   .appearance-tools-grid {
     grid-template-columns: 1fr 1fr;
   }
+}
+
+.control-panel {
+  gap: 14px;
+  min-width: 0;
+  color: #151719;
+  font-size: 12px;
+}
+
+.control-panel *,
+.control-panel *::before,
+.control-panel *::after {
+  min-width: 0;
+}
+
+.panel-section {
+  gap: 14px;
+  min-width: 0;
+}
+
+.settings-block,
+.memory-hero,
+.profile-preview,
+.manual-summary-card,
+.memory-records {
+  border: 1px solid rgba(17, 17, 17, 0.04);
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.84);
+  box-shadow: 0 14px 36px rgba(21, 30, 26, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.92);
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+}
+
+.settings-block,
+.manual-summary-card,
+.memory-records {
+  display: grid;
+  gap: 14px;
+  padding: 14px;
+}
+
+.section-header {
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.section-header div {
+  gap: 4px;
+}
+
+.section-header span,
+.memory-card-head span {
+  color: #8a8f94;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.section-header strong {
+  color: #151719;
+  font-size: 17px;
+  font-weight: 900;
+  line-height: 1.15;
+}
+
+.memory-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 12px;
+  min-height: 118px;
+  padding: 18px;
+  background:
+    radial-gradient(circle at 94% 6%, rgba(6, 199, 85, 0.14), transparent 34%),
+    linear-gradient(145deg, rgba(255, 255, 255, 0.98), rgba(247, 249, 248, 0.92));
+}
+
+.memory-hero div {
+  gap: 6px;
+}
+
+.memory-hero span,
+.profile-preview span,
+.upload-card span,
+.empty-note,
+.switch-card span:not(.switch-track) {
+  color: #747b80;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.memory-hero span,
+.profile-preview span {
+  font-weight: 800;
+}
+
+.memory-hero strong {
+  color: #0f1111;
+  font-size: 30px;
+  font-weight: 900;
+  letter-spacing: 0;
+  line-height: 1;
+}
+
+.memory-hero p {
+  max-width: 100%;
+  margin: 0;
+  color: #747b80;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.field,
+.profile-avatar-stack {
+  display: grid;
+  gap: 8px;
+}
+
+.field > span {
+  max-width: 100%;
+  overflow: hidden;
+  color: #4c5357;
+  font-size: 11px;
+  font-weight: 850;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.field input,
+.field textarea,
+.field select,
+.model-select-shell,
+.perspective-select-shell,
+.sticker-bind-trigger,
+.switch-card,
+.compact-field,
+.upload-card,
+.time-awareness-note,
+.empty-note,
+.merge-picker,
+.memory-card,
+.background-url-card,
+.background-upload-card,
+.background-color-card,
+.background-thumb-card,
+.bubble-preview {
+  border: 1px solid rgba(42, 75, 60, 0.08);
+  border-radius: 16px;
+  background: rgba(250, 252, 250, 0.96);
+  box-shadow: 0 8px 18px rgba(30, 55, 45, 0.04), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+}
+
+.field input,
+.field textarea,
+.field select {
+  width: 100%;
+  min-height: 44px;
+  padding: 11px 12px;
+  color: #151719;
+  font-size: 12px;
+  font-weight: 750;
+  line-height: 1.4;
+}
+
+.field textarea {
+  min-height: 132px;
+  max-width: 100%;
+  resize: vertical;
+}
+
+.field input::placeholder,
+.field textarea::placeholder {
+  color: #a3a9ad;
+}
+
+.field:focus-within > span {
+  color: #17191b;
+}
+
+.field:focus-within input,
+.field:focus-within textarea,
+.field:focus-within select,
+.model-select-shell:focus-within,
+.perspective-select-shell:focus-within {
+  box-shadow: inset 0 0 0 1px rgba(6, 199, 85, 0.35), 0 0 0 3px rgba(6, 199, 85, 0.1);
+}
+
+.memory-toggle-grid,
+.range-grid,
+.color-grid,
+.manual-summary-actions,
+.merge-actions,
+.memory-actions,
+.background-thumb-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px;
+}
+
+.switch-card,
+.compact-field {
+  min-height: 66px;
+  padding: 12px;
+}
+
+.switch-card {
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  touch-action: manipulation;
+}
+
+.switch-card div {
+  gap: 3px;
+}
+
+.switch-card strong,
+.sticker-bind-trigger strong,
+.upload-card strong {
+  max-width: 100%;
+  overflow: hidden;
+  color: #151719;
+  font-size: 14px;
+  font-weight: 900;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.switch-track {
+  flex: 0 0 auto;
+  width: 46px;
+  height: 28px;
+  background: #171717;
+  box-shadow: inset 0 0 0 1px rgba(17, 17, 17, 0.08);
+}
+
+.switch-track::after {
+  top: 4px;
+  left: 4px;
+  width: 20px;
+  height: 20px;
+  box-shadow: 0 3px 8px rgba(42, 35, 31, 0.18);
+}
+
+.switch-card input:not(:checked) + .switch-track {
+  background: #dedad7;
+}
+
+.switch-card input:checked + .switch-track::after {
+  transform: translateX(18px);
+}
+
+.compact-switch {
+  min-height: 42px;
+  padding: 9px 10px;
+  border-radius: 14px;
+}
+
+.compact-switch .switch-track {
+  width: 38px;
+  height: 22px;
+}
+
+.compact-switch .switch-track::after {
+  top: 3px;
+  left: 3px;
+  width: 16px;
+  height: 16px;
+}
+
+.compact-switch input:checked + .switch-track::after {
+  transform: translateX(16px);
+}
+
+.compact-field {
+  justify-content: center;
+}
+
+.compact-field input {
+  min-height: 36px;
+  padding: 8px 10px;
+  border-radius: 13px;
+}
+
+.manual-summary-button,
+.summary-submit,
+.setting-action-button,
+.secondary-action,
+.danger-action,
+.background-thumb-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  min-height: 42px;
+  padding: 0 12px;
+  overflow: hidden;
+  border-radius: 14px;
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0;
+  line-height: 1.15;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  touch-action: manipulation;
+}
+
+.manual-summary-button,
+.summary-submit,
+.primary-setting-action {
+  background: #171717;
+  color: #ffffff;
+  box-shadow: 0 12px 24px rgba(17, 17, 17, 0.16);
+}
+
+.secondary-action,
+.background-thumb-actions button:first-child {
+  background: #edf1ef;
+  color: #171717;
+  box-shadow: inset 0 0 0 1px rgba(23, 23, 23, 0.04);
+}
+
+.danger-action,
+.background-thumb-actions button:last-child {
+  background: rgba(239, 68, 90, 0.1);
+  color: #d73850;
+  box-shadow: inset 0 0 0 1px rgba(239, 68, 90, 0.08);
+}
+
+.manual-summary-button:disabled,
+.summary-submit:disabled,
+.secondary-action:disabled,
+.danger-action:disabled,
+.background-thumb-actions button:disabled {
+  transform: none;
+  background: #ebe8e5;
+  color: #aaa5a0;
+  box-shadow: none;
+  cursor: default;
+}
+
+.manual-summary-card p,
+.time-awareness-note,
+.empty-note,
+.perspective-select-field > small {
+  margin: 0;
+  color: #747b80;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.55;
+}
+
+.model-select-shell,
+.perspective-select-shell {
+  display: grid;
+  align-items: center;
+  gap: 8px;
+  min-height: 50px;
+  padding: 6px;
+}
+
+.model-select-shell {
+  grid-template-columns: auto auto minmax(0, 1fr);
+}
+
+.model-select-shell select:not(.with-provider) {
+  grid-column: 1 / -1;
+}
+
+.model-select-shell img {
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  border-radius: 10px;
+  object-fit: cover;
+}
+
+.model-select-vendor {
+  max-width: 76px;
+  overflow: hidden;
+  color: #5f6662;
+  font-size: 11px;
+  font-weight: 900;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-select-field select,
+.perspective-select-shell select,
+.frequency-field select {
+  min-width: 0;
+  overflow: hidden;
+  background: transparent;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.perspective-select-shell {
+  grid-template-columns: auto minmax(0, 1fr);
+}
+
+.perspective-select-shell strong {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 54px;
+  min-height: 36px;
+  padding: 0 10px;
+  overflow: hidden;
+  border-radius: 13px;
+  background: #171717;
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 900;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.record-header em,
+.memory-card-head em {
+  flex: 0 0 auto;
+  font-style: normal;
+  white-space: nowrap;
+}
+
+.record-header em {
+  color: #747b80;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.merge-picker {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+}
+
+.memory-card {
+  position: relative;
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  background: #fffdf9;
+}
+
+.memory-card-head {
+  align-items: flex-start;
+}
+
+.memory-card-head div {
+  display: grid;
+  gap: 3px;
+}
+
+.memory-card-head strong {
+  color: #221f1c;
+  font-size: 15px;
+  font-weight: 900;
+  line-height: 1.2;
+}
+
+.memory-card-head em {
+  max-width: 44%;
+  padding: 4px 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #eef8f1;
+  color: #1f6b3a;
+  font-size: 10px;
+  font-weight: 900;
+  text-overflow: ellipsis;
+}
+
+.memory-card textarea {
+  min-height: 156px;
+  padding: 13px;
+  border: 1px solid rgba(84, 74, 62, 0.08);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.84);
+  color: #2a2723;
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.memory-empty-note,
+.compact-empty-note {
+  display: grid;
+  min-height: 92px;
+  place-items: center;
+  text-align: center;
+}
+
+.background-manager,
+.background-library {
+  display: grid;
+  gap: 10px;
+}
+
+.background-url-card,
+.background-upload-card,
+.background-color-card,
+.profile-avatar-stack .field,
+.profile-avatar-stack .upload-card {
+  min-height: 84px;
+  padding: 12px;
+}
+
+.inline-input-action {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.setting-action-button {
+  min-width: 64px;
+}
+
+.background-color-card input[type='color'],
+.color-card input[type='color'],
+.appearance-color-field input[type='color'] {
+  width: 100%;
+  min-height: 40px;
+  padding: 4px;
+  border-radius: 13px;
+  background: #ffffff;
+}
+
+.background-thumb-card {
+  display: grid;
+  gap: 8px;
+  padding: 9px;
+}
+
+.background-thumb-card.active {
+  border-color: rgba(6, 199, 85, 0.32);
+  background: linear-gradient(135deg, rgba(237, 252, 242, 0.98), rgba(255, 246, 249, 0.96));
+  box-shadow: 0 10px 24px rgba(31, 120, 74, 0.09), inset 0 1px 0 rgba(255, 255, 255, 0.92);
+}
+
+.background-thumb {
+  min-height: 118px;
+  border-radius: 14px;
+}
+
+.background-thumb span {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bubble-preview {
+  display: grid;
+  gap: 10px;
+  min-height: 154px;
+  padding: 14px;
+  background-position: center;
+  background-size: cover;
+}
+
+.preview-row {
+  min-width: 0;
+}
+
+.preview-bubble {
+  max-width: min(76%, 280px);
+  overflow-wrap: anywhere;
+}
+
+.profile-preview {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 14px;
+  align-items: center;
+  padding: 16px;
+}
+
+.profile-preview .avatar {
+  width: 62px;
+  height: 62px;
+  border: 3px solid #ffffff;
+  border-radius: 20px;
+  object-fit: cover;
+  box-shadow: 0 10px 24px rgba(18, 25, 22, 0.12);
+}
+
+.profile-preview div {
+  display: grid;
+  gap: 4px;
+}
+
+.profile-preview strong {
+  overflow: hidden;
+  color: #151719;
+  font-size: 17px;
+  font-weight: 900;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.profile-preview span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.upload-card {
+  position: relative;
+  display: grid;
+  align-content: center;
+  gap: 5px;
+  cursor: pointer;
+}
+
+.upload-card input[type='file'] {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.sticker-bind-trigger {
+  grid-template-columns: minmax(0, 1fr) auto;
+  min-height: 58px;
+  padding: 12px;
+  overflow: hidden;
+  text-align: left;
+  white-space: nowrap;
+  touch-action: manipulation;
+}
+
+.sticker-bind-trigger > span {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 3px;
+}
+
+.sticker-bind-trigger small,
+.sticker-group-name {
+  overflow: hidden;
+  color: #747b80;
+  font-size: 11px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sticker-bind-trigger svg {
+  flex: 0 0 auto;
+}
+
+.sticker-group-popover {
+  display: grid;
+  gap: 7px;
+  padding: 8px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.86);
+  box-shadow: inset 0 0 0 1px rgba(20, 24, 22, 0.05);
+}
+
+.sticker-group-option,
+.merge-row {
+  grid-template-columns: auto minmax(0, 1fr);
+}
+
+.time-awareness-note {
+  padding: 12px;
+}
+
+@media (min-width: 520px) {
+  .background-library {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 380px) {
+  .settings-block,
+  .manual-summary-card,
+  .memory-records {
+    padding: 12px;
+    border-radius: 22px;
+  }
+
+  .memory-hero {
+    padding: 16px;
+  }
+
+  .switch-card,
+  .compact-field {
+    min-height: 62px;
+    padding: 10px;
+  }
+
+  .switch-card {
+    gap: 8px;
+  }
+
+  .switch-card strong,
+  .sticker-bind-trigger strong,
+  .upload-card strong {
+    font-size: 13px;
+  }
+
+  .manual-summary-button,
+  .summary-submit,
+  .setting-action-button,
+  .secondary-action,
+  .danger-action,
+  .background-thumb-actions button {
+    padding-inline: 10px;
+  }
+}
+
+@media (max-width: 340px) {
+  .memory-hero,
+  .perspective-select-shell,
+  .inline-input-action,
+  .profile-preview {
+    grid-template-columns: 1fr;
+  }
+
+  .manual-summary-button,
+  .setting-action-button {
+    width: 100%;
+  }
+
+  .memory-toggle-grid,
+  .range-grid,
+  .color-grid,
+  .manual-summary-actions,
+  .merge-actions,
+  .memory-actions,
+  .background-thumb-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .memory-card-head {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .memory-card-head em {
+    max-width: 100%;
+    width: fit-content;
+  }
+}
+
+.settings-block,
+.memory-hero,
+.profile-preview,
+.manual-summary-card,
+.memory-records,
+.switch-card,
+.compact-field,
+.upload-card,
+.time-awareness-note,
+.empty-note,
+.merge-picker,
+.memory-card,
+.background-url-card,
+.background-upload-card,
+.background-color-card,
+.background-thumb-card,
+.bubble-preview,
+.sticker-bind-trigger,
+.sticker-group-popover {
+  border-color: transparent;
+}
+
+.switch-card,
+.compact-field,
+.upload-card,
+.time-awareness-note,
+.empty-note,
+.merge-picker,
+.background-url-card,
+.background-upload-card,
+.background-color-card,
+.background-thumb-card,
+.sticker-bind-trigger,
+.sticker-group-popover {
+  background: rgba(248, 251, 249, 0.9);
+  box-shadow: 0 10px 22px rgba(28, 55, 44, 0.035), inset 0 1px 0 rgba(255, 255, 255, 0.92);
+}
+
+.model-select-shell,
+.perspective-select-shell {
+  border-color: transparent;
+  background: rgba(255, 255, 255, 0.95);
+}
+
+.perspective-select-shell {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.manual-summary-button,
+.summary-submit,
+.primary-setting-action {
+  border: 1px solid rgba(6, 199, 85, 0.18);
+  background: linear-gradient(135deg, rgba(224, 249, 233, 0.98), rgba(255, 242, 247, 0.96));
+  color: #16643e;
+  box-shadow: 0 14px 28px rgba(31, 120, 74, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+}
+
+.secondary-action,
+.background-thumb-actions button:first-child {
+  border: 0;
+  background: #edf8f1;
+  color: #1f6b3a;
+  box-shadow: inset 0 0 0 1px rgba(6, 199, 85, 0.08);
+}
+
+.danger-action,
+.background-thumb-actions button:last-child {
+  border: 0;
+  background: rgba(239, 68, 90, 0.09);
+  color: #d73850;
+  box-shadow: inset 0 0 0 1px rgba(239, 68, 90, 0.06);
+}
+
+.switch-track {
+  background: #dceee4;
+  box-shadow: inset 0 0 0 1px rgba(31, 107, 58, 0.08);
+}
+
+.switch-card input:not(:checked) + .switch-track {
+  background: #dfe8e4;
+}
+
+.switch-card input:checked + .switch-track {
+  background: linear-gradient(135deg, #62d98d, #06c755);
+  box-shadow: 0 8px 16px rgba(6, 199, 85, 0.18), inset 0 0 0 1px rgba(6, 199, 85, 0.18);
+}
+
+.switch-track::after {
+  background: #ffffff;
+  box-shadow: 0 3px 8px rgba(31, 107, 58, 0.18);
+}
+
+.manual-summary-button:disabled,
+.summary-submit:disabled,
+.secondary-action:disabled,
+.danger-action:disabled,
+.background-thumb-actions button:disabled {
+  background: rgba(239, 242, 240, 0.86);
+  color: #a0aaa5;
+  box-shadow: none;
 }
 </style>

@@ -62,6 +62,13 @@ export interface UserProfile {
   profile: VisualProfile;
 }
 
+export interface CharacterMindState {
+  lines: string[];
+  updatedAt: number;
+  readAt: number;
+  sourceConversationId?: string;
+}
+
 export interface CharacterProfile {
   id: string;
   nickname: string;
@@ -74,9 +81,12 @@ export interface CharacterProfile {
   subtitle: string;
   lastSeen: string;
   localWorldBookIds: string[];
-  voomFrequency: 'low' | 'medium' | 'high';
+  voomFrequency: VoomFrequency;
   profile?: VisualProfile;
+  mindState?: CharacterMindState;
 }
+
+export type VoomFrequency = 'very-low' | 'low' | 'medium' | 'high' | 'very-high' | 'always';
 
 export type ChatModelScope = 'online' | 'offline' | 'voom';
 
@@ -96,6 +106,8 @@ export interface ChatAppearanceSettings {
   characterTextColor: string;
   showMessageTime: boolean;
   showReadStatus: boolean;
+  showOnlyFirstAvatarInReply: boolean;
+  hideVoomNarration: boolean;
 }
 
 export type SummaryPerspective =
@@ -128,8 +140,9 @@ export interface ConversationSettings {
   memory: ChatMemorySettings;
   modelOverrides: ChatModelOverrides;
   appearance: ChatAppearanceSettings;
+  narrationModeEnabled: boolean;
   autoGenerateVoom: boolean;
-  voomFrequency: 'low' | 'medium' | 'high';
+  voomFrequency: VoomFrequency;
   stickerVisionEnabled: boolean;
   characterStickerGroupIds: string[];
   timeAwareness: ConversationTimeAwarenessSettings;
@@ -396,6 +409,7 @@ export interface PromptContext {
   conversationSummary: string;
   memorySummary?: string;
   stickerVisionEnabled?: boolean;
+  narrationModeEnabled?: boolean;
   availableStickers?: ChatStickerAttachment[];
   timeAwareness?: ConversationTimeAwarenessSettings;
 }

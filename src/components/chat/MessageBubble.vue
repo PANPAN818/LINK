@@ -1,9 +1,9 @@
 <template>
-  <article :class="['message-row', message.sender, { selecting: selectionMode, selected }]">
+  <article :class="['message-row', message.sender, { selecting: selectionMode, selected, 'hide-avatar': hideAvatar, 'profile-alert': showProfileAlert }]">
     <button v-if="selectionMode" class="selection-dot" type="button" :aria-pressed="selected" @click.stop="emit('toggle-select')">
       <span></span>
     </button>
-    <button v-if="message.sender === 'char'" class="avatar-button" type="button" @click.stop="selectionMode ? emit('toggle-select') : emit('open-profile')">
+    <button v-if="message.sender === 'char'" class="avatar-button" type="button" :aria-hidden="hideAvatar" :tabindex="hideAvatar ? -1 : 0" @click.stop="handleAvatarClick">
       <img class="avatar mini" :src="character.avatar" :alt="characterDisplayName" />
     </button>
     <div class="bubble-wrap">
@@ -57,10 +57,14 @@ const props = withDefaults(defineProps<{
   message: ChatMessage;
   character: CharacterProfile;
   appearance?: ChatAppearanceSettings;
+  hideAvatar?: boolean;
+  profileAlert?: boolean;
   selectionMode?: boolean;
   selected?: boolean;
 }>(), {
   appearance: () => defaultConversationSettings.appearance,
+  hideAvatar: false,
+  profileAlert: false,
   selectionMode: false,
   selected: false
 });
@@ -162,6 +166,7 @@ const showInlineTranslation = computed(() => props.message.sender === 'char'
   && shouldShowChineseTranslation(displayContent.value, displayTranslation.value));
 
 const characterDisplayName = computed(() => getCharacterDisplayName(props.character));
+const showProfileAlert = computed(() => props.profileAlert && props.message.sender === 'char');
 const quoteText = computed(() => props.message.quote?.sticker
   ? props.message.quote.sticker.description
   : props.message.quote?.content ?? '');
@@ -223,6 +228,12 @@ function cancelLongPress() {
   longPressStart = null;
 }
 
+function handleAvatarClick() {
+  if (props.hideAvatar) return;
+  if (props.selectionMode) emit('toggle-select');
+  else emit('open-profile');
+}
+
 function emitLongPress() {
   if (props.selectionMode) return;
   clearLongPressTimer();
@@ -244,7 +255,7 @@ function handleBubbleClick(event: MouseEvent) {
 .message-row {
   position: relative;
   display: flex;
-  gap: 6px;
+  gap: 10px;
   margin: 7px 0;
 }
 
@@ -295,11 +306,48 @@ function handleBubbleClick(event: MouseEvent) {
 }
 
 .avatar-button {
+  position: relative;
+  display: block;
+  flex: 0 0 32px;
   width: 32px;
   height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  line-height: 0;
+}
+
+.message-row.profile-alert .avatar-button::before {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  border-radius: 50%;
+  border: 2px solid rgba(6, 199, 85, 0.76);
+  animation: profile-alert-pulse 1.8s ease-out infinite;
+  pointer-events: none;
+}
+
+@keyframes profile-alert-pulse {
+  0% {
+    opacity: 0.72;
+    transform: scale(0.94);
+  }
+
+  80%,
+  100% {
+    opacity: 0;
+    transform: scale(1.24);
+  }
+}
+
+.message-row.hide-avatar .avatar-button {
+  visibility: hidden;
+  pointer-events: none;
 }
 
 .mini {
+  display: block;
   width: 32px;
   height: 32px;
 }

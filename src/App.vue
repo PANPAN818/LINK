@@ -34,5 +34,7 @@ async function handleDisclaimerComplete() {
   color: #363a40;
   font-size: 14px;
   line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 </style>

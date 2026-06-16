@@ -9,7 +9,7 @@
 
     <main ref="offlineScrollRef" class="offline-scroll" :style="scrollStyle">
       <section class="story-head">
-        <button class="story-avatar-button" type="button" @click="showProfile = true">
+        <button class="story-avatar-button" type="button" @click="openCharacterProfile">
           <img class="avatar" :src="character.avatar" :alt="characterDisplayName" />
         </button>
         <div>
@@ -61,7 +61,7 @@ import type { CharacterProfile } from '@/types/domain';
 import { getCharacterDisplayName } from '@/utils/character';
 import { useKeyboardScrollGuard } from '@/utils/keyboardScrollGuard';
 import { formatChatTime } from '@/utils/time';
-import { mergeVoomLikeMessages } from '@/utils/voomMessages';
+import { isVoomNarrationMessage, mergeVoomLikeMessages } from '@/utils/voomMessages';
 
 const props = defineProps<{
   id: string;
@@ -76,7 +76,13 @@ const conversation = computed(() => store.conversationById(props.id));
 const character = computed(() => (conversation.value ? store.characterById(conversation.value.charId) : undefined));
 const characterDisplayName = computed(() => (character.value ? getCharacterDisplayName(character.value) : ''));
 const chatSettings = computed(() => store.settingsForConversation(props.id));
-const offlineMessages = computed(() => mergeVoomLikeMessages(store.visibleMessagesForConversation(props.id).filter((message) => message.mode === 'offline')));
+const offlineMessages = computed(() => {
+  const messages = store.visibleMessagesForConversation(props.id).filter((message) => message.mode === 'offline');
+  const displayMessages = chatSettings.value.appearance.hideVoomNarration
+    ? messages.filter((message) => !isVoomNarrationMessage(message))
+    : messages;
+  return mergeVoomLikeMessages(displayMessages);
+});
 const scrollStyle = computed(() => ({
   backgroundColor: chatSettings.value.appearance.backgroundColor,
   backgroundImage: chatSettings.value.appearance.backgroundImage ? `url(${chatSettings.value.appearance.backgroundImage})` : 'none'
@@ -107,6 +113,11 @@ async function send(content: string) {
 
 async function saveCharacterProfile(nextCharacter: CharacterProfile) {
   await store.saveCharacter(nextCharacter);
+}
+
+async function openCharacterProfile() {
+  showProfile.value = true;
+  if (character.value) await store.markCharacterMindStateRead(character.value.id);
 }
 
 function openChatSettings() {

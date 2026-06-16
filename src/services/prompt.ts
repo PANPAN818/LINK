@@ -86,17 +86,26 @@ export const profileMutationPrompt = `补充输出规则：
 如果不修改资料：
 {
   "replies": ["正常回复内容"],
+  "replyTranslations": ["对应 replies[0] 的普通话译文；如果 replies[0] 已经是自然标准普通话则填空字符串"],
+  "narrations": [],
   "stickers": [],
   "messageActions": {
     "recallMessageIds": [],
     "quotes": []
   },
-  "profileUpdate": null
+  "profileUpdate": {
+    "nickname": "",
+    "signature": "",
+    "narration": "",
+    "innerMonologue": ["内心独白第一句", "内心独白第二句", "内心独白第三句"]
+  }
 }
 
 如果你要修改资料：
 {
   "replies": ["第一条聊天气泡", "第二条聊天气泡", "第三条聊天气泡"],
+  "replyTranslations": ["第一条的普通话译文或空字符串", "第二条的普通话译文或空字符串", "第三条的普通话译文或空字符串"],
+  "narrations": [],
   "stickers": [],
   "messageActions": {
     "recallMessageIds": [],
@@ -105,20 +114,40 @@ export const profileMutationPrompt = `补充输出规则：
   "profileUpdate": {
     "nickname": "新的网名，可留空表示不改",
     "signature": "新的个性签名，可留空表示不改",
-    "narration": "第三人称短旁白，用于显示你修改了自己的资料"
+    "narration": "第三人称短旁白，用于显示你修改了自己的资料",
+    "innerMonologue": ["内心独白第一句", "内心独白第二句", "内心独白第三句"]
   }
 }
 
 要求：
 1. replies 只放正常聊天内容，每个数组项会显示成一个独立聊天气泡；示例只表示 JSON 结构，不代表固定数量。
-2. 根据角色习惯、情绪、当前节奏和用户消息自然选择几条消息气泡。
-3. narration 只描述资料变动本身，不要总结，不要剧透。
-4. 如果你觉得现在不该改资料，就把 profileUpdate 设为 null。
-5. 如果允许你发送 Stickers，stickers 数组可以填写可用 Sticker 的 id 或文字描述；不发送则输出空数组。
-6. 最近对话每条消息前的 [msg_xxx] 是 messageId。你可以像真实社交软件一样撤回自己之前发出的某条消息，但只能把你自己发过的角色消息 id 放进 messageActions.recallMessageIds；不要撤回用户或系统消息。
-7. 你可以引用用户之前发过的某条消息进行回复。若某条 replies 要引用用户消息，在 messageActions.quotes 里写 {"replyIndex": 0, "messageId": "用户消息id"}；replyIndex 从 0 开始，对应 replies 数组下标。
-8. 引用用于自然承接上下文。引用时 replies 里仍只写你真正要发出的新消息，不要重复被引用内容。
-9. 如果没有撤回或引用动作，messageActions 里的两个数组都保持空数组。`;
+2. replyTranslations 必须与 replies 一一对应，长度必须相同；第 n 项只翻译 replies 第 n 项，不要合并多条消息。
+3. 只要 replies 某项不是自然、标准、现代简体普通话，就必须在对应 replyTranslations 项写普通话译文；包括但不限于外语、粤语、闽南语、吴语、客家话、四川话、东北话等方言、繁体中文、文言/古风表达、网络混写、罗马音、假名、韩文、泰文、俄文等。
+4. 普通话译文必须是自然口语化的现代简体中文，只翻译意思，不解释语言来源，不加“翻译：”“普通话：”等前缀，不使用括号包裹。
+5. 如果 replies 某项已经是自然标准普通话，对应 replyTranslations 项填空字符串 ""。
+6. 根据角色习惯、情绪、当前节奏和用户消息自然选择几条消息气泡。
+7. 线上模式每次都要在 profileUpdate.innerMonologue 输出 3-5 句当前内心独白；一句一项，像角色当下不会说出口的心声，不要解释给用户听，不要使用上帝视角，不要重复聊天气泡原文。
+8. 线下模式可以把 profileUpdate 设为 null；线上模式即使不修改资料，也保留 profileUpdate，并让 nickname、signature、narration 为空字符串。
+9. narration 只描述资料变动本身，不要总结，不要剧透；没有资料变动时 narration 为空字符串。
+10. 如果允许你发送 Stickers，stickers 数组可以填写可用 Sticker 的 id 或文字描述；不发送则输出空数组。
+11. 最近对话每条消息前的 [msg_xxx] 是 messageId。你可以像真实社交软件一样撤回自己之前发出的某条消息，但只能把你自己发过的角色消息 id 放进 messageActions.recallMessageIds；不要撤回用户或系统消息。
+12. 你可以引用用户之前发过的某条消息进行回复。若某条 replies 要引用用户消息，在 messageActions.quotes 里写 {"replyIndex": 0, "messageId": "用户消息id"}；replyIndex 从 0 开始，对应 replies 数组下标。
+13. 引用用于自然承接上下文。引用时 replies 里仍只写你真正要发出的新消息，不要重复被引用内容。
+14. 如果没有撤回或引用动作，messageActions 里的两个数组都保持空数组。
+15. narrations 默认保持空数组；只有当额外规则明确说明“旁白模式已开启”时，才允许填入旁白短句。`;
+
+export const narrationModePrompt = `补充旁白模式规则：
+
+旁白模式已开启，只在线上聊天生效。本次仍然只使用同一次角色回复 API；不要另起一段非 JSON 文本。
+
+在最终 JSON 的 narrations 数组中输出 1-3 条短旁白，用于聊天页面像 VOOM 系统旁白一样独立显示。narrations 不属于聊天气泡，不要写进 replies。
+
+旁白内容：
+1. 只描写{{char}}当下可观察的动作、姿态、停顿、打字状态、手机/环境互动等动描。
+2. 不写{{user}}的动作或状态，除非用户消息已经明确描述。
+3. 不写上帝视角、未来预告、关系总结、剧情解释、内心独白或不能被观察到的信息。
+4. 每条控制在 10-36 个中文字符，第三人称或无主语短句均可，语气要像聊天流里的轻量提示。
+5. 如果当前完全不适合动描，允许 narrations 输出空数组，但不要为了凑数写空泛句。`;
 
 export const strictRoleplayRules = `补充严格规则：
 
@@ -280,6 +309,12 @@ export function buildPrompt(context: PromptContext) {
       '{{bound_user_signature}}': context.boundUser.signature
     }),
     modeInstructions[context.mode],
+    context.mode === 'online' && context.narrationModeEnabled
+      ? replaceTokens(narrationModePrompt, {
+          '{{char}}': context.character.name,
+          '{{user}}': context.user.name
+        })
+      : '',
     timeAwarenessPrompt,
     `当前对话总结：\n${context.conversationSummary || '暂无总结。'}`,
     `记忆手册：\n${context.memorySummary || '暂无记忆手册。'}`,
@@ -291,5 +326,5 @@ export function buildPrompt(context: PromptContext) {
 }
 
 export function buildMomentPrompt(context: PromptContext) {
-  return `${buildPrompt(context)}\n\n现在生成角色要发布的一条 LINK VOOM / 朋友圈动态，以及这条动态自然产生的点赞和评论区。只输出 JSON，不要输出 Markdown，不要输出 JSON 以外的任何文字。\n\n格式：\n{\n  "content": "朋友圈正文",\n  "imageDescription": "这条动态会同时发布的一张配图的文字描述",\n  "likes": ["NPC在社交软件上的网名（NPC真名）"],\n  "comments": [\n    { "authorName": "NPC在社交软件上的网名（NPC真名）", "content": "评论内容" }\n  ]\n}\n\n要求：\n1. content 是角色真正发出去的动态文字，像社交软件朋友圈正文，可以短，可以日常，不要解释设定。\n2. imageDescription 是配图画面描述，不是生图提示词，不要写英文标签、相机参数、画质词或模型术语。\n3. 配图内容由角色性格、对话历史、动态正文、最近经历和生活状态决定，不固定题材；可以是自拍、随手拍、物品、街景、餐食、房间、作业、工作现场等任何合理画面。\n4. imageDescription 描述“画面里有什么”和“看起来是什么氛围”，控制在 20-80 个中文字符。\n5. likes 和 comments 来自角色真实社交圈里的 NPC，不要包含{{user}}，也不要使用“NPC”这种占位名字。\n6. comments 控制在 2-6 条，内容要像社交软件评论区里会出现的真实评论。`;
+  return `${buildPrompt(context)}\n\n现在生成角色要发布的一条 LINK VOOM / 朋友圈动态，以及这条动态自然产生的点赞和评论区。只输出 JSON，不要输出 Markdown，不要输出 JSON 以外的任何文字。\n\n格式：\n{\n  "content": "朋友圈正文",\n  "contentTranslation": "如 content 不是自然标准普通话，则给普通话译文；否则留空",\n  "imageDescription": "这条动态会同时发布的一张配图的文字描述",\n  "likes": ["NPC在社交软件上的网名"],\n  "comments": [\n    { "authorName": "NPC在社交软件上的网名", "content": "评论内容", "contentTranslation": "如 content 不是自然标准普通话，则给普通话译文；否则留空" }\n  ]\n}\n\n要求：\n1. content 是角色真正发出去的动态文字，像社交软件朋友圈正文，可以短，可以日常，不要解释设定。\n2. contentTranslation 和每条 comment.contentTranslation 的规则：除了自然标准普通话以外都要翻译成自然现代简体普通话，包括外语、粤语、方言、繁体中文、文言/古风表达、网络混写等；不要加“翻译：”前缀。\n3. imageDescription 是配图画面描述，不是生图提示词，不要写英文标签、相机参数、画质词或模型术语。\n4. 配图内容由角色性格、对话历史、动态正文、最近经历和生活状态决定，不固定题材；可以是自拍、随手拍、物品、街景、餐食、房间、作业、工作现场等任何合理画面。\n5. imageDescription 描述“画面里有什么”和“看起来是什么氛围”，控制在 20-80 个中文字符。\n6. likes 和 comments 来自角色真实社交圈里的 NPC，不要包含{{user}}，也不要使用“NPC”这种占位名字。\n7. comments 控制在 2-6 条，内容要像社交软件评论区里会出现的真实评论。`;
 }

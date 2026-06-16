@@ -9,15 +9,17 @@
 
     <main ref="messageListRef" class="message-list" :style="messageListStyle">
       <MessageBubble
-        v-for="message in onlineMessages"
+        v-for="(message, index) in onlineMessages"
         :key="message.id"
         :message="message"
         :character="character"
         :appearance="chatSettings.appearance"
+        :hide-avatar="shouldHideAvatar(index)"
+        :profile-alert="hasUnreadMindState"
         :selection-mode="selectionMode"
         :selected="isMessageSelected(message)"
         @long-press="openMessageActions"
-        @open-profile="showProfile = true"
+        @open-profile="openCharacterProfile"
         @toggle-select="toggleMessageSelection(message)"
       />
       <div v-if="store.loadingReply" class="typing-indicator">
@@ -171,7 +173,7 @@ import StickerLibraryModal from '@/components/stickers/StickerLibraryModal.vue';
 import { useAppStore } from '@/stores/appStore';
 import type { CharacterProfile, ChatMessage, ChatMessageQuote, UserProfile } from '@/types/domain';
 import { useKeyboardScrollGuard } from '@/utils/keyboardScrollGuard';
-import { mergeVoomLikeMessages } from '@/utils/voomMessages';
+import { isVoomNarrationMessage, mergeVoomLikeMessages } from '@/utils/voomMessages';
 
 const props = defineProps<{
   id: string;
@@ -202,7 +204,21 @@ const conversation = computed(() => store.conversationById(props.id));
 const character = computed(() => (conversation.value ? store.characterById(conversation.value.charId) : undefined));
 const boundUser = computed(() => (character.value ? store.userById(character.value.boundUserId) : null));
 const chatSettings = computed(() => store.settingsForConversation(props.id));
-const onlineMessages = computed(() => mergeVoomLikeMessages(store.visibleMessagesForConversation(props.id).filter((message) => message.mode === 'online')));
+const onlineMessages = computed(() => {
+  const messages = store.visibleMessagesForConversation(props.id).filter((message) => message.mode === 'online');
+  const displayMessages = chatSettings.value.appearance.hideVoomNarration
+    ? messages.filter((message) => !isVoomNarrationMessage(message))
+    : messages;
+  return mergeVoomLikeMessages(displayMessages);
+});
+
+function shouldHideAvatar(index: number) {
+  if (!chatSettings.value.appearance.showOnlyFirstAvatarInReply) return false;
+  const message = onlineMessages.value[index];
+  const previousMessage = onlineMessages.value[index - 1];
+  return message?.sender === 'char' && previousMessage?.sender === 'char';
+}
+
 const messageListStyle = computed(() => ({
   backgroundColor: chatSettings.value.appearance.backgroundColor,
   backgroundImage: chatSettings.value.appearance.backgroundImage ? `url(${chatSettings.value.appearance.backgroundImage})` : 'none'
@@ -212,6 +228,8 @@ const hasPendingUserMessages = computed(() => {
   return lastMessage?.sender === 'user';
 });
 const selectedMessageCount = computed(() => selectedMessageIds.value.length);
+const hasUnreadMindState = computed(() => Boolean(character.value?.mindState?.lines.length
+  && character.value.mindState.updatedAt > character.value.mindState.readAt));
 const activeMessageIsSynthetic = computed(() => Boolean(activeMessage.value?.id.includes('__')));
 const canRecallActiveMessage = computed(() => Boolean(activeMessage.value && activeMessage.value.sender === 'user' && !activeMessageIsSynthetic.value));
 const canQuoteActiveMessage = computed(() => Boolean(activeMessage.value && activeMessage.value.sender === 'char' && !activeMessageIsSynthetic.value));
@@ -400,9 +418,10 @@ function openUserProfile() {
   showUserProfile.value = true;
 }
 
-function openCharacterProfile() {
+async function openCharacterProfile() {
   showActionMenu.value = false;
   showProfile.value = true;
+  if (character.value) await store.markCharacterMindStateRead(character.value.id);
 }
 
 function openModelSwitch() {

@@ -347,6 +347,9 @@
               {{ vendorSyncButtonLabel }}
             </button>
           </div>
+          <p v-if="vendorSyncFeedback" class="module-feedback" :class="vendorSyncState === 'error' ? 'error' : 'success'">
+            {{ vendorSyncFeedback }}
+          </p>
 
           <div v-if="vendorDraft.models.length" class="model-grid">
             <button
@@ -423,6 +426,7 @@ const vendorDraft = ref<ApiVendor>(createApiVendor({
   apiPath: '/images/generations'
 }));
 const vendorSyncState = ref<PreviewState>('idle');
+const vendorSyncFeedback = ref('');
 const previewState = reactive<Record<ImageModuleId, PreviewState>>({
   openai: 'idle',
   novelai: 'idle',
@@ -555,6 +559,7 @@ function openVendorCreator() {
   }));
   activeVendorTab.value = 'provider';
   vendorSyncState.value = 'idle';
+  vendorSyncFeedback.value = '';
   showVendorComposer.value = true;
 }
 
@@ -563,18 +568,22 @@ function openVendorEditor(vendor: ApiVendor) {
   vendorDraft.value = cloneVendor(vendor);
   activeVendorTab.value = 'provider';
   vendorSyncState.value = 'idle';
+  vendorSyncFeedback.value = '';
   showVendorComposer.value = true;
 }
 
 async function pullVendorModels() {
   vendorSyncState.value = 'loading';
+  vendorSyncFeedback.value = '';
   try {
     const modelIds = await fetchVendorModels(vendorDraft.value);
     vendorDraft.value = mergeVendorModels(vendorDraft.value, modelIds);
     vendorSyncState.value = 'success';
+    vendorSyncFeedback.value = modelIds.length ? `已同步 ${modelIds.length} 个模型。` : '接口返回为空，未发现可用模型。';
     activeVendorTab.value = 'models';
-  } catch {
+  } catch (error) {
     vendorSyncState.value = 'error';
+    vendorSyncFeedback.value = error instanceof Error ? error.message : '图片模型同步失败，请检查 API 配置。';
   }
 }
 
@@ -768,10 +777,14 @@ function removeVendor() {
 
 .module-feedback.error {
   color: #cf425a;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .module-feedback.success {
   color: #26774e;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .hero-generate,

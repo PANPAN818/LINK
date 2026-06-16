@@ -44,23 +44,34 @@
         <div class="avatar-wrap">
           <img class="sheet-avatar" :src="character.avatar" :alt="character.nickname" />
         </div>
+        <div class="profile-summary">
+          <div class="sheet-copy">
+            <strong>{{ character.nickname }}</strong>
+          </div>
+
+          <div class="stats-row">
+            <article v-for="item in statsItems" :key="item.label" class="stat-card">
+              <strong>{{ item.value }}</strong>
+              <span>{{ item.label }}</span>
+            </article>
+          </div>
+        </div>
       </div>
 
-      <div class="sheet-copy">
-        <strong>{{ character.nickname }}</strong>
-        <span class="handle">@{{ character.id }}</span>
+      <div class="sheet-bio">
         <p>{{ character.signature }}</p>
-      </div>
-
-      <div class="stats-row">
-        <article v-for="item in statsItems" :key="item.label" class="stat-card">
-          <strong>{{ item.value }}</strong>
-          <span>{{ item.label }}</span>
-        </article>
       </div>
 
       <section class="gallery-section">
         <div class="section-head">
+          <h3>Gallery</h3>
+        </div>
+
+        <div class="mind-state-card">
+          <p v-for="line in mindStateLines" :key="line">{{ line }}</p>
+        </div>
+
+        <div class="section-head section-head-voom">
           <h3>Voom</h3>
         </div>
 
@@ -114,6 +125,12 @@ const statsItems = computed(() => {
     { label: stats?.followersLabel ?? 'Followers', value: stats?.followers ?? '14.2K' },
     { label: stats?.followingLabel ?? 'Following', value: formatCompactStat(stats?.following ?? 56) }
   ];
+});
+
+const mindStateLines = computed(() => {
+  const lines = props.character.mindState?.lines ?? [];
+  if (lines.length) return lines;
+  return [props.character.signature || '还没有新的状态。'];
 });
 
 const galleryTiles = computed(() => {
@@ -313,13 +330,15 @@ function saveEditor() {
 
 .panel-top {
   display: flex;
-  align-items: flex-end;
+  align-items: center;
+  gap: 16px;
 }
 
 .avatar-wrap {
   position: relative;
-  width: 96px;
-  height: 96px;
+  flex: 0 0 auto;
+  width: 92px;
+  height: 92px;
 }
 
 .sheet-avatar {
@@ -343,14 +362,25 @@ function saveEditor() {
   box-shadow: 0 0 0 4px rgba(30, 199, 115, 0.18);
 }
 
+.profile-summary {
+  min-width: 0;
+  flex: 1;
+  display: grid;
+  gap: 14px;
+  padding-top: 8px;
+}
+
 .sheet-copy {
   display: grid;
-  gap: 6px;
-  margin-top: 16px;
+  gap: 5px;
+  min-width: 0;
 }
 
 .sheet-copy strong {
-  font-size: 24px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 22px;
   font-weight: 900;
   line-height: 1;
 }
@@ -360,7 +390,11 @@ function saveEditor() {
   font-size: 12px;
 }
 
-.sheet-copy p {
+.sheet-bio {
+  margin-top: 14px;
+}
+
+.sheet-bio p {
   margin: 0;
   color: rgba(245, 243, 241, 0.78);
   font-size: 14px;
@@ -370,13 +404,16 @@ function saveEditor() {
 .stats-row {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
-  margin-top: 22px;
+  gap: 8px;
 }
 
 .stat-card {
   display: grid;
-  gap: 6px;
+  gap: 4px;
+  min-width: 0;
+  padding: 0 !important;
+  border-radius: 0 !important;
+  text-align: center;
 }
 
 .stat-card strong,
@@ -387,22 +424,43 @@ function saveEditor() {
 }
 
 .stat-card strong {
-  font-size: 21px;
+  font-size: 18px;
   font-weight: 800;
+  line-height: 1;
 }
 
 .stat-card span {
   color: rgba(245, 243, 241, 0.44);
-  font-size: 11px;
+  font-size: 10px;
+  line-height: 1.1;
+  white-space: nowrap;
 }
 
 .gallery-section {
-  margin-top: 24px;
+  margin-top: 22px;
 }
 
 .section-head h3 {
-  font-size: 18px;
+  font-size: 17px;
   font-weight: 800;
+}
+
+.section-head-voom {
+  margin-top: 20px;
+}
+
+.mind-state-card {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 2px 0;
+}
+
+.mind-state-card p {
+  margin: 0;
+  color: rgba(245, 243, 241, 0.72);
+  font-size: 12px;
+  line-height: 1.55;
 }
 
 .gallery-grid {
@@ -458,6 +516,23 @@ function saveEditor() {
 @media (max-width: 360px) {
   .profile-panel {
     padding: 0 16px 18px;
+  }
+
+  .panel-top {
+    gap: 12px;
+  }
+
+  .avatar-wrap {
+    width: 82px;
+    height: 82px;
+  }
+
+  .sheet-copy strong {
+    font-size: 19px;
+  }
+
+  .stat-card strong {
+    font-size: 16px;
   }
 
   .editor-grid {

@@ -90,6 +90,9 @@
               {{ syncButtonLabel }}
             </button>
           </div>
+          <p v-if="modelFeedback" class="sync-feedback" :class="modelState === 'error' ? 'error' : 'success'">
+            {{ modelFeedback }}
+          </p>
 
           <div v-if="draft.models.length" class="model-grid">
             <label v-for="model in draft.models" :key="model.id" class="model-option">
@@ -170,6 +173,7 @@ const showComposer = ref(false);
 const activeTab = ref<ComposerTab>('openai');
 const loadingModels = ref(false);
 const modelState = ref<'idle' | 'loading' | 'success' | 'error'>('idle');
+const modelFeedback = ref('');
 const editingVendorId = ref<string | null>(null);
 const draft = ref<ApiVendor>(createApiVendor({ enabled: true }));
 const showAvatarEditor = ref(false);
@@ -215,6 +219,7 @@ function openCreator() {
   }));
   activeTab.value = 'openai';
   modelState.value = 'idle';
+  modelFeedback.value = '';
   showComposer.value = true;
 }
 
@@ -223,20 +228,23 @@ function openEditor(vendor: ApiVendor) {
   draft.value = cloneVendor(vendor);
   activeTab.value = 'openai';
   modelState.value = 'idle';
+  modelFeedback.value = '';
   showComposer.value = true;
 }
 
 async function pullModels() {
   loadingModels.value = true;
   modelState.value = 'loading';
+  modelFeedback.value = '';
   try {
     const modelIds = await fetchVendorModels(draft.value);
     draft.value = mergeVendorModels(draft.value, modelIds);
     modelState.value = 'success';
+    modelFeedback.value = modelIds.length ? `已同步 ${modelIds.length} 个模型。` : '接口返回为空，未发现可用模型。';
     activeTab.value = 'models';
   } catch (error) {
     modelState.value = 'error';
-    console.error(error);
+    modelFeedback.value = error instanceof Error ? error.message : '模型同步失败，请检查 API 配置。';
   } finally {
     loadingModels.value = false;
   }
@@ -581,6 +589,19 @@ function submit() {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.sync-feedback {
+  margin: 0;
+  color: #26774e;
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.sync-feedback.error {
+  color: #cf425a;
 }
 
 .sync-button {

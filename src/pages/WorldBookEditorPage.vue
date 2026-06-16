@@ -895,6 +895,8 @@ watch(draft, scheduleAutoSave, { deep: true });
   font-size: 12px;
   font-weight: 800;
   line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .cover-feedback.success {

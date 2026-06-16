@@ -19,9 +19,7 @@
     <label class="field">
       <span>朋友圈频率</span>
       <select v-model="draft.voomFrequency">
-        <option value="low">低</option>
-        <option value="medium">中</option>
-        <option value="high">高</option>
+        <option v-for="option in voomFrequencyOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
       </select>
     </label>
     <section v-if="localBooks.length" class="bind-list">
@@ -41,6 +39,7 @@ import { reactive, ref, watch } from 'vue';
 import AvatarCropperModal from '@/components/image/AvatarCropperModal.vue';
 import type { CharacterProfile, WorldBookEntry } from '@/types/domain';
 import { readImageFileFromInput } from '@/utils/imageFile';
+import { voomFrequencyOptions } from '@/utils/voom';
 
 const props = defineProps<{
   character: CharacterProfile;

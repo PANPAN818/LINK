@@ -4,7 +4,7 @@ import { deleteEntity, loadSnapshot, putEntity } from '@/data/db';
 import { defaultStickerGroups } from '@/data/seed';
 import type { AppSettings, CharacterProfile, ChatMessage, ChatMessageQuote, ChatMode, Conversation, ConversationMemoryRecord, ConversationSettings, Sticker, StickerGroup, UserProfile, VisualProfile, VoomComment, VoomPost, VoomPostVisibility, WorldBookEntry } from '@/types/domain';
 import { createAccountId, createId } from '@/utils/id';
-import { getCharacterVoomAuthorName, normalizeCharacterProfile } from '@/utils/character';
+import { getCharacterVoomAuthorName, normalizeCharacterMindStateLines, normalizeCharacterProfile } from '@/utils/character';
 import { normalizeUserProfile, normalizeVisualProfile } from '@/utils/profile';
 import { mergeVendorModels, normalizeAppSettings } from '@/utils/settings';
 import { normalizeWorldBookEntry } from '@/utils/worldBook';
@@ -168,7 +168,10 @@ export const useAppStore = defineStore('app', () => {
 
   function settingsForConversation(id: string) {
     const existing = conversationSettings.value.find((entry) => entry.conversationId === id);
-    return normalizeConversationSettings(existing, id);
+    if (existing) return normalizeConversationSettings(existing, id);
+    const conversation = conversationById(id);
+    const character = conversation ? characterById(conversation.charId) : null;
+    return normalizeConversationSettings({ voomFrequency: character?.voomFrequency }, id);
   }
 
   function memoriesForConversation(id: string) {
@@ -535,6 +538,36 @@ export const useAppStore = defineStore('app', () => {
       if (conversationIndex >= 0) conversations.value[conversationIndex] = nextConversation;
       await putEntity('conversations', nextConversation);
     }
+  }
+
+  async function updateCharacterMindState(characterId: string, lines: unknown, conversationId: string) {
+    const character = characterById(characterId);
+    const mindStateLines = normalizeCharacterMindStateLines(lines);
+    if (!character || !mindStateLines.length) return;
+
+    await saveCharacter({
+      ...character,
+      mindState: {
+        lines: mindStateLines,
+        updatedAt: Date.now(),
+        readAt: character.mindState?.readAt ?? 0,
+        sourceConversationId: conversationId
+      }
+    });
+  }
+
+  async function markCharacterMindStateRead(characterId: string) {
+    const character = characterById(characterId);
+    if (!character?.mindState?.lines.length) return;
+    if (character.mindState.readAt >= character.mindState.updatedAt) return;
+
+    await saveCharacter({
+      ...character,
+      mindState: {
+        ...character.mindState,
+        readAt: Date.now()
+      }
+    });
   }
 
   async function saveConversationSettings(nextSettings: ConversationSettings) {
@@ -1193,6 +1226,7 @@ export const useAppStore = defineStore('app', () => {
         conversationSummary: conversation.summary,
         memorySummary: memoryContextForConversation(conversationId),
         stickerVisionEnabled: chatSettings.stickerVisionEnabled,
+        narrationModeEnabled: chatSettings.narrationModeEnabled,
         timeAwareness: chatSettings.timeAwareness,
         availableStickers: availableCharacterStickers.map((sticker) => ({
           stickerId: sticker.id,
@@ -1212,6 +1246,12 @@ export const useAppStore = defineStore('app', () => {
           translation: conversation.activeMode === 'online' ? normalizeTranslationText(replyTranslations[index]) : ''
         }))
         .filter((reply) => Boolean(reply.content));
+      const narrationMessages = conversation.activeMode === 'online' && chatSettings.narrationModeEnabled
+        ? (parsedReply.narrations ?? [])
+          .map((narration) => String(narration ?? '').trim())
+          .filter(Boolean)
+          .slice(0, 3)
+        : [];
       const replyStickers = resolveCharacterStickerSelections(parsedReply.stickers, availableCharacterStickers);
       const recallMessageIds = parsedReply.messageActions?.recallMessageIds ?? [];
       const validRecallMessageIds = recallMessageIds.filter((messageId) => messages.value.some((message) => message.id === messageId && message.conversationId === conversationId && message.sender === 'char'));
@@ -1221,25 +1261,26 @@ export const useAppStore = defineStore('app', () => {
         const quote = targetMessage ? createMessageQuoteSnapshot(targetMessage) : null;
         if (quote) quoteByReplyIndex.set(Math.max(0, Math.floor(quoteAction.replyIndex)), quote);
       }
-      if (!replyMessages.length && !replyStickers.length && !validRecallMessageIds.length) {
+      if (!replyMessages.length && !replyStickers.length && !narrationMessages.length && !validRecallMessageIds.length) {
         showConfigAlert('AI 返回内容中没有可显示的聊天文本，请重试或检查模型输出格式。', '回复异常');
         return;
       }
-      if (parsedReply.profileUpdate && (parsedReply.profileUpdate.nickname || parsedReply.profileUpdate.signature)) {
+      const profileUpdate = parsedReply.profileUpdate;
+      if (profileUpdate && (profileUpdate.nickname || profileUpdate.signature)) {
         const nextCharacter = normalizeCharacterProfile({
           ...character,
-          nickname: parsedReply.profileUpdate.nickname || character.nickname,
-          signature: parsedReply.profileUpdate.signature || character.signature,
-          subtitle: parsedReply.profileUpdate.signature || character.subtitle
+          nickname: profileUpdate.nickname || character.nickname,
+          signature: profileUpdate.signature || character.signature,
+          subtitle: profileUpdate.signature || character.subtitle
         }, character.boundUserId);
         await saveCharacter(nextCharacter);
-        if (parsedReply.profileUpdate.narration.trim()) {
+        if (profileUpdate.narration.trim()) {
           const narrationMessage: ChatMessage = {
             id: createId('msg'),
             conversationId,
             sender: 'system',
             mode: conversation.activeMode,
-            content: parsedReply.profileUpdate.narration.trim(),
+            content: profileUpdate.narration.trim(),
             createdAt: Date.now(),
             displayStyle: 'narration',
             status: 'sent'
@@ -1248,10 +1289,23 @@ export const useAppStore = defineStore('app', () => {
           await putEntity('messages', narrationMessage);
         }
       }
+      if (conversation.activeMode === 'online' && profileUpdate?.innerMonologue?.length) {
+        await updateCharacterMindState(character.id, profileUpdate.innerMonologue, conversationId);
+      }
       for (const messageId of validRecallMessageIds) {
         await recallMessage(messageId, { actor: 'char' });
       }
       const createdAt = Date.now();
+      const charNarrationMessages = narrationMessages.map((content, index) => ({
+        id: createId('msg'),
+        conversationId,
+        sender: 'system' as const,
+        mode: conversation.activeMode,
+        content,
+        createdAt: createdAt + index,
+        displayStyle: 'narration' as const,
+        status: 'sent' as const
+      } satisfies ChatMessage));
       const charTextMessages = replyMessages.map((reply, index) => ({
         id: createId('msg'),
         conversationId,
@@ -1260,7 +1314,7 @@ export const useAppStore = defineStore('app', () => {
         content: reply.content,
         translation: reply.translation || undefined,
         quote: quoteByReplyIndex.get(index),
-        createdAt: createdAt + index,
+        createdAt: createdAt + charNarrationMessages.length + index,
         status: 'sent' as const
       } satisfies ChatMessage));
       const charStickerMessages = replyStickers.map((sticker, index) => ({
@@ -1274,10 +1328,10 @@ export const useAppStore = defineStore('app', () => {
           description: sticker.description,
           imageUrl: sticker.imageUrl
         },
-        createdAt: createdAt + charTextMessages.length + index,
+        createdAt: createdAt + charNarrationMessages.length + charTextMessages.length + index,
         status: 'sent' as const
       } satisfies ChatMessage));
-      const charMessages = [...charTextMessages, ...charStickerMessages];
+      const charMessages = [...charNarrationMessages, ...charTextMessages, ...charStickerMessages];
       if (charMessages.length) {
         messages.value.push(...charMessages);
         await Promise.all(charMessages.map((message) => putEntity('messages', message)));
@@ -1712,6 +1766,7 @@ export const useAppStore = defineStore('app', () => {
     setActiveUser,
     saveVisualProfile,
     saveCharacter,
+    markCharacterMindStateRead,
     addCharacter,
     saveConversationSettings,
     saveStickerGroup,

@@ -13,7 +13,7 @@ interface UserTimeSnapshot {
 }
 
 export const defaultTimeAwarenessSettings: ConversationTimeAwarenessSettings = {
-  enabled: false
+  enabled: true
 };
 
 export function normalizeTimeAwarenessSettings(settings: Partial<ConversationTimeAwarenessSettings> | null | undefined): ConversationTimeAwarenessSettings {
