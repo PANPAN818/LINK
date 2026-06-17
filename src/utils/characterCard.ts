@@ -12,7 +12,12 @@ export interface ImportedCharacterCard {
   worldBooks: WorldBookEntry[];
 }
 
+const defaultSignature = '该用户很懒，什么也没留下';
+
 interface CharacterBookSource {
+  name?: unknown;
+  title?: unknown;
+  comment?: unknown;
   entries?: Array<Record<string, unknown>>;
 }
 
@@ -53,24 +58,15 @@ function toDicebearAvatar(seed: string) {
   return `https://api.dicebear.com/9.x/thumbs/svg?seed=${encodeURIComponent(seed || 'NewFriend')}&backgroundColor=f2f2f2`;
 }
 
-function summarizeLines(value: string, limit = 48) {
-  const cleaned = value.replace(/\r/g, '\n').split('\n').map((line) => line.trim()).find(Boolean) || '';
-  return cleaned.length > limit ? `${cleaned.slice(0, limit - 1)}…` : cleaned;
-}
-
 function collectDescriptionSections(source: Record<string, unknown>) {
   const sections: string[] = [];
   const description = String(source.description ?? '').trim();
   const personality = String(source.personality ?? '').trim();
   const scenario = String(source.scenario ?? '').trim();
-  const creatorNotes = String(source.creator_notes ?? source.creatorNotes ?? '').trim();
-  const firstMessage = String(source.first_mes ?? source.firstMessage ?? '').trim();
 
-  if (description) sections.push(`角色资料\n${description}`);
+  if (description) sections.push(description);
   if (personality) sections.push(`性格\n${personality}`);
   if (scenario) sections.push(`场景\n${scenario}`);
-  if (creatorNotes) sections.push(`补充设定\n${creatorNotes}`);
-  if (firstMessage) sections.push(`初始开场\n${firstMessage}`);
 
   return sections.join('\n\n').trim();
 }
@@ -81,37 +77,42 @@ function getCharacterBook(source: Record<string, unknown>) {
   return (nested.character_book ?? extensions.character_book ?? source.character_book ?? null) as CharacterBookSource | null;
 }
 
-function mapWorldBooks(book: CharacterBookSource | null): WorldBookEntry[] {
+function mapWorldBooks(book: CharacterBookSource | null, characterName: string): WorldBookEntry[] {
   const entries = Array.isArray(book?.entries) ? book.entries : [];
-  const mappedEntries: Array<WorldBookEntry | null> = entries.map((entry, index) => {
-      const keys = Array.isArray(entry.keys)
-        ? entry.keys.map((item) => String(item).trim()).filter(Boolean)
-        : String(entry.keys ?? '').split(',').map((item) => item.trim()).filter(Boolean);
-      const title = String(entry.comment ?? entry.name ?? keys[0] ?? `导入设定 ${index + 1}`).trim();
-      const content = String(entry.content ?? '').trim();
-      if (!title && !content) return null;
+  const mappedEntries = entries.map((entry, index) => {
+    const keys = Array.isArray(entry.keys)
+      ? entry.keys.map((item) => String(item).trim()).filter(Boolean)
+      : String(entry.keys ?? '').split(',').map((item) => item.trim()).filter(Boolean);
+    const title = String(entry.comment ?? entry.name ?? keys[0] ?? `导入设定 ${index + 1}`).trim();
+    const content = String(entry.content ?? '').trim();
+    if (!title && !content) return null;
 
-      const loreContent = keys.length ? `触发词：${keys.join('、')}\n\n${content || '暂无内容。'}` : (content || '暂无内容。');
-      return {
-        id: createId('wb'),
-        title: title || `导入设定 ${index + 1}`,
-        content: loreContent,
-        entries: [createWorldBookLoreEntry({
-          title: title || `导入设定 ${index + 1}`,
-          content: loreContent,
-          activation: keys.length ? 'keyword' : 'constant',
-          keys
-        })],
-        scope: 'local' as const,
-        enabled: entry.enabled !== false,
-        coverImage: '',
-        coverPrompt: '',
-        coverNegativePrompt: '',
-        coverProvider: ''
-      } satisfies WorldBookEntry;
+    const loreContent = keys.length ? `触发词：${keys.join('、')}\n\n${content || '暂无内容。'}` : (content || '暂无内容。');
+    return createWorldBookLoreEntry({
+      title: title || `导入设定 ${index + 1}`,
+      content: loreContent,
+      activation: keys.length ? 'keyword' : 'constant',
+      keys,
+      enabled: entry.enabled !== false
     });
+  });
 
-  return mappedEntries.filter((entry): entry is WorldBookEntry => entry !== null);
+  const loreEntries = mappedEntries.filter((entry): entry is ReturnType<typeof createWorldBookLoreEntry> => entry !== null);
+  if (!loreEntries.length) return [];
+
+  const title = String(book?.name ?? book?.title ?? book?.comment ?? '').trim() || `${characterName}的角色世界书`;
+  return [{
+    id: createId('wb'),
+    title,
+    content: loreEntries.map((entry) => entry.content).filter(Boolean).join('\n\n'),
+    entries: loreEntries,
+    scope: 'local' as const,
+    enabled: true,
+    coverImage: '',
+    coverPrompt: '',
+    coverNegativePrompt: '',
+    coverProvider: ''
+  } satisfies WorldBookEntry];
 }
 
 function parseCardPayload(payload: string, avatar: string) {
@@ -121,20 +122,14 @@ function parseCardPayload(payload: string, avatar: string) {
     : parsed;
 
   const nickname = String(source.name ?? parsed.name ?? 'NewFriend').trim() || 'NewFriend';
-  const signatureSource = [
-    String(source.personality ?? '').trim(),
-    String(source.scenario ?? '').trim(),
-    String(source.creator_notes ?? source.creatorNotes ?? '').trim(),
-    String(source.first_mes ?? source.firstMessage ?? '').trim()
-  ].find(Boolean) || '';
 
   return {
     avatar: avatar || toDicebearAvatar(nickname),
     nickname,
     name: nickname,
-    signature: summarizeLines(signatureSource || '刚导入的新角色。'),
+    signature: defaultSignature,
     description: collectDescriptionSections(source) || '导入角色卡后尚未提供更多资料。',
-    worldBooks: mapWorldBooks(getCharacterBook(parsed))
+    worldBooks: mapWorldBooks(getCharacterBook(parsed), nickname)
   } satisfies ImportedCharacterCard;
 }
 

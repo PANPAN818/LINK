@@ -354,6 +354,21 @@ export interface PollinationsImageSettings {
   lastImageUrl: string;
 }
 
+export type GitHubBackupStatus = 'idle' | 'running' | 'success' | 'failed';
+
+export interface GitHubBackupSettings {
+  enabled: boolean;
+  token: string;
+  owner: string;
+  repo: string;
+  branch: string;
+  path: string;
+  intervalMinutes: number;
+  lastBackupAt: number;
+  lastBackupStatus: GitHubBackupStatus;
+  lastBackupError: string;
+}
+
 export interface AppSettings {
   activeUserId: string;
   apiEndpoint: string;
@@ -374,6 +389,7 @@ export interface AppSettings {
   voomImageProvider: ImageProviderType | '';
   voomImageModel: string;
   imagePrivateOnly: boolean;
+  githubBackup: GitHubBackupSettings;
 }
 
 export interface AppSnapshot {

@@ -103,6 +103,7 @@ export const profileMutationPrompt = `补充输出规则：
   "replyTranslations": ["对应 replies[0] 的普通话译文；如果 replies[0] 已经是自然标准普通话则填空字符串"],
   "narrations": [],
   "stickers": [],
+  "stickerPlacements": [],
   "messageActions": {
     "recallMessageIds": [],
     "quotes": []
@@ -121,6 +122,9 @@ export const profileMutationPrompt = `补充输出规则：
   "replyTranslations": ["第一条的普通话译文或空字符串", "第二条的普通话译文或空字符串", "第三条的普通话译文或空字符串"],
   "narrations": [],
   "stickers": [],
+  "stickerPlacements": [
+    { "replyIndex": 1, "position": "after", "stickers": ["合适的Sticker id"] }
+  ],
   "messageActions": {
     "recallMessageIds": [],
     "quotes": []
@@ -143,12 +147,14 @@ export const profileMutationPrompt = `补充输出规则：
 7. 线上模式每次都要在 profileUpdate.innerMonologue 输出 3-5 句当前内心独白；一句一项，像角色当下不会说出口的心声，不要解释给用户听，不要使用上帝视角，不要重复聊天气泡原文。
 8. 线下模式可以把 profileUpdate 设为 null；线上模式即使不修改资料，也保留 profileUpdate，并让 nickname、signature、narration 为空字符串。
 9. narration 只描述资料变动本身，不要总结，不要剧透；没有资料变动时 narration 为空字符串。
-10. 如果允许你发送 Stickers，stickers 数组可以填写可用 Sticker 的 id 或文字描述；不发送则输出空数组。
-11. 最近对话每条消息前的 [msg_xxx] 是 messageId。你可以像真实社交软件一样撤回自己之前发出的某条消息，但只能把你自己发过的角色消息 id 放进 messageActions.recallMessageIds；不要撤回用户或系统消息。
-12. 你可以引用用户之前发过的某条消息进行回复。若某条 replies 要引用用户消息，在 messageActions.quotes 里写 {"replyIndex": 0, "messageId": "用户消息id"}；replyIndex 从 0 开始，对应 replies 数组下标。
-13. 引用用于自然承接上下文。引用时 replies 里仍只写你真正要发出的新消息，不要重复被引用内容。
-14. 如果没有撤回或引用动作，messageActions 里的两个数组都保持空数组。
-15. narrations 默认保持空数组；只有当额外规则明确说明“旁白模式已开启”时，才允许填入旁白短句。`;
+10. 如果允许你发送 Stickers，优先使用 stickerPlacements 决定发送位置；格式为 {"replyIndex": 0, "position": "after", "stickers": ["Sticker id或文字描述"]}。replyIndex 从 0 开始，对应 replies 数组下标；position 只能是 "before" 或 "after"，表示在该条文字气泡前或后单独发送 Sticker。
+11. 不要默认把 Sticker 固定放在整轮回复末尾。像真实聊天一样根据语境、情绪和节奏决定是否发、发哪张、在第几条消息前后发；不合适就不发。
+12. 顶层 stickers 数组仅作为旧格式兼容，会显示在整轮回复结束后；除非确实想让 Sticker 最后发送，否则保持空数组。不要把同一张 Sticker 同时写进 stickers 和 stickerPlacements。
+13. 最近对话每条消息前的 [msg_xxx] 是 messageId。你可以像真实社交软件一样撤回自己之前发出的某条消息，但只能把你自己发过的角色消息 id 放进 messageActions.recallMessageIds；不要撤回用户或系统消息。
+14. 你可以引用用户之前发过的某条消息进行回复。若某条 replies 要引用用户消息，在 messageActions.quotes 里写 {"replyIndex": 0, "messageId": "用户消息id"}；replyIndex 从 0 开始，对应 replies 数组下标。
+15. 引用用于自然承接上下文。引用时 replies 里仍只写你真正要发出的新消息，不要重复被引用内容。
+16. 如果没有撤回或引用动作，messageActions 里的两个数组都保持空数组。
+17. narrations 默认保持空数组；只有当额外规则明确说明“旁白模式已开启”时，才允许填入旁白短句。`;
 
 export const narrationModePrompt = `补充旁白模式规则：
 
@@ -280,7 +286,8 @@ function renderAvailableStickers(context: PromptContext) {
   if (!stickers.length) return '当前没有允许你主动发送的 Stickers。stickers 必须输出空数组。';
   return [
     '你可以在合适时主动发送 Stickers，但只能从下面列表中选择。',
-    '如果要发送，在 JSON 的 stickers 数组中填写对应 id 或文字描述；不要编造列表外的 Sticker。',
+    '如果要发送，优先在 JSON 的 stickerPlacements 中填写位置和对应 id 或文字描述；不要编造列表外的 Sticker。',
+    '不要默认把 Sticker 放在所有文字消息末尾，要像真实聊天一样按上下文决定它出现在某条消息前还是后。',
     ...stickers.map((sticker) => `- id: ${sticker.stickerId}；描述: ${sticker.description}`)
   ].join('\n');
 }

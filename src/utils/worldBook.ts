@@ -13,9 +13,53 @@ function pickPalette(scope: WorldBookScope) {
   }[scope];
 }
 
+function escapeSvgText(value: string) {
+  return value.replace(/[&<>'"]/g, (character) => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    "'": '&apos;',
+    '"': '&quot;'
+  })[character] ?? character);
+}
+
+function isCjkCharacter(character: string) {
+  const codePoint = character.codePointAt(0) ?? 0;
+  return codePoint >= 0x3400 && codePoint <= 0x9fff || codePoint >= 0xf900 && codePoint <= 0xfaff;
+}
+
+function splitCoverTitle(title: string) {
+  const characters = Array.from(title.trim() || 'World Book');
+  const lineLength = characters.some((character) => isCjkCharacter(character)) ? 8 : 14;
+  const maxLines = 3;
+  const lines: string[] = [];
+
+  for (let startIndex = 0; startIndex < characters.length && lines.length < maxLines; startIndex += lineLength) {
+    lines.push(characters.slice(startIndex, startIndex + lineLength).join('').trim());
+  }
+
+  if (characters.length > lineLength * maxLines) {
+    const lastLine = lines[lines.length - 1] ?? '';
+    lines[lines.length - 1] = `${Array.from(lastLine).slice(0, Math.max(1, lineLength - 3)).join('')}...`;
+  }
+
+  return lines.filter(Boolean).length ? lines.filter(Boolean) : ['World Book'];
+}
+
+function renderCoverTitle(title: string, ink: string) {
+  const lines = splitCoverTitle(title);
+  const fontSize = lines.length > 2 ? 44 : lines.length > 1 ? 48 : 54;
+  const startY = lines.length > 2 ? 392 : lines.length > 1 ? 420 : 450;
+  const lineHeight = lines.length > 2 ? 56 : 62;
+  const tspans = lines
+    .map((line, index) => `<tspan x="360" y="${startY + index * lineHeight}">${escapeSvgText(line)}</tspan>`)
+    .join('');
+  return `<text text-anchor="middle" font-size="${fontSize}" fill="${ink}" font-weight="600" font-family="Iowan Old Style, Palatino Linotype, Times New Roman, Songti SC, serif">${tspans}</text>`;
+}
+
 export function createDefaultWorldBookCover(title: string, scope: WorldBookScope) {
   const [paper, accent, ink] = pickPalette(scope);
-  const safeTitle = (title.trim() || 'World Book').slice(0, 24);
+  const coverTitle = renderCoverTitle(title, ink);
 
   return encodeSvg(`
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 1024">
@@ -31,7 +75,7 @@ export function createDefaultWorldBookCover(title: string, scope: WorldBookScope
       <path d="M126 826c82-126 162-188 246-188s164 62 246 188" fill="none" stroke="${accent}" stroke-opacity="0.32" stroke-width="12" stroke-linecap="round" />
       <circle cx="360" cy="410" r="116" fill="${accent}" fill-opacity="0.22" />
       <text x="360" y="182" text-anchor="middle" font-size="28" fill="${ink}" fill-opacity="0.72" font-family="Iowan Old Style, Palatino Linotype, Times New Roman, Songti SC, serif" letter-spacing="8">WORLD BOOK</text>
-      <text x="360" y="450" text-anchor="middle" font-size="54" fill="${ink}" font-weight="600" font-family="Iowan Old Style, Palatino Linotype, Times New Roman, Songti SC, serif">${safeTitle}</text>
+      ${coverTitle}
       <text x="360" y="902" text-anchor="middle" font-size="24" fill="${ink}" fill-opacity="0.68" font-family="Iowan Old Style, Palatino Linotype, Times New Roman, Songti SC, serif">Link Library Edition</text>
     </svg>
   `);

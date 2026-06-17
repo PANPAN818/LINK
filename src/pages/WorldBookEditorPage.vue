@@ -9,7 +9,7 @@
         <button class="book-power-button" :class="{ active: draft.enabled }" type="button" @click="toggleBookEnabled">
           <span>{{ draft.enabled ? 'Enabled' : 'Disabled' }}</span>
         </button>
-        <button v-if="selectedBookId" class="book-delete-button" type="button" @click="openDeletePage">
+        <button v-if="selectedBookId" class="book-delete-button" type="button" @click="requestDeleteWorldBook">
           <span>Delete</span>
         </button>
         <button class="world-book-editor-save-button" type="button" aria-label="保存世界书" title="保存世界书" @click="finishEditing">
@@ -212,6 +212,23 @@
         <small>{{ draft.entries.length }}</small>
       </button>
     </nav>
+
+    <AppModal v-model="showDeleteConfirm" title="确认删除世界书" :show-header="false" variant="ins">
+      <section class="confirm-card world-book-delete-confirm">
+        <p class="eyebrow">Delete check</p>
+        <h2>确认删除这本世界书？</h2>
+        <p>
+          <strong>{{ deleteBookTitle }}</strong>
+          删除后会从书架移除，绑定到角色的局部引用也会一并清掉。
+        </p>
+        <div class="confirm-actions">
+          <button class="ghost-button" type="button" :disabled="isDeletingWorldBook" @click="cancelDeleteWorldBook">再想想</button>
+          <button class="ghost-button danger" type="button" :disabled="isDeletingWorldBook" @click="confirmDeleteWorldBook">
+            {{ isDeletingWorldBook ? '删除中' : '确认删除' }}
+          </button>
+        </div>
+      </section>
+    </AppModal>
   </section>
 </template>
 
@@ -219,6 +236,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { BookOpen, ChevronLeft as ChevronLeftIcon, ChevronRight as ChevronRightIcon, Image as ImageIcon, Plus } from 'lucide-vue-next';
+import AppModal from '@/components/common/AppModal.vue';
 import { generateImageByProvider } from '@/services/ai';
 import { useAppStore } from '@/stores/appStore';
 import type { ImageProviderType, WorldBookEntry, WorldBookEntryActivation, WorldBookLoreEntry } from '@/types/domain';
@@ -238,6 +256,8 @@ const coverFeedback = ref('');
 const editorTab = ref<EditorTab>('cover');
 const activeEntryIndex = ref(0);
 const draftError = ref('');
+const showDeleteConfirm = ref(false);
+const isDeletingWorldBook = ref(false);
 const draft = reactive(createDraft());
 const isRestoringDraft = ref(false);
 const isLoaded = ref(false);
@@ -258,6 +278,7 @@ const currentSettings = computed(() => normalizeAppSettings(store.settings));
 const draftCoverImage = computed(() => resolveWorldBookCover(draft));
 const draftEnabledEntryCount = computed(() => draft.entries.filter((entry) => entry.enabled).length);
 const activeEntry = computed(() => draft.entries[activeEntryIndex.value] ?? draft.entries[0] ?? null);
+const deleteBookTitle = computed(() => draft.title.trim() || '未命名世界书');
 
 onMounted(() => {
   void store.hydrate();
@@ -428,11 +449,32 @@ async function finishEditing() {
   goBackToShelf();
 }
 
-async function openDeletePage() {
+async function requestDeleteWorldBook() {
   await flushAutoSave(true);
   const targetId = selectedBookId.value || draft.id;
   if (!targetId) return;
-  void router.push({ name: 'world-book-delete', params: { id: targetId } });
+  showDeleteConfirm.value = true;
+}
+
+function cancelDeleteWorldBook() {
+  if (isDeletingWorldBook.value) return;
+  showDeleteConfirm.value = false;
+}
+
+async function confirmDeleteWorldBook() {
+  const targetId = selectedBookId.value || draft.id;
+  if (!targetId || isDeletingWorldBook.value) return;
+  isDeletingWorldBook.value = true;
+  try {
+    await store.deleteWorldBook(targetId);
+    showDeleteConfirm.value = false;
+    clearAutoSaveTimer();
+    hasPendingAutoSave = false;
+    isLoaded.value = false;
+    void router.replace({ name: 'world-book' });
+  } finally {
+    isDeletingWorldBook.value = false;
+  }
 }
 
 function entryLampClass(entry: WorldBookLoreEntry) {
@@ -718,6 +760,62 @@ watch(draft, scheduleAutoSave, { deep: true });
   border: 1px solid rgba(180, 72, 92, 0.18);
   background: linear-gradient(135deg, rgba(255, 241, 245, 0.96), rgba(255, 255, 255, 0.9));
   color: #b4485c;
+}
+
+.world-book-delete-confirm {
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+  color: #7c847f;
+}
+
+.world-book-delete-confirm h2,
+.world-book-delete-confirm p {
+  margin: 0;
+}
+
+.world-book-delete-confirm h2 {
+  color: #1f2622;
+  font-size: 24px;
+  line-height: 1.1;
+}
+
+.world-book-delete-confirm p {
+  line-height: 1.7;
+}
+
+.world-book-delete-confirm strong {
+  display: block;
+  margin-bottom: 4px;
+  color: #1f2622;
+}
+
+.confirm-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.ghost-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 42px;
+  padding: 0 15px;
+  border: 1px solid rgba(17, 17, 17, 0.05);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.94);
+  color: #1f2622;
+  font-weight: 900;
+}
+
+.ghost-button.danger {
+  background: rgba(239, 68, 90, 0.08);
+  color: #b4485c;
+}
+
+.ghost-button:disabled {
+  opacity: 0.52;
 }
 
 .world-book-editor-tabs {

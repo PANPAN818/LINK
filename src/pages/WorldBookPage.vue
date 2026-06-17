@@ -5,9 +5,22 @@
         <h1 class="top-title">World Book</h1>
       </button>
 
-      <button class="world-book-create-button" type="button" aria-label="新建世界书" @click="openCreateWorldBook">
-        <Plus :size="20" stroke-width="2.4" />
-      </button>
+      <div class="world-book-actions">
+        <button class="world-book-action-button" type="button" :disabled="importingWorldBooks" aria-label="导入世界书" @click="openImportPicker">
+          <Upload :size="20" stroke-width="2.4" />
+        </button>
+        <button class="world-book-action-button" type="button" aria-label="新建世界书" @click="openCreateWorldBook">
+          <Plus :size="20" stroke-width="2.4" />
+        </button>
+        <input
+          ref="importInputRef"
+          class="world-book-import-input"
+          type="file"
+          accept=".json,.txt,.doc,.docx,application/json,text/plain,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+          multiple
+          @change="importWorldBookFiles"
+        />
+      </div>
     </header>
 
     <main class="world-book-main">
@@ -39,17 +52,20 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import { useRouter } from 'vue-router';
-import { BookOpen, BookOpenText, Globe2, Plus, UserRound } from 'lucide-vue-next';
+import { BookOpen, BookOpenText, Globe2, Plus, Upload, UserRound } from 'lucide-vue-next';
 import WorldBookShelf from '@/components/home/WorldBookShelf.vue';
 import { useAppStore } from '@/stores/appStore';
 import type { WorldBookEntry } from '@/types/domain';
+import { parseWorldBookImportText, readWorldBookImportFile, worldBookImportSourceTypeForFile } from '@/utils/worldBookImport';
 
 type ScopeFilter = 'all' | WorldBookEntry['scope'];
 
 const router = useRouter();
 const store = useAppStore();
 const worldBookShelfRef = ref<InstanceType<typeof WorldBookShelf> | null>(null);
+const importInputRef = ref<HTMLInputElement | null>(null);
 const activeScope = ref<ScopeFilter>('all');
+const importingWorldBooks = ref(false);
 
 const filters = [
   { id: 'all' as ScopeFilter, shortLabel: '全部', icon: BookOpen },
@@ -79,6 +95,59 @@ function goBack() {
 
 function openCreateWorldBook() {
   worldBookShelfRef.value?.openCreateModal();
+}
+
+function openImportPicker() {
+  if (importingWorldBooks.value) return;
+  importInputRef.value?.click();
+}
+
+function showImportFeedback(title: string, message: string) {
+  store.configAlert.title = title;
+  store.configAlert.message = message;
+  store.configAlert.open = true;
+}
+
+function importDefaultScope(): WorldBookEntry['scope'] {
+  return activeScope.value === 'all' ? 'local' : activeScope.value;
+}
+
+async function importWorldBookFiles(event: Event) {
+  const input = event.target instanceof HTMLInputElement ? event.target : null;
+  const files = Array.from(input?.files ?? []);
+  if (!files.length) return;
+
+  importingWorldBooks.value = true;
+  try {
+    await store.hydrate();
+    const importedBooks: WorldBookEntry[] = [];
+    const warnings: string[] = [];
+
+    for (const file of files) {
+      const text = await readWorldBookImportFile(file);
+      const result = parseWorldBookImportText(text, {
+        fileName: file.name,
+        defaultScope: importDefaultScope(),
+        sourceType: worldBookImportSourceTypeForFile(file)
+      });
+      importedBooks.push(...result.books);
+      warnings.push(...result.warnings.map((warning) => `${file.name}: ${warning}`));
+    }
+
+    if (!importedBooks.length) {
+      showImportFeedback('没有导入世界书', warnings.join('\n') || '没有识别到可导入的世界书内容。');
+      return;
+    }
+
+    await Promise.all(importedBooks.map((book) => store.saveWorldBook(book)));
+    const warningText = warnings.length ? `\n\n${warnings.join('\n')}` : '';
+    showImportFeedback('导入完成', `已导入 ${importedBooks.length} 本世界书。${warningText}`);
+  } catch (error) {
+    showImportFeedback('导入失败', error instanceof Error ? error.message : '世界书导入失败，请重试。');
+  } finally {
+    importingWorldBooks.value = false;
+    if (input) input.value = '';
+  }
 }
 
 function setScope(scope: ScopeFilter) {
@@ -124,13 +193,31 @@ function scopeCount(scope: ScopeFilter) {
   text-align: left;
 }
 
-.world-book-create-button {
+.world-book-actions {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  margin-left: auto;
+}
+
+.world-book-action-button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
   padding: 0;
   color: #111111;
+}
+
+.world-book-action-button:disabled {
+  opacity: 0.42;
+}
+
+.world-book-import-input {
+  display: none;
 }
 
 .world-book-main {

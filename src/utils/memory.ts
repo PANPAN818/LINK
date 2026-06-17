@@ -24,6 +24,8 @@ export function renderCharacterMemoryPrompt(prompt: string, characterName: strin
 export const defaultCharacterStickerGroupIds = ['sticker_group_default'];
 const legacyDefaultBackgroundColor = '#8fa2af';
 const defaultBackgroundColor = '#ffffff';
+const legacyDefaultUserBubbleColor = '#5ce46f';
+const defaultUserBubbleColor = '#eeeeee';
 
 export const defaultConversationSettings: Omit<ConversationSettings, 'conversationId'> = {
   memory: defaultChatMemorySettings,
@@ -36,7 +38,7 @@ export const defaultConversationSettings: Omit<ConversationSettings, 'conversati
     backgroundImage: '',
     backgroundImages: [],
     backgroundColor: defaultBackgroundColor,
-    userBubbleColor: '#5ce46f',
+    userBubbleColor: defaultUserBubbleColor,
     userTextColor: '#111111',
     characterBubbleColor: '#ffffff',
     characterTextColor: '#111111',
@@ -61,6 +63,10 @@ export function normalizeConversationSettings(settings: Partial<ConversationSett
   const backgroundColor = !rawBackgroundColor || rawBackgroundColor.toLowerCase() === legacyDefaultBackgroundColor
     ? defaultBackgroundColor
     : rawBackgroundColor;
+  const rawUserBubbleColor = String(appearance.userBubbleColor ?? defaultConversationSettings.appearance.userBubbleColor).trim();
+  const userBubbleColor = !rawUserBubbleColor || rawUserBubbleColor.toLowerCase() === legacyDefaultUserBubbleColor
+    ? defaultUserBubbleColor
+    : rawUserBubbleColor;
   const activeBackgroundImage = String(appearance.backgroundImage ?? '').trim();
   const backgroundImages = [
     activeBackgroundImage,
@@ -89,7 +95,7 @@ export function normalizeConversationSettings(settings: Partial<ConversationSett
       backgroundImage: activeBackgroundImage,
       backgroundImages: [...new Set(backgroundImages)],
       backgroundColor,
-      userBubbleColor: String(appearance.userBubbleColor ?? defaultConversationSettings.appearance.userBubbleColor).trim() || defaultConversationSettings.appearance.userBubbleColor,
+      userBubbleColor,
       userTextColor: String(appearance.userTextColor ?? defaultConversationSettings.appearance.userTextColor).trim() || defaultConversationSettings.appearance.userTextColor,
       characterBubbleColor: String(appearance.characterBubbleColor ?? defaultConversationSettings.appearance.characterBubbleColor).trim() || defaultConversationSettings.appearance.characterBubbleColor,
       characterTextColor: String(appearance.characterTextColor ?? defaultConversationSettings.appearance.characterTextColor).trim() || defaultConversationSettings.appearance.characterTextColor,

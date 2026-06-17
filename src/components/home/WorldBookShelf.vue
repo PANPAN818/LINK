@@ -223,20 +223,24 @@ defineExpose({
 
 .book-copy {
   display: grid;
+  width: 100%;
   min-width: 0;
   justify-items: center;
   text-align: center;
 }
 
 .book-copy strong {
-  display: block;
+  display: -webkit-box;
+  max-width: 100%;
   overflow: hidden;
   color: var(--ink);
   font-size: 9px;
   font-weight: 900;
   line-height: 1.25;
-  white-space: nowrap;
-  text-overflow: ellipsis;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .empty-shelf {

@@ -27,7 +27,7 @@ const legacyMomentToday = 'https://images.unsplash.com/photo-1515886657613-9f351
 const legacySvgMomentToday = '/src/assets/profile/momo-moment-today.svg';
 const fallbackAvatar = momoAvatar;
 const fallbackBackground = momoBackground;
-const legacyProfileBio = '今天也想把生活过成一张柔软的照片。';
+const legacyProfileBio = 'link to your excutive character';
 const defaultProfileBio = 'link with your exclusive Char';
 const legacyDefaultStats = {
   posts: 128,

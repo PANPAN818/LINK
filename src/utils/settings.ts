@@ -1,4 +1,4 @@
-import type { ApiVendor, ApiVendorModel, AppSettings, ImageProviderType, NovelAiImageSettings, OpenAiImageSettings, PollinationsImageSettings } from '@/types/domain';
+import type { ApiVendor, ApiVendorModel, AppSettings, GitHubBackupSettings, ImageProviderType, NovelAiImageSettings, OpenAiImageSettings, PollinationsImageSettings } from '@/types/domain';
 import { createId } from './id';
 
 const imageProviderOrder: ImageProviderType[] = ['openai', 'novelai', 'pollinations'];
@@ -80,7 +80,19 @@ export const defaultAppSettings: AppSettings = {
   },
   voomImageProvider: '',
   voomImageModel: '',
-  imagePrivateOnly: true
+  imagePrivateOnly: true,
+  githubBackup: {
+    enabled: false,
+    token: '',
+    owner: '',
+    repo: 'link-private-backups',
+    branch: 'main',
+    path: 'link-backup.json',
+    intervalMinutes: 30,
+    lastBackupAt: 0,
+    lastBackupStatus: 'idle',
+    lastBackupError: ''
+  }
 };
 
 function normalizeImageProvider(provider: string | null | undefined): ImageProviderType | '' {
@@ -140,6 +152,26 @@ function normalizePollinationsImageSettings(settings: Partial<PollinationsImageS
     nologo: settings?.nologo ?? defaultAppSettings.imagePollinations.nologo,
     private: settings?.private ?? defaultAppSettings.imagePollinations.private,
     lastImageUrl: String(settings?.lastImageUrl ?? '').trim()
+  };
+}
+
+function normalizeGitHubBackupSettings(settings: Partial<GitHubBackupSettings> | null | undefined): GitHubBackupSettings {
+  const intervalMinutes = Math.min(1440, Math.max(1, Math.round(Number(settings?.intervalMinutes ?? defaultAppSettings.githubBackup.intervalMinutes) || defaultAppSettings.githubBackup.intervalMinutes)));
+  const status = ['idle', 'running', 'success', 'failed'].includes(String(settings?.lastBackupStatus))
+    ? settings?.lastBackupStatus as GitHubBackupSettings['lastBackupStatus']
+    : defaultAppSettings.githubBackup.lastBackupStatus;
+
+  return {
+    enabled: Boolean(settings?.enabled),
+    token: String(settings?.token ?? '').trim(),
+    owner: String(settings?.owner ?? '').trim(),
+    repo: String(settings?.repo ?? defaultAppSettings.githubBackup.repo).trim() || defaultAppSettings.githubBackup.repo,
+    branch: String(settings?.branch ?? defaultAppSettings.githubBackup.branch).trim() || defaultAppSettings.githubBackup.branch,
+    path: String(settings?.path ?? defaultAppSettings.githubBackup.path).trim().replace(/^\/+/, '') || defaultAppSettings.githubBackup.path,
+    intervalMinutes,
+    lastBackupAt: Math.max(0, Number(settings?.lastBackupAt ?? 0) || 0),
+    lastBackupStatus: status,
+    lastBackupError: String(settings?.lastBackupError ?? '').trim()
   };
 }
 
@@ -370,7 +402,8 @@ export function normalizeAppSettings(settings?: Partial<AppSettings> | null): Ap
       imagePromptPrefix: legacyImagePromptPrefix || merged.imagePromptPrefix
     }),
     imageNovelAi: normalizeNovelAiImageSettings(settings?.imageNovelAi),
-    imagePollinations: normalizePollinationsImageSettings(settings?.imagePollinations)
+    imagePollinations: normalizePollinationsImageSettings(settings?.imagePollinations),
+    githubBackup: normalizeGitHubBackupSettings(settings?.githubBackup)
   };
 
   const resolvedApiConfig = getResolvedApiConfig(normalized);

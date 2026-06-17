@@ -21,11 +21,7 @@
         <DataCenterPanel
           v-else
           :user-id="store.user?.id || '--'"
-          :character-count="store.characters.length"
-          :conversation-count="store.conversations.length"
-          :message-count="store.messages.length"
-          :world-book-count="store.worldBooks.length"
-          :voom-count="store.voomPosts.length"
+          :settings="currentSettings"
         />
       </section>
     </main>
@@ -49,7 +45,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { ImagePlus, Plus, Save, Settings2, SlidersHorizontal, Volume2 } from 'lucide-vue-next';
+import { CloudUpload, ImagePlus, Plus, Save, SlidersHorizontal, Volume2 } from 'lucide-vue-next';
 import ApiSettingsEditor from '@/components/home/ApiSettingsEditor.vue';
 import DataCenterPanel from '@/components/settings/DataCenterPanel.vue';
 import ImageSettingsEditor from '@/components/settings/ImageSettingsEditor.vue';
@@ -87,11 +83,11 @@ const tabs = [
   },
   {
     id: 'data' as SettingsTab,
-    label: 'More',
-    shortLabel: 'More',
-    title: '本地数据概览',
-    longDescription: '数据页不直接改内容，只展示当前站点内的核心存储状态，方便确认本地资料、世界书和会话是否正常落盘。',
-    icon: Settings2
+    label: 'Backup',
+    shortLabel: 'Backup',
+    title: 'Backup',
+    longDescription: '数据页提供本地导入导出和 GitHub 私有仓库自动备份。',
+    icon: CloudUpload
   }
 ];
 

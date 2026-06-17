@@ -16,7 +16,6 @@ import StickersPage from '@/pages/StickersPage.vue';
 import StickerManagePage from '@/pages/StickerManagePage.vue';
 import WorldBookPage from '@/pages/WorldBookPage.vue';
 import WorldBookEditorPage from '@/pages/WorldBookEditorPage.vue';
-import WorldBookDeletePage from '@/pages/WorldBookDeletePage.vue';
 
 export const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -32,7 +31,7 @@ export const router = createRouter({
     { path: '/world-book', name: 'world-book', component: WorldBookPage },
     { path: '/world-book/new', name: 'world-book-new', component: WorldBookEditorPage },
     { path: '/world-book/:id/edit', name: 'world-book-edit', component: WorldBookEditorPage },
-    { path: '/world-book/:id/delete', name: 'world-book-delete', component: WorldBookDeletePage },
+    { path: '/world-book/:id/delete', redirect: (to) => ({ name: 'world-book-edit', params: { id: String(to.params.id) } }) },
     { path: '/settings', name: 'settings', component: SettingsPage },
     { path: '/settings/image/:module', name: 'image-module-settings', component: ImageModuleSettingsPage },
     { path: '/chats', name: 'chats', component: ChatsPage },

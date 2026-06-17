@@ -149,22 +149,30 @@
             </div>
           </header>
           <div class="background-manager">
-            <label class="field background-url-card">
-              <span>新增背景图 URL</span>
-              <div class="inline-input-action">
+            <section class="background-tool-panel" aria-label="背景导入与颜色">
+              <label class="field background-url-card">
+                <div class="background-field-title">
+                  <span>背景图 URL</span>
+                  <button class="setting-action-button primary-setting-action" type="button" aria-label="添加背景图 URL" @click="addBackgroundImageFromUrl">
+                    <Plus :size="16" stroke-width="2.5" aria-hidden="true" />
+                  </button>
+                </div>
                 <input v-model="backgroundImageUrlDraft" placeholder="https://..." @keydown.enter.prevent="addBackgroundImageFromUrl" />
-                <button class="setting-action-button primary-setting-action" type="button" @click="addBackgroundImageFromUrl">新增</button>
+              </label>
+              <div class="background-quick-actions">
+                <label class="upload-card background-upload-card">
+                  <strong>导入本地图片</strong>
+                  <input type="file" accept="image/*" multiple @change="readAppearanceFiles" />
+                </label>
+                <label class="field background-color-card appearance-color-field">
+                  <span>背景色</span>
+                  <div class="background-color-select">
+                    <input v-model="draft.appearance.backgroundColor" type="color" @change="saveDraft" />
+                    <span>{{ draft.appearance.backgroundColor }}</span>
+                  </div>
+                </label>
               </div>
-            </label>
-            <label class="upload-card background-upload-card">
-              <strong>导入本地背景</strong>
-              <span>可一次选择多张，保存到 IndexedDB。</span>
-              <input type="file" accept="image/*" multiple @change="readAppearanceFiles" />
-            </label>
-            <label class="field background-color-card appearance-color-field">
-              <span>背景色</span>
-              <input v-model="draft.appearance.backgroundColor" type="color" @change="saveDraft" />
-            </label>
+            </section>
             <section class="background-library" aria-label="背景图列表">
               <article
                 v-for="(image, index) in backgroundImageOptions"
@@ -194,10 +202,10 @@
           <section class="bubble-preview" :style="bubblePreviewStyle" aria-label="气泡预览">
             <div class="preview-row character-preview-row">
               <img class="avatar mini" :src="characterDraft.avatar" :alt="characterDraftNickname" />
-              <div class="preview-bubble" :style="characterBubblePreviewStyle">晚上好，今天的聊天会像这样显示。</div>
+              <div class="preview-bubble" :style="characterBubblePreviewStyle">角色的聊天会像这样显示。</div>
             </div>
             <div class="preview-row user-preview-row">
-              <div class="preview-bubble" :style="userBubblePreviewStyle">我这边的气泡颜色在这里预览。</div>
+              <div class="preview-bubble" :style="userBubblePreviewStyle">用户气泡颜色在这里预览。</div>
             </div>
           </section>
           <div class="color-grid">
@@ -242,13 +250,6 @@
             </div>
           </label>
           <label class="switch-card wide">
-            <input v-model="draft.narrationModeEnabled" type="checkbox" @change="saveDraft" />
-            <span class="switch-track"></span>
-            <div>
-              <strong>旁白模式</strong>
-            </div>
-          </label>
-          <label class="switch-card wide">
             <input v-model="draft.appearance.hideVoomNarration" type="checkbox" @change="saveDraft" />
             <span class="switch-track"></span>
             <div>
@@ -259,78 +260,82 @@
       </section>
 
       <section v-else-if="activeTab === 'profile'" class="panel-section profile-panel">
-        <section class="profile-preview">
-          <img class="avatar" :src="characterDraft.avatar" :alt="characterDraftNickname" />
-          <div>
-            <strong>{{ characterDraftNickname }}</strong>
-            <span>ID {{ characterDraft.id }}</span>
+        <section class="profile-section wide-field" aria-label="角色基础资料">
+          <div class="avatar-card">
+            <img class="avatar-preview" :src="characterDraft.avatar" :alt="characterDraftNickname" />
+            <label class="avatar-upload">
+              <input type="file" accept="image/*" @change="readAvatarFile" />
+              <span>导入头像</span>
+            </label>
           </div>
-        </section>
-        <section class="settings-block">
-          <header class="section-header">
-            <div>
-              <span>Identity</span>
-              <strong>头像与公开资料</strong>
-            </div>
-          </header>
-          <div class="profile-avatar-stack">
-            <label class="field">
+          <div class="profile-fields">
+            <label class="field avatar-url-field">
               <span>头像 URL</span>
               <input v-model="characterDraft.avatar" @change="saveCharacterDraft" />
             </label>
-            <label class="upload-card">
-              <strong>上传本地头像</strong>
-              <span>也可以直接粘贴头像 URL。</span>
-              <input type="file" accept="image/*" @change="readAvatarFile" />
-            </label>
+
+            <section class="identity-row" aria-label="角色名称资料">
+              <label class="field compact-field">
+                <span>名字</span>
+                <input v-model="characterDraft.name" @change="saveCharacterDraft" />
+              </label>
+
+              <label class="field compact-field">
+                <span>网名</span>
+                <input v-model="characterDraft.nickname" @change="saveCharacterDraft" />
+              </label>
+
+              <label class="field compact-field note-field">
+                <span>备注</span>
+                <input v-model="characterDraft.userNote" @change="saveCharacterDraft" />
+              </label>
+            </section>
           </div>
-          <label class="field">
-            <span>备注（仅用户可见，API 不读取）</span>
-            <input v-model="characterDraft.userNote" @change="saveCharacterDraft" />
-          </label>
-          <label class="field">
-            <span>网名</span>
-            <input v-model="characterDraft.nickname" @change="saveCharacterDraft" />
-          </label>
-          <label class="field">
-            <span>个性签名</span>
-            <input v-model="characterDraft.signature" @change="saveCharacterDraft" />
-          </label>
-          <label class="field">
-            <span>名字</span>
-            <input v-model="characterDraft.name" @change="saveCharacterDraft" />
-          </label>
-          <label class="field">
-            <span>角色资料</span>
-            <textarea v-model="characterDraft.description" @change="saveCharacterDraft"></textarea>
-          </label>
         </section>
-        <section class="settings-block local-book-bind" aria-labelledby="profile-local-world-book-title">
-          <header class="section-header local-book-header">
-            <div>
-              <span>Local lore</span>
-              <strong id="profile-local-world-book-title">绑定局部世界书</strong>
-            </div>
+
+        <label class="field wide-field">
+          <span>个性签名</span>
+          <input v-model="characterDraft.signature" @change="saveCharacterDraft" />
+        </label>
+
+        <label class="field wide-field">
+          <span>角色资料</span>
+          <textarea v-model="characterDraft.description" rows="7" @change="saveCharacterDraft"></textarea>
+        </label>
+
+        <section class="local-book-bind wide-field" aria-labelledby="profile-local-world-book-title">
+          <div class="local-book-header">
+            <strong id="profile-local-world-book-title">绑定局部世界书</strong>
             <span v-if="localWorldBooks.length">{{ characterDraft.localWorldBookIds.length }}/{{ localWorldBooks.length }}</span>
-          </header>
-          <div class="local-book-actions">
-            <button class="secondary-action" type="button" @click="createLocalWorldBook">新增局部世界书</button>
           </div>
           <div v-if="localWorldBooks.length" class="local-book-list">
-            <article v-for="book in localWorldBooks" :key="book.id" class="local-book-card" :class="{ selected: characterDraft.localWorldBookIds.includes(book.id) }">
-              <label class="local-book-row">
-                <input :checked="characterDraft.localWorldBookIds.includes(book.id)" type="checkbox" @change="toggleLocalWorldBook(book.id, $event)" />
-                <span class="book-check" aria-hidden="true"></span>
-                <span>{{ book.title }}</span>
-              </label>
-              <button class="local-book-edit" type="button" @click="editLocalWorldBook(book.id)">修改</button>
-            </article>
+            <label v-for="book in localWorldBooks" :key="book.id" class="local-book-row" :class="{ selected: characterDraft.localWorldBookIds.includes(book.id) }">
+              <input :checked="characterDraft.localWorldBookIds.includes(book.id)" type="checkbox" @change="toggleLocalWorldBook(book.id, $event)" />
+              <span>{{ book.title }}</span>
+              <span class="book-check" aria-hidden="true"></span>
+            </label>
           </div>
-          <p v-else class="local-book-empty">暂无局部世界书，可以先新增一本。</p>
+          <p v-else class="local-book-empty">暂无局部世界书</p>
         </section>
       </section>
 
       <section v-else class="panel-section other-panel">
+        <section class="settings-block">
+          <header class="section-header">
+            <div>
+              <span>Narration</span>
+              <strong>旁白模式</strong>
+            </div>
+          </header>
+          <label class="switch-card wide">
+            <input v-model="draft.narrationModeEnabled" type="checkbox" @change="saveDraft" />
+            <span class="switch-track"></span>
+            <div>
+              <strong>开启旁白模式</strong>
+              <span>线上聊天回复会加入角色动描等旁白。</span>
+            </div>
+          </label>
+        </section>
         <section class="settings-block">
           <header class="section-header">
             <div>
@@ -409,9 +414,8 @@
 </template>
 
 <script setup lang="ts">
-import { ChevronDown } from 'lucide-vue-next';
+import { ChevronDown, Plus } from 'lucide-vue-next';
 import { computed, reactive, ref, watch } from 'vue';
-import { useRouter } from 'vue-router';
 import AvatarCropperModal from '@/components/image/AvatarCropperModal.vue';
 import { useAppStore } from '@/stores/appStore';
 import type { CharacterProfile, ConversationMemoryRecord, ConversationSettings } from '@/types/domain';
@@ -426,7 +430,6 @@ const props = defineProps<{
 }>();
 
 const store = useAppStore();
-const router = useRouter();
 export type PanelTab = 'memory' | 'beauty' | 'profile' | 'other';
 
 const activeTab = computed(() => props.activeTab);
@@ -694,14 +697,6 @@ function toggleLocalWorldBook(bookId: string, event: Event) {
   else ids.delete(bookId);
   characterDraft.localWorldBookIds = localWorldBooks.value.map((book) => book.id).filter((id) => ids.has(id));
   saveCharacterDraft();
-}
-
-function createLocalWorldBook() {
-  void router.push({ name: 'world-book-new', query: { scope: 'local' } });
-}
-
-function editLocalWorldBook(bookId: string) {
-  void router.push({ name: 'world-book-edit', params: { id: bookId } });
 }
 
 function readFileAsDataUrl(file: File) {
@@ -2043,23 +2038,120 @@ function applyEditedAvatar(value: string) {
   min-height: 58px;
 }
 
-.profile-avatar-stack {
-  display: grid;
-  gap: 10px;
+.wide-field {
+  min-width: 0;
 }
 
-.profile-avatar-stack .field,
-.profile-avatar-stack .upload-card {
+.profile-section,
+.local-book-bind {
+  border: 1px solid rgba(17, 17, 17, 0.04);
+  background: rgba(255, 255, 255, 0.84);
+  box-shadow: 0 14px 36px rgba(21, 30, 26, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.92);
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+}
+
+.profile-section {
+  display: grid;
+  grid-template-columns: clamp(82px, 25vw, 104px) minmax(0, 1fr);
+  gap: clamp(10px, 3vw, 14px);
+  align-items: center;
   min-width: 0;
-  min-height: 86px;
+  padding: clamp(12px, 3.5vw, 14px);
+  border-radius: 24px;
+}
+
+.avatar-card {
+  align-self: center;
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.avatar-preview {
+  width: clamp(70px, 21vw, 88px);
+  height: clamp(70px, 21vw, 88px);
+  border-radius: clamp(20px, 6vw, 26px);
+  background: #eef3f1;
+  object-fit: cover;
+  box-shadow: inset 0 0 0 1px rgba(17, 17, 17, 0.05), 0 12px 26px rgba(26, 33, 30, 0.08);
+}
+
+.avatar-upload {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 38px;
+  max-width: 100%;
+  padding: 0 clamp(10px, 2.8vw, 12px);
+  border: 1px solid rgba(6, 199, 85, 0.16);
+  border-radius: 999px;
+  background: linear-gradient(135deg, rgba(232, 249, 239, 0.98), rgba(255, 242, 247, 0.96));
+  color: #16643e;
+  font-size: 11px;
+  font-weight: 850;
+  white-space: nowrap;
+  box-shadow: 0 10px 20px rgba(31, 120, 74, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  touch-action: manipulation;
+}
+
+.avatar-upload input {
+  display: none;
+}
+
+.profile-fields {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.identity-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: clamp(8px, 2.5vw, 10px);
+  min-width: 0;
+}
+
+.note-field {
+  grid-column: 1 / -1;
+}
+
+.profile-section .compact-field {
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.profile-section .compact-field input {
+  min-height: 44px;
+  padding: 11px 12px;
+  border-radius: 16px;
+}
+
+.profile-panel > .field textarea {
+  min-height: 168px;
 }
 
 .local-book-bind {
+  display: grid;
   gap: 10px;
+  padding: 14px;
+  border-radius: 22px;
 }
 
 .local-book-header {
+  display: flex;
   align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.local-book-header strong {
+  color: #30363a;
+  font-size: 13px;
 }
 
 .local-book-header > span,
@@ -2069,47 +2161,42 @@ function applyEditedAvatar(value: string) {
   font-weight: 850;
 }
 
-.local-book-actions {
-  display: grid;
-}
-
 .local-book-list {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 9px;
-}
-
-.local-book-card {
-  display: grid;
-  gap: 8px;
-  padding: 9px;
-  border: 1px solid rgba(42, 75, 60, 0.08);
-  border-radius: 16px;
-  background: rgba(250, 252, 250, 0.96);
-  box-shadow: 0 8px 18px rgba(30, 55, 45, 0.04), inset 0 1px 0 rgba(255, 255, 255, 0.9);
-  transition: border-color 0.18s ease, background 0.18s ease, box-shadow 0.18s ease;
-}
-
-.local-book-card.selected {
-  border-color: rgba(6, 199, 85, 0.24);
-  background: linear-gradient(135deg, rgba(237, 252, 242, 0.98), rgba(255, 246, 249, 0.96));
-  box-shadow: 0 10px 24px rgba(31, 120, 74, 0.09), inset 0 1px 0 rgba(255, 255, 255, 0.92);
+  gap: 10px;
+  max-height: calc(58px * 4 + 10px * 3);
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 }
 
 .local-book-row {
   position: relative;
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  gap: 9px;
-  min-height: 36px;
-  color: #33393d;
-  font-size: 12px;
+  gap: 12px;
+  min-width: 0;
+  min-height: 58px;
+  padding: 0 14px;
+  border: 1px solid transparent;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.95);
+  color: #151719;
+  font-size: 13px;
   font-weight: 850;
+  box-shadow: 0 8px 18px rgba(30, 55, 45, 0.04), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  transition: border-color 0.18s ease, background 0.18s ease, box-shadow 0.18s ease, color 0.18s ease;
   touch-action: manipulation;
 }
 
-.local-book-card.selected .local-book-row {
-  color: #1f5f3d;
+.local-book-row.selected {
+  border-color: rgba(6, 199, 85, 0.34);
+  background: #f7fffa;
+  color: #146b3f;
+  box-shadow: inset 0 0 0 1px rgba(6, 199, 85, 0.12), 0 8px 18px rgba(30, 55, 45, 0.04), inset 0 1px 0 rgba(255, 255, 255, 0.9);
 }
 
 .local-book-row input {
@@ -2120,21 +2207,20 @@ function applyEditedAvatar(value: string) {
 
 .book-check {
   position: relative;
-  width: 22px;
-  height: 22px;
-  flex: 0 0 22px;
-  border-radius: 8px;
-  background: #ffffff;
-  box-shadow: inset 0 0 0 1.5px rgba(104, 119, 111, 0.35);
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  background: rgba(21, 23, 25, 0.05);
+  box-shadow: inset 0 0 0 1px rgba(21, 23, 25, 0.1);
 }
 
 .book-check::after {
   content: '';
   position: absolute;
-  left: 7px;
-  top: 4px;
-  width: 6px;
-  height: 10px;
+  left: 6px;
+  top: 3px;
+  width: 5px;
+  height: 9px;
   border: solid #ffffff;
   border-width: 0 2px 2px 0;
   opacity: 0;
@@ -2142,30 +2228,21 @@ function applyEditedAvatar(value: string) {
   transition: opacity 0.18s ease, transform 0.18s ease;
 }
 
-.local-book-card.selected .book-check {
+.local-book-row.selected .book-check {
   background: var(--link-green);
   box-shadow: inset 0 0 0 1px rgba(6, 199, 85, 0.7), 0 6px 14px rgba(6, 199, 85, 0.22);
 }
 
-.local-book-card.selected .book-check::after {
+.local-book-row.selected .book-check::after {
   opacity: 1;
   transform: rotate(45deg) scale(1);
 }
 
-.local-book-row span:last-child {
+.local-book-row span:first-of-type {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.local-book-edit {
-  min-height: 32px;
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.78);
-  color: #31373a;
-  font-size: 12px;
-  font-weight: 900;
 }
 
 .local-book-empty {
@@ -3010,5 +3087,214 @@ function applyEditedAvatar(value: string) {
   background: rgba(239, 242, 240, 0.86);
   color: #a0aaa5;
   box-shadow: none;
+}
+
+.beauty-panel .background-manager {
+  gap: 9px;
+}
+
+.beauty-panel .background-tool-panel {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 9px;
+  align-items: stretch;
+  min-width: 0;
+}
+
+.beauty-panel .background-quick-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px;
+  min-width: 0;
+}
+
+.beauty-panel .background-url-card,
+.beauty-panel .background-upload-card,
+.beauty-panel .background-color-card {
+  min-height: 0;
+  padding: 10px;
+  border-radius: 16px;
+  background: rgba(248, 251, 249, 0.92);
+  box-shadow: 0 8px 18px rgba(28, 55, 44, 0.03), inset 0 1px 0 rgba(255, 255, 255, 0.92);
+}
+
+.beauty-panel .background-url-card {
+  align-content: stretch;
+  gap: 8px;
+}
+
+.beauty-panel .background-field-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.beauty-panel .background-field-title > span {
+  min-width: 0;
+  overflow: hidden;
+  color: #626d68;
+  font-size: 11px;
+  font-weight: 900;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.beauty-panel .background-field-title .setting-action-button {
+  flex: 0 0 28px;
+  width: 28px;
+  min-width: 28px;
+  min-height: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: #16643e;
+  box-shadow: none;
+}
+
+.beauty-panel .background-field-title .setting-action-button svg {
+  flex: 0 0 auto;
+}
+
+.beauty-panel .background-url-card > span,
+.beauty-panel .background-color-card > span {
+  color: #626d68;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.beauty-panel .inline-input-action {
+  gap: 7px;
+}
+
+.beauty-panel .background-url-card > input,
+.beauty-panel .inline-input-action input {
+  min-height: 42px;
+  border-radius: 14px;
+  font-weight: 800;
+}
+
+.beauty-panel .setting-action-button {
+  min-width: 56px;
+  min-height: 42px;
+  padding-inline: 12px;
+  border-radius: 14px;
+}
+
+.beauty-panel .background-upload-card {
+  align-content: center;
+  gap: 2px;
+  min-height: 54px;
+}
+
+.beauty-panel .background-upload-card strong {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 13px;
+  line-height: 1.15;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.beauty-panel .background-upload-card span {
+  color: #78827d;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.beauty-panel .background-color-card {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 5px;
+  align-items: stretch;
+  min-height: 54px;
+}
+
+.beauty-panel .background-color-select {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  min-height: 0;
+  height: 28px;
+  padding: 4px 9px 4px 4px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.95);
+  box-shadow: inset 0 0 0 1px rgba(42, 75, 60, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+}
+
+.beauty-panel .background-color-select input[type='color'] {
+  width: 20px;
+  min-width: 20px;
+  min-height: 20px;
+  height: 20px;
+  padding: 3px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  box-shadow: none;
+}
+
+.beauty-panel .background-color-select span {
+  min-width: 0;
+  overflow: hidden;
+  color: #626d68;
+  font-size: 11px;
+  font-weight: 850;
+  text-transform: uppercase;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.beauty-panel .background-library {
+  gap: 8px;
+  max-height: min(306px, 42vh);
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+}
+
+.beauty-panel .compact-empty-note {
+  min-height: 58px;
+  padding: 10px 12px;
+  border-radius: 16px;
+  color: #74807a;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.45;
+}
+
+.beauty-panel .background-thumb-card {
+  gap: 7px;
+  padding: 8px;
+  border-radius: 16px;
+}
+
+.beauty-panel .background-thumb {
+  min-height: 86px;
+  border-radius: 13px;
+}
+
+.beauty-panel .background-thumb-actions {
+  gap: 7px;
+}
+
+.beauty-panel .background-thumb-actions button {
+  min-height: 34px;
+  border-radius: 12px;
+}
+
+@media (max-width: 360px) {
+  .beauty-panel .background-tool-panel {
+    grid-template-columns: 1fr;
+  }
+
+  .beauty-panel .background-quick-actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 </style>

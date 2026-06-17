@@ -1,17 +1,19 @@
 import { computed, ref, toRaw } from 'vue';
 import { defineStore } from 'pinia';
-import { deleteEntity, loadSnapshot, putEntity } from '@/data/db';
-import { defaultStickerGroups } from '@/data/seed';
-import type { AppSettings, CharacterProfile, ChatMessage, ChatMessageQuote, ChatMode, Conversation, ConversationMemoryRecord, ConversationSettings, Sticker, StickerGroup, UserProfile, VisualProfile, VoomComment, VoomPost, VoomPostVisibility, WorldBookEntry } from '@/types/domain';
+import { deleteEntity, loadSnapshot, putEntity, replaceSnapshot } from '@/data/db';
+import { defaultSettings, defaultStickerGroups } from '@/data/seed';
+import type { AppSettings, AppSnapshot, CharacterProfile, ChatMessage, ChatMessageQuote, ChatMode, Conversation, ConversationMemoryRecord, ConversationSettings, Sticker, StickerGroup, UserProfile, VisualProfile, VoomComment, VoomPost, VoomPostVisibility, WorldBookEntry } from '@/types/domain';
 import { createAccountId, createId } from '@/utils/id';
 import { getCharacterVoomAuthorName, normalizeCharacterMindStateLines, normalizeCharacterProfile } from '@/utils/character';
 import { normalizeUserProfile, normalizeVisualProfile } from '@/utils/profile';
 import { mergeVendorModels, normalizeAppSettings } from '@/utils/settings';
-import { normalizeWorldBookEntry } from '@/utils/worldBook';
+import { normalizeWorldBookEntry, normalizeWorldBooks } from '@/utils/worldBook';
 import { createStickerFromDraft, createStickerGroup, normalizeSticker, normalizeStickerGroup, type StickerImportDraft } from '@/utils/stickers';
 import { ageMemoryKind, createMemoryRecord, getConversationFloorCount, getHiddenMessageIds, getMemoryContext, getMessageFloorMap, getMessagesInFloorRange, getNextSummaryRange, getVisibleMessages, normalizeConversationSettings, renderCharacterMemoryPrompt, shouldCompressMemory } from '@/utils/memory';
 import { formatContentWithChineseTranslation, normalizeTranslationText } from '@/utils/translation';
 import { estimateRoleplayReplyInputTokens, fetchVendorModels, generateConversationSummary, generateEmbeddingVector, generateRoleplayReply, generateUserVoomComments, generateVoomCommentReplies, generateVoomPost, hasTextGenerationConfig, shouldAutoGenerateMoment, type RoleplayReplyResult } from '@/services/ai';
+import { formatGitHubBackupError, uploadGitHubBackup } from '@/services/githubBackup';
+import { createLinkBackupFile } from '@/utils/backup';
 
 interface CreateUserVoomPostPayload {
   userId: string;
@@ -25,6 +27,7 @@ interface CreateUserVoomPostPayload {
 export const useAppStore = defineStore('app', () => {
   const ready = ref(false);
   let hydratePromise: Promise<void> | null = null;
+  let githubBackupRunning = false;
   const loadingReply = ref(false);
   const replyingVoomCommentPostIds = ref<string[]>([]);
   const configAlert = ref({ open: false, title: '提示', message: '' });
@@ -83,6 +86,62 @@ export const useAppStore = defineStore('app', () => {
     });
 
     return { dedupedGroups, dedupedStickers, removedGroupIds: [...removedIdToKeptId.keys()] };
+  }
+
+  function normalizeSnapshotForRestore(snapshot: AppSnapshot): AppSnapshot {
+    const normalizedUsers = snapshot.users.map((entry) => normalizeUserProfile(entry));
+    if (!normalizedUsers.length) throw new Error('备份文件里没有用户资料。');
+
+    const fallbackUserId = snapshot.settings.activeUserId || normalizedUsers[0].id;
+    const normalizedGroups = snapshot.stickerGroups
+      .map((entry) => normalizeStickerGroup(entry))
+      .filter((entry): entry is StickerGroup => Boolean(entry));
+    if (!normalizedGroups.length) {
+      normalizedGroups.push({ ...defaultStickerGroups[0], createdAt: Date.now(), updatedAt: Date.now() });
+    }
+    const fallbackGroupId = normalizedGroups[0]?.id ?? defaultStickerGroups[0].id;
+    const normalizedStickers = snapshot.stickers
+      .map((entry) => normalizeSticker(entry, fallbackGroupId))
+      .filter((entry): entry is Sticker => Boolean(entry));
+    const { dedupedGroups, dedupedStickers } = dedupeStickerGroups(normalizedGroups, normalizedStickers);
+
+    return {
+      users: normalizedUsers,
+      characters: snapshot.characters.map((entry) => normalizeCharacterProfile(entry, fallbackUserId)),
+      conversations: snapshot.conversations,
+      messages: snapshot.messages,
+      voomPosts: snapshot.voomPosts,
+      worldBooks: normalizeWorldBooks(snapshot.worldBooks),
+      stickerGroups: dedupedGroups,
+      stickers: dedupedStickers,
+      conversationSettings: snapshot.conversationSettings.map((entry) => normalizeConversationSettings(entry, entry.conversationId)),
+      conversationMemories: snapshot.conversationMemories.map((memory) => ({
+        ...memory,
+        kind: ageMemoryKind(memory.createdAt),
+        vector: Array.isArray(memory.vector) ? memory.vector : []
+      })),
+      settings: normalizeAppSettings({
+        ...defaultSettings,
+        ...snapshot.settings,
+        activeUserId: snapshot.settings.activeUserId || normalizedUsers[0].id
+      })
+    };
+  }
+
+  function applySnapshotToStore(snapshot: AppSnapshot) {
+    users.value = snapshot.users;
+    characters.value = snapshot.characters;
+    conversations.value = snapshot.conversations;
+    messages.value = snapshot.messages;
+    voomPosts.value = snapshot.voomPosts;
+    worldBooks.value = snapshot.worldBooks;
+    stickerGroups.value = snapshot.stickerGroups;
+    stickers.value = snapshot.stickers;
+    conversationSettings.value = snapshot.conversationSettings;
+    conversationMemories.value = snapshot.conversationMemories;
+    settings.value = snapshot.settings;
+    activeConversationId.value = null;
+    ready.value = true;
   }
 
   async function hydrate() {
@@ -1012,6 +1071,64 @@ export const useAppStore = defineStore('app', () => {
     await deleteEntity('worldBooks', worldBookId);
   }
 
+  async function createBackupFile() {
+    return createLinkBackupFile(await loadSnapshot());
+  }
+
+  async function importBackupSnapshot(snapshot: AppSnapshot) {
+    const normalizedSnapshot = normalizeSnapshotForRestore(snapshot);
+    await replaceSnapshot(normalizedSnapshot);
+    applySnapshotToStore(normalizedSnapshot);
+    void refreshEnabledVendorModels();
+  }
+
+  async function saveGitHubBackupState(overrides: Partial<AppSettings['githubBackup']>) {
+    if (!settings.value) return;
+    const normalizedSettings = normalizeAppSettings({
+      ...settings.value,
+      githubBackup: {
+        ...settings.value.githubBackup,
+        ...overrides
+      }
+    });
+    settings.value = normalizedSettings;
+    await putEntity('settings', normalizedSettings, 'main');
+  }
+
+  async function runGitHubBackup(reason: 'manual' | 'auto' = 'manual') {
+    if (githubBackupRunning) return false;
+    if (!settings.value) throw new Error('设置尚未载入。');
+
+    const config = settings.value.githubBackup;
+    if (!config.token || !config.owner || !config.repo) throw new Error('请先连接 GitHub 并创建备份仓库。');
+
+    githubBackupRunning = true;
+    await saveGitHubBackupState({ lastBackupStatus: 'running', lastBackupError: '' });
+
+    try {
+      const backup = await createBackupFile();
+      const activeConfig = settings.value?.githubBackup ?? config;
+      await uploadGitHubBackup(
+        {
+          token: activeConfig.token,
+          owner: activeConfig.owner,
+          repo: activeConfig.repo,
+          branch: activeConfig.branch,
+          path: activeConfig.path
+        },
+        JSON.stringify(backup, null, 2),
+        `${reason === 'auto' ? 'Auto' : 'Manual'} LINK backup ${new Date().toISOString()}`
+      );
+      await saveGitHubBackupState({ lastBackupAt: Date.now(), lastBackupStatus: 'success', lastBackupError: '' });
+      return true;
+    } catch (error) {
+      await saveGitHubBackupState({ lastBackupStatus: 'failed', lastBackupError: formatGitHubBackupError(error) });
+      throw error;
+    } finally {
+      githubBackupRunning = false;
+    }
+  }
+
   async function saveSettings(nextSettings: AppSettings) {
     const normalizedSettings = normalizeAppSettings(nextSettings);
     settings.value = normalizedSettings;
@@ -1429,6 +1546,17 @@ export const useAppStore = defineStore('app', () => {
           .slice(0, 3)
         : [];
       const replyStickers = resolveCharacterStickerSelections(parsedReply.stickers, availableCharacterStickers);
+      const replyStickerPlacements = (parsedReply.stickerPlacements ?? [])
+        .map((placement) => {
+          const rawReplyIndex = Number(placement.replyIndex);
+          const replyIndex = Number.isFinite(rawReplyIndex)
+            ? Math.min(Math.max(0, Math.floor(rawReplyIndex)), Math.max(0, replyMessages.length - 1))
+            : 0;
+          const position = placement.position === 'before' ? 'before' : 'after';
+          const stickers = resolveCharacterStickerSelections(placement.stickers, availableCharacterStickers);
+          return { replyIndex, position, stickers };
+        })
+        .filter((placement) => placement.stickers.length);
       const recallMessageIds = parsedReply.messageActions?.recallMessageIds ?? [];
       const validRecallMessageIds = recallMessageIds.filter((messageId) => messages.value.some((message) => message.id === messageId && message.conversationId === conversationId && message.sender === 'char'));
       const quoteByReplyIndex = new Map<number, ChatMessageQuote>();
@@ -1484,34 +1612,52 @@ export const useAppStore = defineStore('app', () => {
         replyBatchId,
         status: 'sent' as const
       } satisfies ChatMessage));
-      const charTextMessages = replyMessages.map((reply, index) => ({
-        id: createId('msg'),
-        conversationId,
-        sender: 'char' as const,
-        mode: conversation.activeMode,
-        content: reply.content,
-        translation: reply.translation || undefined,
-        quote: quoteByReplyIndex.get(index),
-        replyBatchId,
-        createdAt: createdAt + charNarrationMessages.length + index,
-        status: 'sent' as const
-      } satisfies ChatMessage));
-      const charStickerMessages = replyStickers.map((sticker, index) => ({
-        id: createId('msg'),
-        conversationId,
-        sender: 'char' as const,
-        mode: conversation.activeMode,
-        content: `[Sticker] ${sticker.description}`,
-        sticker: {
-          stickerId: sticker.id,
-          description: sticker.description,
-          imageUrl: sticker.imageUrl
-        },
-        replyBatchId,
-        createdAt: createdAt + charNarrationMessages.length + charTextMessages.length + index,
-        status: 'sent' as const
-      } satisfies ChatMessage));
-      const charMessages = [...charNarrationMessages, ...charTextMessages, ...charStickerMessages];
+      const charMessagesAfterNarration: ChatMessage[] = [];
+      let charMessageOffset = charNarrationMessages.length;
+      const appendStickerMessages = (stickersToSend: Sticker[]) => {
+        charMessagesAfterNarration.push(...stickersToSend.map((sticker) => ({
+          id: createId('msg'),
+          conversationId,
+          sender: 'char' as const,
+          mode: conversation.activeMode,
+          content: `[Sticker] ${sticker.description}`,
+          sticker: {
+            stickerId: sticker.id,
+            description: sticker.description,
+            imageUrl: sticker.imageUrl
+          },
+          replyBatchId,
+          createdAt: createdAt + charMessageOffset++,
+          status: 'sent' as const
+        } satisfies ChatMessage)));
+      };
+      const appendPlacedStickers = (replyIndex: number, position: 'before' | 'after') => {
+        for (const placement of replyStickerPlacements) {
+          if (placement.replyIndex === replyIndex && placement.position === position) appendStickerMessages(placement.stickers);
+        }
+      };
+      if (replyMessages.length) {
+        replyMessages.forEach((reply, index) => {
+          appendPlacedStickers(index, 'before');
+          charMessagesAfterNarration.push({
+            id: createId('msg'),
+            conversationId,
+            sender: 'char' as const,
+            mode: conversation.activeMode,
+            content: reply.content,
+            translation: reply.translation || undefined,
+            quote: quoteByReplyIndex.get(index),
+            replyBatchId,
+            createdAt: createdAt + charMessageOffset++,
+            status: 'sent' as const
+          } satisfies ChatMessage);
+          appendPlacedStickers(index, 'after');
+        });
+      } else {
+        replyStickerPlacements.forEach((placement) => appendStickerMessages(placement.stickers));
+      }
+      appendStickerMessages(replyStickers);
+      const charMessages = [...charNarrationMessages, ...charMessagesAfterNarration];
       if (charMessages.length) {
         messages.value.push(...charMessages);
         await Promise.all(charMessages.map((message) => putEntity('messages', message)));
@@ -1981,6 +2127,9 @@ export const useAppStore = defineStore('app', () => {
     moveStickersToGroup,
     saveWorldBook,
     deleteWorldBook,
+    createBackupFile,
+    importBackupSnapshot,
+    runGitHubBackup,
     saveSettings,
     refreshEnabledVendorModels,
     bindWorldBook,

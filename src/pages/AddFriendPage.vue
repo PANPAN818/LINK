@@ -4,7 +4,7 @@
       <button class="add-title-button" type="button" aria-label="返回上一页" @click="goBack">
         <h1 class="top-title">Add</h1>
       </button>
-      <button v-if="activeFormTab === 'add'" class="add-submit-button" type="submit" form="add-friend-form" aria-label="添加好友" title="添加好友">
+      <button v-if="submitFormId" class="add-submit-button" type="submit" :form="submitFormId" :aria-label="submitLabel" :title="submitLabel">
         <Plus :size="18" stroke-width="2.4" aria-hidden="true" />
       </button>
       <span v-else class="header-spacer" aria-hidden="true"></span>
@@ -16,6 +16,7 @@
         :accounts="store.accounts"
         :active-user-id="store.user?.id || ''"
         :local-books="localWorldBooks"
+        @scan-import-ready="scanImportReady = $event"
         @add="addFriend"
       />
     </main>
@@ -57,8 +58,15 @@ const router = useRouter();
 const route = useRoute();
 const store = useAppStore();
 const activeFormTab = ref<AddFormTab>('add');
+const scanImportReady = ref(false);
 
 const localWorldBooks = computed(() => store.worldBooks.filter((book) => book.scope === 'local'));
+const submitFormId = computed(() => {
+  if (activeFormTab.value === 'add') return 'add-friend-form';
+  if (activeFormTab.value === 'scan' && scanImportReady.value) return 'import-character-form';
+  return '';
+});
+const submitLabel = computed(() => activeFormTab.value === 'scan' ? '导入角色' : '添加好友');
 
 function fallbackRouteName() {
   const from = String(route.query.from ?? '').trim();

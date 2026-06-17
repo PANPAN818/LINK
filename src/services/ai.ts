@@ -27,12 +27,21 @@ export interface RoleplayMessageActions {
   quotes: RoleplayQuoteAction[];
 }
 
+export type RoleplayStickerPosition = 'before' | 'after';
+
+export interface RoleplayStickerPlacement {
+  replyIndex: number;
+  position: RoleplayStickerPosition;
+  stickers: string[];
+}
+
 export interface RoleplayReplyResult {
   reply: string;
   replies?: string[];
   replyTranslations?: string[];
   narrations?: string[];
   stickers?: string[];
+  stickerPlacements?: RoleplayStickerPlacement[];
   messageActions?: RoleplayMessageActions;
   profileUpdate: null | {
     nickname: string;
@@ -291,6 +300,55 @@ function normalizeStickerSelections(value: unknown): string[] {
       if (selections.length) return selections;
     }
     return normalizeStickerSelections(record.stickers ?? record.stickerIds ?? record.sticker);
+  }
+  return [];
+}
+
+function normalizeStickerPosition(value: unknown, fallback: RoleplayStickerPosition = 'after'): RoleplayStickerPosition {
+  const position = String(value ?? '').trim().toLocaleLowerCase();
+  return position === 'before' || position === 'after' ? position : fallback;
+}
+
+function normalizeStickerPlacementRecord(value: unknown, fallbackReplyIndex = 0, fallbackPosition: RoleplayStickerPosition = 'after'): RoleplayStickerPlacement[] {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return [];
+  const record = value as Record<string, unknown>;
+  const rawReplyIndex = Number(record.replyIndex ?? record.index ?? record.messageIndex ?? record.replyNumber);
+  const replyIndex = Number.isFinite(rawReplyIndex)
+    ? Math.max(0, Math.floor(rawReplyIndex))
+    : fallbackReplyIndex;
+  const position = normalizeStickerPosition(record.position ?? record.placement ?? record.where, fallbackPosition);
+  const directSelections = [
+    ...normalizeStickerSelections(record.stickers),
+    ...normalizeStickerSelections(record.stickerIds),
+    ...normalizeStickerSelections(record.sticker),
+    ...normalizeStickerSelections(record.stickerId)
+  ];
+  const fallbackSelections = directSelections.length ? [] : normalizeStickerSelections(record.id ?? record.description ?? record.name ?? record.label ?? record.text);
+  const stickers = [...new Set([...directSelections, ...fallbackSelections].map((item) => item.trim()).filter(Boolean))];
+  return stickers.length ? [{ replyIndex, position, stickers }] : [];
+}
+
+function normalizeStickerPlacements(value: unknown): RoleplayStickerPlacement[] {
+  if (Array.isArray(value)) return value.flatMap((item) => normalizeStickerPlacements(item));
+  return normalizeStickerPlacementRecord(value);
+}
+
+function normalizeReplyStickerPlacements(value: unknown): RoleplayStickerPlacement[] {
+  if (Array.isArray(value)) {
+    return value.flatMap((item, index) => {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) return [];
+      const record = item as Record<string, unknown>;
+      const inlinePosition = normalizeStickerPosition(record.stickerPosition ?? record.position, 'after');
+      return [
+        ...normalizeStickerPlacementRecord({ replyIndex: index, position: 'before', stickers: record.stickersBefore ?? record.beforeStickers ?? record.stickerBefore }, index, 'before'),
+        ...normalizeStickerPlacementRecord({ replyIndex: index, position: inlinePosition, stickers: record.stickers ?? record.stickerIds ?? record.sticker }, index, inlinePosition),
+        ...normalizeStickerPlacementRecord({ replyIndex: index, position: 'after', stickers: record.stickersAfter ?? record.afterStickers ?? record.stickerAfter }, index, 'after')
+      ];
+    });
+  }
+  if (value && typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    return normalizeReplyStickerPlacements(record.replies ?? record.messages ?? record.reply ?? record.message ?? record.content);
   }
   return [];
 }
@@ -918,16 +976,21 @@ export async function generateRoleplayReply(input: GenerateReplyInput): Promise<
       const stickers = [...new Set([
         ...normalizeStickerSelections(parsedRecord.stickers),
         ...normalizeStickerSelections(parsedRecordAny.stickerIds),
-        ...normalizeStickerSelections(parsedRecordAny.sticker),
-        ...normalizeStickerSelections(parsedRecordAny.messages),
-        ...normalizeStickerSelections(parsedRecord.replies)
+        ...normalizeStickerSelections(parsedRecordAny.sticker)
       ].map((item) => item.trim()).filter(Boolean))];
+      const stickerPlacements = [
+        ...normalizeStickerPlacements(parsedRecordAny.stickerPlacements),
+        ...normalizeStickerPlacements(parsedRecordAny.replyStickers),
+        ...normalizeStickerPlacements(parsedRecordAny.stickerMessages),
+        ...normalizeReplyStickerPlacements(parsedRecordAny.replies ?? parsedRecordAny.messages)
+      ];
       return JSON.stringify({
         reply: replies[0] ?? '',
         replies,
         replyTranslations,
         narrations: narrations.slice(0, 3),
         stickers,
+        stickerPlacements,
         messageActions,
         profileUpdate: profileUpdateRecord
           ? {
@@ -945,7 +1008,7 @@ export async function generateRoleplayReply(input: GenerateReplyInput): Promise<
       } satisfies RoleplayReplyResult);
     } catch {
       const replies = input.mode === 'online' ? normalizeRawOnlineReply(apiReply) : [apiReply];
-      return JSON.stringify({ reply: replies[0] ?? '', replies, narrations: [], stickers: [], messageActions: { recallMessageIds: [], quotes: [] }, profileUpdate: null } satisfies RoleplayReplyResult);
+      return JSON.stringify({ reply: replies[0] ?? '', replies, narrations: [], stickers: [], stickerPlacements: [], messageActions: { recallMessageIds: [], quotes: [] }, profileUpdate: null } satisfies RoleplayReplyResult);
     }
   }
   throw new Error('角色回复模型没有返回内容。');

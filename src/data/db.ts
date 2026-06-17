@@ -1,5 +1,5 @@
 import { openDB, type DBSchema, type IDBPDatabase } from 'idb';
-import type { AppSettings, CharacterProfile, ChatMessage, Conversation, ConversationMemoryRecord, ConversationSettings, Sticker, StickerGroup, UserProfile, VoomPost, WorldBookEntry } from '@/types/domain';
+import type { AppSettings, AppSnapshot, CharacterProfile, ChatMessage, Conversation, ConversationMemoryRecord, ConversationSettings, Sticker, StickerGroup, UserProfile, VoomPost, WorldBookEntry } from '@/types/domain';
 import { normalizeUserProfile } from '@/utils/profile';
 import { normalizeAppSettings } from '@/utils/settings';
 import { normalizeWorldBooks } from '@/utils/worldBook';
@@ -20,6 +20,13 @@ interface LinkDb extends DBSchema {
 }
 
 let dbPromise: Promise<IDBPDatabase<LinkDb>> | undefined;
+
+const storeNames = ['user', 'characters', 'conversations', 'messages', 'voomPosts', 'worldBooks', 'stickerGroups', 'stickers', 'conversationSettings', 'conversationMemories', 'settings'] as const;
+const legacyDefaultUserIds = new Set(['1008600002']);
+const legacyDefaultCharacterIds = new Set(['2000100001', '2000100002', '2000100003']);
+const legacyDefaultConversationIds = new Set(['conv_2000100001', 'conv_2000100002', 'conv_2000100003']);
+const legacyDefaultWorldBookIds = new Set(['wb_global_online', 'wb_global_offline', 'wb_local_campus', 'wb_local_art', 'wb_local_tokyo']);
+const legacyDefaultVoomPostIds = new Set(['voom_seed_1']);
 
 export function getDb() {
   dbPromise ??= openDB<LinkDb>('link-local-db', 4, {
@@ -85,8 +92,60 @@ export async function seedDatabase() {
   await tx.done;
 }
 
+async function pruneLegacyDefaultData() {
+  const db = await getDb();
+  const tx = db.transaction(storeNames, 'readwrite');
+  const userStore = tx.objectStore('user');
+  const messageStore = tx.objectStore('messages');
+  const voomStore = tx.objectStore('voomPosts');
+  const memoryStore = tx.objectStore('conversationMemories');
+  const settingsStore = tx.objectStore('settings');
+  const [users, messages, voomPosts, conversationMemories, settings] = await Promise.all([
+    userStore.getAll(),
+    messageStore.getAll(),
+    voomStore.getAll(),
+    memoryStore.getAll(),
+    settingsStore.get('main')
+  ]);
+
+  users.forEach((user) => {
+    if (legacyDefaultUserIds.has(user.id)) {
+      void userStore.delete(user.id);
+      return;
+    }
+
+    const boundCharacterIds = user.boundCharacterIds.filter((id) => !legacyDefaultCharacterIds.has(id));
+    if (boundCharacterIds.length !== user.boundCharacterIds.length) {
+      void userStore.put({ ...user, boundCharacterIds });
+    }
+  });
+
+  legacyDefaultCharacterIds.forEach((id) => void tx.objectStore('characters').delete(id));
+  legacyDefaultConversationIds.forEach((id) => {
+    void tx.objectStore('conversations').delete(id);
+    void tx.objectStore('conversationSettings').delete(id);
+  });
+  legacyDefaultWorldBookIds.forEach((id) => void tx.objectStore('worldBooks').delete(id));
+  messages
+    .filter((message) => legacyDefaultConversationIds.has(message.conversationId))
+    .forEach((message) => void messageStore.delete(message.id));
+  voomPosts
+    .filter((post) => legacyDefaultVoomPostIds.has(post.id) || legacyDefaultCharacterIds.has(post.charId) || (post.conversationId && legacyDefaultConversationIds.has(post.conversationId)))
+    .forEach((post) => void voomStore.delete(post.id));
+  conversationMemories
+    .filter((memory) => legacyDefaultConversationIds.has(memory.conversationId))
+    .forEach((memory) => void memoryStore.delete(memory.id));
+
+  if (settings && legacyDefaultUserIds.has(settings.activeUserId)) {
+    void settingsStore.put({ ...settings, activeUserId: defaultSettings.activeUserId }, 'main');
+  }
+
+  await tx.done;
+}
+
 export async function loadSnapshot() {
   await seedDatabase();
+  await pruneLegacyDefaultData();
   const db = await getDb();
   const [users, characters, conversations, messages, voomPosts, worldBooks, stickerGroups, stickers, conversationSettings, conversationMemories, settings] = await Promise.all([
     db.getAll('user'),
@@ -117,7 +176,58 @@ export async function loadSnapshot() {
   };
 }
 
-type StoreName = 'user' | 'characters' | 'conversations' | 'messages' | 'voomPosts' | 'worldBooks' | 'stickerGroups' | 'stickers' | 'conversationSettings' | 'conversationMemories' | 'settings';
+export async function replaceSnapshot(snapshot: AppSnapshot) {
+  const db = await getDb();
+  const tx = db.transaction(storeNames, 'readwrite');
+
+  const userStore = tx.objectStore('user');
+  void userStore.clear();
+  snapshot.users.forEach((entry) => void userStore.put(entry));
+
+  const characterStore = tx.objectStore('characters');
+  void characterStore.clear();
+  snapshot.characters.forEach((entry) => void characterStore.put(entry));
+
+  const conversationStore = tx.objectStore('conversations');
+  void conversationStore.clear();
+  snapshot.conversations.forEach((entry) => void conversationStore.put(entry));
+
+  const messageStore = tx.objectStore('messages');
+  void messageStore.clear();
+  snapshot.messages.forEach((entry) => void messageStore.put(entry));
+
+  const voomStore = tx.objectStore('voomPosts');
+  void voomStore.clear();
+  snapshot.voomPosts.forEach((entry) => void voomStore.put(entry));
+
+  const worldBookStore = tx.objectStore('worldBooks');
+  void worldBookStore.clear();
+  snapshot.worldBooks.forEach((entry) => void worldBookStore.put(entry));
+
+  const stickerGroupStore = tx.objectStore('stickerGroups');
+  void stickerGroupStore.clear();
+  snapshot.stickerGroups.forEach((entry) => void stickerGroupStore.put(entry));
+
+  const stickerStore = tx.objectStore('stickers');
+  void stickerStore.clear();
+  snapshot.stickers.forEach((entry) => void stickerStore.put(entry));
+
+  const conversationSettingsStore = tx.objectStore('conversationSettings');
+  void conversationSettingsStore.clear();
+  snapshot.conversationSettings.forEach((entry) => void conversationSettingsStore.put(entry));
+
+  const conversationMemoryStore = tx.objectStore('conversationMemories');
+  void conversationMemoryStore.clear();
+  snapshot.conversationMemories.forEach((entry) => void conversationMemoryStore.put(entry));
+
+  const settingsStore = tx.objectStore('settings');
+  void settingsStore.clear();
+  void settingsStore.put(snapshot.settings, 'main');
+
+  await tx.done;
+}
+
+type StoreName = typeof storeNames[number];
 
 export async function putEntity<TStore extends StoreName>(storeName: TStore, value: LinkDb[TStore]['value'], key?: LinkDb[TStore]['key']) {
   const db = await getDb();
