@@ -1,8 +1,8 @@
 import { unzipSync } from 'fflate';
-import type { ApiVendor, AppSettings, CharacterProfile, ConversationTimeAwarenessSettings, GenerateReplyInput, ImageProviderType, PromptContext, UserProfile, VoomComment, VoomFrequency, VoomPost } from '@/types/domain';
+import type { ApiVendor, AppSettings, CharacterProfile, ConversationTimeAwarenessSettings, GenerateReplyInput, ImageProviderType, NovelAiModelOption, PollinationsModelOption, PromptContext, UserProfile, VoomComment, VoomFrequency, VoomPost } from '@/types/domain';
 import { createId } from '@/utils/id';
 import { getCharacterVoomAuthorName } from '@/utils/character';
-import { getPreferredVoomImageProvider, getResolvedApiConfig, getResolvedOpenAiImageConfig } from '@/utils/settings';
+import { defaultNovelAiModels, defaultPollinationsModels, getPreferredVoomImageProvider, getResolvedApiConfig, getResolvedOpenAiImageConfig, novelAiOfficialApiUrl, novelAiProxyApiUrl } from '@/utils/settings';
 import { estimateTokenCount } from '@/utils/memory';
 import { renderTimeAwarenessPrompt } from '@/utils/timeAwareness';
 import { formatContentWithChineseTranslation, normalizeTranslationText } from '@/utils/translation';
@@ -157,6 +157,74 @@ async function createApiErrorMessage(response: Response, title: string) {
     `${title}：${status || '请求失败'}`,
     details ? `后台日志：\n${details}` : ''
   ].filter(Boolean).join('\n\n');
+}
+
+function createNetworkErrorMessage(error: unknown, title: string, endpoint: string, hint = '浏览器直连 OpenAI 兼容图片网关可能会被 CORS 或网络策略拦截。本地开发会通过同源代理请求；如果仍失败，请确认网关可访问、支持图片生成路径，并且 API Key 与模型可用。') {
+  const message = error instanceof Error ? error.message : String(error);
+  return [
+    `${title}：${message || '网络请求失败'}`,
+    `请求地址：${endpoint}`,
+    hint
+  ].join('\n\n');
+}
+
+function createTextRequestEndpoint(endpoint: string) {
+  const trimmed = endpoint.trim();
+  if (import.meta.env.DEV && /^https?:\/\//i.test(trimmed)) {
+    return `/__text-proxy?url=${encodeURIComponent(trimmed)}`;
+  }
+  return trimmed;
+}
+
+function normalizeImageSource(value: unknown) {
+  const source = String(value ?? '').trim();
+  if (!source) return '';
+  if (/^(?:https?:|data:image\/|blob:)/i.test(source)) return source;
+  if (/^[A-Za-z0-9+/]+={0,2}$/.test(source) && source.length > 80) {
+    return toDataUrlFromBase64(source);
+  }
+  return '';
+}
+
+function extractGeneratedImage(payload: unknown): string {
+  if (Array.isArray(payload)) {
+    for (const item of payload) {
+      const image = extractGeneratedImage(item);
+      if (image) return image;
+    }
+    return '';
+  }
+
+  if (!payload || typeof payload !== 'object') {
+    return normalizeImageSource(payload);
+  }
+
+  const record = payload as Record<string, unknown>;
+  const directCandidates = [
+    record.url,
+    record.imageUrl,
+    record.image_url,
+    record.outputUrl,
+    record.output_url,
+    record.b64_json,
+    record.b64Json,
+    record.base64,
+    record.image_base64,
+    record.imageBase64
+  ];
+
+  for (const candidate of directCandidates) {
+    const image = normalizeImageSource(candidate);
+    if (image) return image;
+  }
+
+  const nestedCandidates = [record.data, record.images, record.image, record.imageUrl, record.image_url, record.output, record.result, record.results, record.artifacts];
+  for (const candidate of nestedCandidates) {
+    const image = extractGeneratedImage(candidate);
+    if (image) return image;
+  }
+
+  return '';
 }
 
 function splitModelSelection(selection = '') {
@@ -785,25 +853,39 @@ function requireTextGenerationConfig(settings: AppSettings | undefined, modelOve
 async function callTextApi(settings: AppSettings | undefined, prompt: string, modelOverride = '', imageParts: TextApiContentPart[] = []) {
   const resolved = getResolvedTextApiConfig(settings, modelOverride);
   if (!resolved.endpoint.trim()) return '';
+  const requestEndpoint = createTextRequestEndpoint(resolved.endpoint);
 
   const content = imageParts.length
     ? [{ type: 'text' as const, text: prompt }, ...imageParts]
     : prompt;
 
-  const response = await fetch(resolved.endpoint, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(resolved.apiKey ? { Authorization: `Bearer ${resolved.apiKey}` } : {})
-    },
-    body: JSON.stringify({
-      model: resolved.model,
-      messages: [{ role: 'user', content }],
-      temperature: 0.9
-    })
-  });
+  let response: Response;
+  try {
+    response = await fetch(requestEndpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(resolved.apiKey ? { Authorization: `Bearer ${resolved.apiKey}` } : {})
+      },
+      body: JSON.stringify({
+        model: resolved.model,
+        messages: [{ role: 'user', content }],
+        temperature: 0.9
+      })
+    });
+  } catch (error) {
+    throw new Error(createNetworkErrorMessage(
+      error,
+      '文本模型网络请求失败',
+      resolved.endpoint,
+      '浏览器直连 OpenAI 兼容聊天网关可能会被 CORS 或网络策略拦截。本地开发会通过同源代理请求；如果仍失败，请确认网关可访问、支持聊天补全路径，并且 API Key 与模型可用。'
+    ));
+  }
 
   if (!response.ok) {
+    if (requestEndpoint.startsWith('/__text-proxy') && response.status === 502) {
+      throw new Error(await createApiErrorMessage(response, '本地文本模型代理请求失败'));
+    }
     throw new Error(await createApiErrorMessage(response, '文本模型 API 请求失败'));
   }
 
@@ -843,45 +925,56 @@ export async function generateOpenAiImage(settings: AppSettings, overrides: Imag
   const positivePrompt = overrides.positivePrompt ?? settings.imageOpenAi.positivePrompt;
   const negativePrompt = overrides.negativePrompt ?? settings.imageOpenAi.negativePrompt;
   const prompt = sanitizePrompt(positivePrompt, negativePrompt);
+  const model = String(overrides.model ?? resolved.model).trim();
+  const size = String(overrides.size ?? resolved.size).trim();
 
   if (!resolved.endpoint.trim() || !resolved.apiKey.trim()) {
-    throw new Error('请先在 GPT-Image 模块里配置可用的 OpenAI 兼容供应商和 API Key。');
+    throw new Error('请先在 OpenAI 图片模块里配置可用的兼容供应商和 API Key。');
+  }
+
+  if (!model) {
+    throw new Error('请先为 OpenAI 兼容供应商选择或手动添加图片模型。');
   }
 
   if (!prompt) {
     throw new Error('请先填写正向提示词。');
   }
 
-  const response = await fetch(resolved.endpoint, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${resolved.apiKey}`
-    },
-    body: JSON.stringify({
-      model: overrides.model ?? resolved.model,
-      prompt,
-      size: overrides.size ?? resolved.size,
-      n: 1,
-      response_format: 'b64_json'
-    })
-  });
+  let response: Response;
+  try {
+    response = await fetch(resolved.endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${resolved.apiKey}`
+      },
+      body: JSON.stringify({
+        model,
+        prompt,
+        ...(size ? { size } : {}),
+        n: 1
+      })
+    });
+  } catch (error) {
+    throw new Error(createNetworkErrorMessage(error, 'OpenAI 图片网络请求失败', resolved.endpoint));
+  }
 
   if (!response.ok) {
-    throw new Error(await createApiErrorMessage(response, 'GPT-Image 请求失败'));
+    if (resolved.endpoint.startsWith('/__image-proxy') && response.status === 502) {
+      throw new Error(await createApiErrorMessage(response, '本地 OpenAI 兼容图片代理请求失败'));
+    }
+    throw new Error(await createApiErrorMessage(response, 'OpenAI 图片请求失败'));
   }
 
   const data = await response.json();
-  const imagePayload = Array.isArray(data.data) ? data.data[0] : null;
-  const imageUrl = String(imagePayload?.url ?? '').trim();
-  const base64Image = String(imagePayload?.b64_json ?? '').trim();
+  const imageUrl = extractGeneratedImage(data);
 
-  if (!imageUrl && !base64Image) {
-    throw new Error('GPT-Image 返回里没有可用图片。');
+  if (!imageUrl) {
+    throw new Error('OpenAI 图片接口返回里没有可用图片。');
   }
 
   return {
-    imageUrl: imageUrl || toDataUrlFromBase64(base64Image),
+    imageUrl,
     provider: 'openai'
   };
 }
@@ -890,10 +983,10 @@ export async function generateNovelAiImage(settings: AppSettings, overrides: Ima
   const config = settings.imageNovelAi;
   const positivePrompt = overrides.positivePrompt ?? config.positivePrompt;
   const negativePrompt = overrides.negativePrompt ?? config.negativePrompt;
-  const endpointBase = normalizeBaseUrl(config.proxyUrl || config.apiUrl);
+  const endpointBase = getNovelAiEndpointBase(settings);
 
   if (!endpointBase) {
-    throw new Error('请先填写 NovelAI 的接口地址或代理地址。');
+    throw new Error('请先选择 NovelAI 的连接方式。');
   }
 
   if (!config.apiKey.trim()) {
@@ -923,16 +1016,16 @@ export async function generateNovelAiImage(settings: AppSettings, overrides: Ima
         steps: config.steps,
         seed: parseSeed(overrides.seed ?? config.seed),
         n_samples: 1,
-        ucPreset: 0,
-        qualityToggle: true,
-        sm: false,
-        sm_dyn: false,
-        dynamic_thresholding: false,
+        ucPreset: config.ucPreset,
+        qualityToggle: config.qualityToggle,
+        sm: config.sm,
+        sm_dyn: config.smDyn,
+        dynamic_thresholding: config.dynamicThresholding,
         legacy: false,
         add_original_image: false,
         uncond_scale: 1,
-        cfg_rescale: 0,
-        noise_schedule: 'native'
+        cfg_rescale: config.cfgRescale,
+        noise_schedule: config.noiseSchedule
       }
     })
   });
@@ -952,13 +1045,83 @@ export async function generateNovelAiImage(settings: AppSettings, overrides: Ima
   };
 }
 
+export async function fetchNovelAiModels(settings: AppSettings): Promise<NovelAiModelOption[]> {
+  const config = settings.imageNovelAi;
+  const endpointBase = getNovelAiEndpointBase(settings);
+
+  if (!config.apiKey.trim()) {
+    return defaultNovelAiModels;
+  }
+
+  const modelListEndpoints = [
+    `${endpointBase}/ai/generate-image/models`,
+    `${endpointBase}/ai/models`
+  ];
+
+  for (const endpoint of modelListEndpoints) {
+    try {
+      const response = await fetch(endpoint, {
+        headers: {
+          Accept: 'application/json',
+          Authorization: `Bearer ${config.apiKey.trim()}`
+        }
+      });
+
+      if (!response.ok) continue;
+      const payload = await response.json();
+      const models = normalizeNovelAiModelPayload(payload);
+      if (models.length) return models;
+    } catch {
+      continue;
+    }
+  }
+
+  return defaultNovelAiModels;
+}
+
+export async function checkNovelAiImageAccess(settings: AppSettings): Promise<void> {
+  const config = settings.imageNovelAi;
+  const endpointBase = getNovelAiEndpointBase(settings);
+
+  if (!config.apiKey.trim()) {
+    throw new Error('请先填写 NovelAI Token。');
+  }
+
+  const response = await fetch(`${endpointBase}/ai/generate-image`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${config.apiKey.trim()}`
+    },
+    body: JSON.stringify({
+      action: 'generate',
+      input: '',
+      model: config.model,
+      parameters: {
+        width: 64,
+        height: 64,
+        steps: 0,
+        n_samples: 0
+      }
+    })
+  });
+
+  if (response.status === 400 || response.status === 422) return;
+  if (response.status === 401 || response.status === 403) {
+    throw new Error('NovelAI Token 无法通过鉴权。');
+  }
+  if (!response.ok) {
+    throw new Error(await createApiErrorMessage(response, 'NovelAI 生图接口预检失败'));
+  }
+}
+
 export async function generatePollinationsImage(settings: AppSettings, overrides: ImageGenerationOverrides = {}): Promise<ImageGenerationResult> {
   const config = settings.imagePollinations;
   const positivePrompt = overrides.positivePrompt ?? config.positivePrompt;
   const negativePrompt = overrides.negativePrompt ?? config.negativePrompt;
 
   if (!config.apiKey.trim()) {
-    throw new Error('请先填写 Pollinations Token。可在 auth.pollinations.ai 创建后填入。');
+    throw new Error('请先填写 Pollinations API Key。文档要求生成请求使用 Bearer key。');
   }
 
   if (!positivePrompt.trim()) {
@@ -966,27 +1129,21 @@ export async function generatePollinationsImage(settings: AppSettings, overrides
   }
 
   const promptPath = encodeURIComponent(positivePrompt.trim());
-  const url = new URL(`https://image.pollinations.ai/prompt/${promptPath}`);
+  const url = new URL(`https://gen.pollinations.ai/image/${promptPath}`);
   url.searchParams.set('model', overrides.model ?? config.model);
   url.searchParams.set('width', String(Math.max(320, Math.floor(overrides.width ?? config.width))));
   url.searchParams.set('height', String(Math.max(320, Math.floor(overrides.height ?? config.height))));
-  url.searchParams.set('enhance', String(config.enhance));
-  url.searchParams.set('nologo', String(config.nologo));
-  url.searchParams.set('private', String(config.private));
-  if (config.referrer.trim()) {
-    url.searchParams.set('referrer', config.referrer.trim());
-  }
-  if ((overrides.seed ?? config.seed).trim()) {
-    url.searchParams.set('seed', String(parseSeed(overrides.seed ?? config.seed)));
-  }
+  url.searchParams.set('seed', (overrides.seed ?? config.seed).trim() ? String(parseSeed(overrides.seed ?? config.seed)) : '-1');
+  url.searchParams.set('safe', config.safe);
+  url.searchParams.set('quality', config.quality);
+  url.searchParams.set('transparent', String(config.transparent));
+  if (config.referenceImage.trim()) url.searchParams.set('image', config.referenceImage.trim());
   if (negativePrompt.trim()) {
     url.searchParams.set('negative', negativePrompt.trim());
   }
 
   const response = await fetch(url.toString(), {
-    headers: {
-      Authorization: `Bearer ${config.apiKey.trim()}`
-    }
+    headers: { Authorization: `Bearer ${config.apiKey.trim()}` }
   });
 
   if (!response.ok) {
@@ -1000,6 +1157,50 @@ export async function generatePollinationsImage(settings: AppSettings, overrides
     imageUrl: arrayBufferToDataUrl(buffer, contentType.startsWith('image/') ? contentType : 'image/jpeg'),
     provider: 'pollinations'
   };
+}
+
+export async function fetchPollinationsModels(): Promise<PollinationsModelOption[]> {
+  try {
+    const response = await fetch('https://gen.pollinations.ai/image/models', {
+      headers: { Accept: 'application/json' }
+    });
+    if (!response.ok) return defaultPollinationsModels;
+    const payload = await response.json();
+    const models = normalizePollinationsModelPayload(payload);
+    return models.length ? models : defaultPollinationsModels;
+  } catch {
+    return defaultPollinationsModels;
+  }
+}
+
+export async function checkPollinationsImageAccess(settings: AppSettings): Promise<void> {
+  const config = settings.imagePollinations;
+  if (!config.apiKey.trim()) {
+    throw new Error('请先填写 Pollinations API Key。');
+  }
+
+  const promptPath = encodeURIComponent('link health check');
+  const url = new URL(`https://gen.pollinations.ai/image/${promptPath}`);
+  url.searchParams.set('model', config.model || defaultPollinationsModels[0].id);
+  url.searchParams.set('width', '64');
+  url.searchParams.set('height', '64');
+  url.searchParams.set('seed', '-1');
+  url.searchParams.set('safe', config.safe);
+  url.searchParams.set('quality', config.quality);
+  url.searchParams.set('transparent', String(config.transparent));
+
+  const response = await fetch(url.toString(), {
+    headers: { Authorization: `Bearer ${config.apiKey.trim()}` }
+  });
+
+  if (!response.ok) {
+    throw new Error(await createApiErrorMessage(response, 'Pollinations 生图接口检测失败'));
+  }
+
+  const contentType = response.headers.get('content-type') || '';
+  if (!contentType.startsWith('image/')) {
+    throw new Error('Pollinations 检测返回的不是图片内容。');
+  }
 }
 
 export async function generateImageByProvider(
@@ -1118,6 +1319,8 @@ export async function generateVoomPost(context: PromptContext, settings?: AppSet
     }
   }
 
+  const fallbackImage = settings && imageProvider && !imageResult ? '/load.jpg' : undefined;
+
   return {
     charId: context.character.id,
     conversationId: context.messages[0]?.conversationId,
@@ -1125,9 +1328,9 @@ export async function generateVoomPost(context: PromptContext, settings?: AppSet
     authorAvatar: context.character.avatar,
     content,
     contentTranslation,
-    image: imageResult?.imageUrl,
+    image: imageResult?.imageUrl ?? fallbackImage,
     imageDescription,
-    imageProvider: imageResult?.provider ?? 'mock',
+    imageProvider: imageResult?.provider ?? (fallbackImage ? 'local' : 'mock'),
     likes,
     comments: comments.map((comment) => ({
       id: createId('comment'),
@@ -1214,7 +1417,7 @@ export async function generateUserVoomComments(input: {
     `输出格式：
 {
   "comments": [
-    { "authorId": "从可评论角色 id 中选择", "content": "评论内容", "contentTranslation": "如 content 不是自然标准普通话，则给普通话译文；否则留空" }
+    { "authorId": "从可评论角色 id 中选择", "content": "评论内容", "contentTranslation": "如 content 不是普通话，则给普通话译文；否则留空" }
   ]
 }`,
     '要求：1. 输出 0-6 条；2. authorId 必须来自可评论角色；3. 不要代替用户本人评论；4. 评论要短、自然、有社交软件感；5. 不要使用“NPC”“朋友A”“路人”这类占位名；6. contentTranslation 规则：外语、粤语、方言、繁体中文、文言/古风表达都要翻译成自然现代简体普通话；不要加“翻译：”前缀。'
@@ -1258,11 +1461,11 @@ export async function generateVoomCommentReplies(input: {
     `输出格式：
 {
   "replies": [
-    { "id": "r1", "authorName": "${fallbackAuthorName}", "content": "回复内容", "contentTranslation": "如 content 不是自然标准普通话，则给普通话译文；否则留空", "parentId": "被回复评论ID，可留空" },
-    { "id": "r2", "authorName": "NPC网名", "content": "自然评论或回复", "contentTranslation": "如 content 不是自然标准普通话，则给普通话译文；否则留空", "parentId": "已有评论ID或本次前面输出的id，可留空" }
+    { "id": "r1", "authorName": "${fallbackAuthorName}", "content": "回复内容", "contentTranslation": "如 content 不是普通话，则给普通话译文；否则留空", "parentId": "被回复评论ID，可留空" },
+    { "id": "r2", "authorName": "NPC网名", "content": "自然评论或回复", "contentTranslation": "如 content 不是普通话，则给普通话译文；否则留空", "parentId": "已有评论ID或本次前面输出的id，可留空" }
   ]
 }`,
-    '要求：1. 输出 0-6 条；2. authorName 可以是角色昵称，也可以是角色社交圈里真实感的 NPC 网名；3. 角色可以回复用户或其他人的评论，NPC 也可以发新评论、回复角色或互相回复；4. parentId 留空表示新评论，填写已有评论 ID 或本次前面输出的 id 表示回复；5. 不要代替用户发言，不要使用“NPC”“路人”“朋友A”这类占位名；6. 内容像真实社交软件评论区，短、自然、有上下文，不要解释设定；7. contentTranslation 规则：除了自然标准普通话以外都要翻译成自然现代简体普通话，包括外语、粤语、方言、繁体中文、文言/古风表达、网络混写等；不要加“翻译：”前缀。'
+    '要求：1. 输出 0-6 条；2. authorName 可以是角色昵称，也可以是角色社交圈里真实感的 NPC 网名；3. 角色可以回复用户或其他人的评论，NPC 也可以发新评论、回复角色或互相回复；4. parentId 留空表示新评论，填写已有评论 ID 或本次前面输出的 id 表示回复；5. 不要代替用户发言，不要使用“NPC”“路人”“朋友A”这类占位名；6. 内容像真实社交软件评论区，短、自然、有上下文，不要解释设定；7. contentTranslation 规则：外语、粤语、方言、繁体中文、文言/古风表达都要翻译成简体普通话；不要加“翻译：”前缀。'
   ].join('\n\n');
 
   const apiReply = await callTextApi(input.settings, prompt, input.modelOverride);
@@ -1336,4 +1539,69 @@ export async function generateEmbeddingVector(input: {
   } catch {
     return [];
   }
+}
+
+function getNovelAiEndpointBase(settings: AppSettings) {
+  const config = settings.imageNovelAi;
+  const endpoint = config.endpointMode === 'official' ? novelAiOfficialApiUrl : novelAiProxyApiUrl;
+  return normalizeBaseUrl(endpoint);
+}
+
+function normalizeNovelAiModelPayload(payload: unknown): NovelAiModelOption[] {
+  const maybeObject = payload as { models?: unknown; data?: unknown; results?: unknown } | null;
+  const rawModels = Array.isArray(payload)
+    ? payload
+    : Array.isArray(maybeObject?.models)
+      ? maybeObject.models
+      : Array.isArray(maybeObject?.data)
+        ? maybeObject.data
+        : Array.isArray(maybeObject?.results)
+          ? maybeObject.results
+          : [];
+
+  const models = rawModels.flatMap((item) => {
+    if (typeof item === 'string') return [{ id: item, label: item }];
+    if (!item || typeof item !== 'object') return [];
+    const model = item as { id?: unknown; name?: unknown; model?: unknown; label?: unknown; title?: unknown; nickname?: unknown };
+    const id = String(model.id ?? model.model ?? model.name ?? '').trim();
+    if (!id) return [];
+    const label = String(model.label ?? model.title ?? model.nickname ?? model.name ?? id).trim();
+    return [{ id, label: label || id }];
+  });
+
+  const byId = new Map(defaultNovelAiModels.map((model) => [model.id, model]));
+  models.forEach((model) => byId.set(model.id, model));
+  return [...byId.values()];
+}
+
+function normalizePollinationsModelPayload(payload: unknown): PollinationsModelOption[] {
+  const maybeObject = payload as { models?: unknown; data?: unknown } | null;
+  const rawModels = Array.isArray(payload)
+    ? payload
+    : Array.isArray(maybeObject?.models)
+      ? maybeObject.models
+      : Array.isArray(maybeObject?.data)
+        ? maybeObject.data
+        : [];
+
+  const models = rawModels.flatMap((item) => {
+    if (typeof item === 'string') return [{ id: item, label: item }];
+    if (!item || typeof item !== 'object') return [];
+    const model = item as { id?: unknown; name?: unknown; model?: unknown; label?: unknown; title?: unknown; category?: unknown; output_modalities?: unknown; outputModalities?: unknown };
+    const outputModalities = Array.isArray(model.output_modalities)
+      ? model.output_modalities
+      : Array.isArray(model.outputModalities)
+        ? model.outputModalities
+        : [];
+    if (String(model.category ?? '').trim() && String(model.category).trim() !== 'image') return [];
+    if (outputModalities.length && !outputModalities.includes('image')) return [];
+    const id = String(model.id ?? model.model ?? model.name ?? '').trim();
+    if (!id) return [];
+    const label = String(model.label ?? model.title ?? model.name ?? id).trim();
+    return [{ id, label: label || id }];
+  });
+
+  const byId = new Map(defaultPollinationsModels.map((model) => [model.id, model]));
+  models.forEach((model) => byId.set(model.id, model));
+  return [...byId.values()];
 }

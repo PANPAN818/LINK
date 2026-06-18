@@ -8,16 +8,14 @@
       <button v-if="activeTab === 'api'" class="header-action-button" type="button" aria-label="新增 API 配置" title="新增 API 配置" @click="openApiComposer">
         <Plus :size="18" stroke-width="2.4" />
       </button>
-      <button v-else-if="activeTab === 'image'" class="header-action-button header-action-save" type="button" aria-label="保存图片设置" title="保存图片设置" @click="saveImageSettings">
-        <Save :size="18" stroke-width="2.4" />
-      </button>
+      <ImageModelPickerButton v-else-if="activeTab === 'image'" />
     </header>
 
     <main class="settings-main">
       <section class="settings-panel">
         <ApiSettingsEditor v-if="activeTab === 'api'" :settings="currentSettings" :open-composer-tick="apiComposerTick" @save="saveSettings" />
         <TtsSettingsEditor v-else-if="activeTab === 'tts'" :settings="currentSettings" @save="saveSettings" />
-        <ImageSettingsEditor v-else-if="activeTab === 'image'" ref="imageSettingsEditorRef" :settings="currentSettings" @save="saveSettings" />
+        <ImageSettingsEditor v-else-if="activeTab === 'image'" :settings="currentSettings" @save="saveSettings" />
         <DataCenterPanel
           v-else
           :user-id="store.user?.id || '--'"
@@ -45,10 +43,11 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { CloudUpload, ImagePlus, Plus, Save, SlidersHorizontal, Volume2 } from 'lucide-vue-next';
+import { CloudUpload, ImagePlus, Plus, SlidersHorizontal, Volume2 } from 'lucide-vue-next';
 import ApiSettingsEditor from '@/components/home/ApiSettingsEditor.vue';
 import DataCenterPanel from '@/components/settings/DataCenterPanel.vue';
 import ImageSettingsEditor from '@/components/settings/ImageSettingsEditor.vue';
+import ImageModelPickerButton from '@/components/settings/ImageModelPickerButton.vue';
 import TtsSettingsEditor from '@/components/settings/TtsSettingsEditor.vue';
 import { useAppStore } from '@/stores/appStore';
 import type { AppSettings } from '@/types/domain';
@@ -95,7 +94,6 @@ const route = useRoute();
 const router = useRouter();
 const store = useAppStore();
 const apiComposerTick = ref(0);
-const imageSettingsEditorRef = ref<InstanceType<typeof ImageSettingsEditor> | null>(null);
 
 const currentSettings = computed<AppSettings>(() => normalizeAppSettings(store.settings));
 
@@ -121,10 +119,6 @@ function openTab(tab: SettingsTab) {
 
 function openApiComposer() {
   apiComposerTick.value += 1;
-}
-
-function saveImageSettings() {
-  imageSettingsEditorRef.value?.saveSettings();
 }
 
 async function saveSettings(nextSettings: AppSettings) {
@@ -190,6 +184,17 @@ async function saveSettings(nextSettings: AppSettings) {
   border-radius: 22px;
   background: rgba(255, 255, 255, 0.9);
   box-shadow: 0 14px 32px rgba(16, 24, 20, 0.06);
+}
+
+@media (max-width: 360px) {
+  .settings-main {
+    padding: 8px 10px 14px;
+  }
+
+  .settings-panel {
+    padding: 10px;
+    border-radius: 18px;
+  }
 }
 
 .settings-tabs {

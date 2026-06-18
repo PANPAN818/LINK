@@ -2,17 +2,17 @@ import { computed, ref, toRaw } from 'vue';
 import { defineStore } from 'pinia';
 import { deleteEntity, loadSnapshot, putEntity, replaceSnapshot } from '@/data/db';
 import { defaultSettings, defaultStickerGroups } from '@/data/seed';
-import type { AppSettings, AppSnapshot, CharacterProfile, ChatMessage, ChatMessageQuote, ChatMode, Conversation, ConversationMemoryRecord, ConversationSettings, Sticker, StickerGroup, UserProfile, VisualProfile, VoomComment, VoomPost, VoomPostVisibility, WorldBookEntry } from '@/types/domain';
+import type { AppSettings, AppSnapshot, CharacterProfile, ChatMessage, ChatMessageQuote, ChatMode, Conversation, ConversationMemoryRecord, ConversationSettings, GeneratedImageRecord, ImageModuleId, Sticker, StickerGroup, UserProfile, VisualProfile, VoomComment, VoomPost, VoomPostVisibility, WorldBookEntry } from '@/types/domain';
 import { createAccountId, createId } from '@/utils/id';
 import { getCharacterVoomAuthorName, normalizeCharacterMindStateLines, normalizeCharacterProfile } from '@/utils/character';
 import { normalizeUserProfile, normalizeVisualProfile } from '@/utils/profile';
-import { mergeVendorModels, normalizeAppSettings } from '@/utils/settings';
+import { getImagePromptPresetForProvider, getSelectedImageModelOption, mergeVendorModels, normalizeAppSettings } from '@/utils/settings';
 import { normalizeWorldBookEntry, normalizeWorldBooks } from '@/utils/worldBook';
 import { createStickerFromDraft, createStickerGroup, normalizeSticker, normalizeStickerGroup, type StickerImportDraft } from '@/utils/stickers';
 import { ageMemoryKind, createMemoryRecord, getConversationFloorCount, getHiddenMessageIds, getMemoryContext, getMessageFloorMap, getMessagesInFloorRange, getNextSummaryRange, getVisibleMessages, normalizeConversationSettings, renderCharacterMemoryPrompt, shouldCompressMemory } from '@/utils/memory';
 import { formatContentWithChineseTranslation, normalizeTranslationText } from '@/utils/translation';
-import { estimateRoleplayReplyInputTokens, fetchVendorModels, generateConversationSummary, generateEmbeddingVector, generateRoleplayReply, generateUserVoomComments, generateVoomCommentReplies, generateVoomPost, hasTextGenerationConfig, shouldAutoGenerateMoment, type RoleplayReplyResult, type RoleplayReplySegment } from '@/services/ai';
-import { downloadGitHubBackup, downloadGitHubBackupVersion, formatGitHubBackupError, listGitHubBackupHistory, uploadGitHubBackup } from '@/services/githubBackup';
+import { estimateRoleplayReplyInputTokens, fetchVendorModels, generateConversationSummary, generateEmbeddingVector, generateImageByProvider, generateRoleplayReply, generateUserVoomComments, generateVoomCommentReplies, generateVoomPost, hasTextGenerationConfig, shouldAutoGenerateMoment, type RoleplayReplyResult, type RoleplayReplySegment } from '@/services/ai';
+import { GitHubBackupError, downloadGitHubBackup, downloadGitHubBackupVersion, ensureGitHubBackupRepository, formatGitHubBackupError, listGitHubBackupHistory, uploadGitHubBackup } from '@/services/githubBackup';
 import { createLinkBackupFile, parseLinkBackupFileText, parseLinkBackupText } from '@/utils/backup';
 
 interface CreateUserVoomPostPayload {
@@ -42,6 +42,7 @@ export const useAppStore = defineStore('app', () => {
   const stickers = ref<Sticker[]>([]);
   const conversationSettings = ref<ConversationSettings[]>([]);
   const conversationMemories = ref<ConversationMemoryRecord[]>([]);
+  const generatedImages = ref<GeneratedImageRecord[]>([]);
   const settings = ref<AppSettings | null>(null);
   const user = computed(() => {
     if (!users.value.length) return null;
@@ -120,10 +121,24 @@ export const useAppStore = defineStore('app', () => {
         kind: ageMemoryKind(memory.createdAt),
         vector: Array.isArray(memory.vector) ? memory.vector : []
       })),
+      generatedImages: normalizeGeneratedImages(snapshot.generatedImages ?? []),
       settings: normalizeAppSettings({
         ...defaultSettings,
         ...snapshot.settings,
         activeUserId: snapshot.settings.activeUserId || normalizedUsers[0].id
+      })
+    };
+  }
+
+  function keepDeviceGitHubBackupSettings(snapshot: AppSnapshot): AppSnapshot {
+    const currentBackup = settings.value?.githubBackup;
+    if (!currentBackup || (!currentBackup.token && !currentBackup.owner && !currentBackup.enabled && !currentBackup.lastBackupAt)) return snapshot;
+
+    return {
+      ...snapshot,
+      settings: normalizeAppSettings({
+        ...snapshot.settings,
+        githubBackup: currentBackup
       })
     };
   }
@@ -139,6 +154,7 @@ export const useAppStore = defineStore('app', () => {
     stickers.value = snapshot.stickers;
     conversationSettings.value = snapshot.conversationSettings;
     conversationMemories.value = snapshot.conversationMemories;
+    generatedImages.value = snapshot.generatedImages;
     settings.value = snapshot.settings;
     activeConversationId.value = null;
     ready.value = true;
@@ -189,6 +205,7 @@ export const useAppStore = defineStore('app', () => {
       kind: ageMemoryKind(memory.createdAt),
       vector: Array.isArray(memory.vector) ? memory.vector : []
     }));
+    generatedImages.value = normalizeGeneratedImages(snapshot.generatedImages ?? []);
     settings.value = normalizeAppSettings({
       ...snapshot.settings,
       activeUserId: snapshot.settings.activeUserId || snapshot.users[0]?.id || ''
@@ -223,6 +240,29 @@ export const useAppStore = defineStore('app', () => {
 
   function messagesForConversation(id: string) {
     return messages.value.filter((message) => message.conversationId === id).sort((a, b) => a.createdAt - b.createdAt);
+  }
+
+  function normalizeGeneratedImages(entries: GeneratedImageRecord[]) {
+    return entries
+      .map((entry) => ({
+        ...entry,
+        provider: (['openai', 'novelai', 'pollinations'].includes(entry.provider) ? entry.provider : 'openai') as ImageModuleId,
+        imageUrl: String(entry.imageUrl ?? '').trim(),
+        title: String(entry.title ?? '').trim(),
+        prompt: String(entry.prompt ?? '').trim(),
+        negativePrompt: String(entry.negativePrompt ?? '').trim(),
+        model: String(entry.model ?? '').trim(),
+        size: String(entry.size ?? '').trim(),
+        source: ['settings', 'world-book', 'voom'].includes(entry.source) ? entry.source : 'settings',
+        createdAt: Number.isFinite(entry.createdAt) ? entry.createdAt : Date.now()
+      } satisfies GeneratedImageRecord))
+      .filter((entry) => entry.id && entry.imageUrl);
+  }
+
+  function generatedImagesForProvider(provider: ImageModuleId) {
+    return generatedImages.value
+      .filter((entry) => entry.provider === provider)
+      .sort((a, b) => b.createdAt - a.createdAt);
   }
 
   function settingsForConversation(id: string) {
@@ -1076,7 +1116,7 @@ export const useAppStore = defineStore('app', () => {
   }
 
   async function importBackupSnapshot(snapshot: AppSnapshot) {
-    const normalizedSnapshot = normalizeSnapshotForRestore(snapshot);
+    const normalizedSnapshot = keepDeviceGitHubBackupSettings(normalizeSnapshotForRestore(snapshot));
     await replaceSnapshot(normalizedSnapshot);
     applySnapshotToStore(normalizedSnapshot);
     void refreshEnabledVendorModels();
@@ -1147,6 +1187,22 @@ export const useAppStore = defineStore('app', () => {
       });
       return history;
     } catch (error) {
+      if (error instanceof GitHubBackupError && (error.status === 404 || error.status === 409)) {
+        await saveGitHubBackupState({
+          history: [],
+          latestRemoteBackupSha: '',
+          latestRemoteBackupAt: 0,
+          pendingRestoreSha: '',
+          pendingRestoreAt: 0,
+          progress: {
+            phase: 'idle',
+            label: '',
+            percent: 0,
+            updatedAt: Date.now()
+          }
+        });
+        return [];
+      }
       await saveGitHubBackupProgress('failed', formatGitHubBackupError(error), 100);
       throw error;
     }
@@ -1164,6 +1220,17 @@ export const useAppStore = defineStore('app', () => {
     await saveGitHubBackupProgress('checking', reason === 'auto' ? '正在准备自动备份' : '正在准备手动备份', 10);
 
     try {
+      await saveGitHubBackupProgress('checking', reason === 'auto' ? '正在检查自动备份仓库' : '正在检查备份仓库', 25);
+      const repository = await ensureGitHubBackupRepository({
+        token: config.token,
+        owner: config.owner,
+        repo: config.repo
+      });
+      await saveGitHubBackupState({
+        owner: repository.owner,
+        repo: repository.repo,
+        branch: repository.branch || config.branch || 'main'
+      });
       const backup = await createBackupFile();
       const activeConfig = settings.value?.githubBackup ?? config;
       await saveGitHubBackupProgress('uploading', reason === 'auto' ? '正在上传自动备份' : '正在上传手动备份', 65);
@@ -1235,17 +1302,8 @@ export const useAppStore = defineStore('app', () => {
           });
       const backupFile = parseLinkBackupFileText(backupText);
       const currentBackupConfig = settings.value.githubBackup;
-      const restoredSnapshot: AppSnapshot = {
-        ...backupFile.snapshot,
-        settings: {
-          ...backupFile.snapshot.settings,
-          githubBackup: {
-            ...currentBackupConfig
-          }
-        }
-      };
       await saveGitHubBackupProgress('restoring', '正在恢复 GitHub 备份到本地', 75);
-      await importBackupSnapshot(restoredSnapshot);
+      await importBackupSnapshot(backupFile.snapshot);
       const history = await loadGitHubBackupHistory(3).catch(() => currentBackupConfig.history ?? []);
       const latest = history[0];
       await saveGitHubBackupState({
@@ -1284,6 +1342,31 @@ export const useAppStore = defineStore('app', () => {
     settings.value = normalizedSettings;
     await putEntity('settings', normalizedSettings, 'main');
     void refreshEnabledVendorModels();
+  }
+
+  async function addGeneratedImage(record: Omit<GeneratedImageRecord, 'id' | 'createdAt'> & { id?: string; createdAt?: number }) {
+    const normalizedRecord = normalizeGeneratedImages([{
+      id: record.id || createId('image'),
+      provider: record.provider,
+      imageUrl: record.imageUrl,
+      title: record.title,
+      prompt: record.prompt,
+      negativePrompt: record.negativePrompt,
+      model: record.model,
+      size: record.size,
+      source: record.source,
+      createdAt: record.createdAt ?? Date.now()
+    }])[0];
+    if (!normalizedRecord) return null;
+
+    generatedImages.value = [normalizedRecord, ...generatedImages.value.filter((entry) => entry.id !== normalizedRecord.id)];
+    await putEntity('generatedImages', normalizedRecord);
+    return normalizedRecord;
+  }
+
+  async function deleteGeneratedImage(imageId: string) {
+    generatedImages.value = generatedImages.value.filter((entry) => entry.id !== imageId);
+    await deleteEntity('generatedImages', imageId);
   }
 
   async function refreshEnabledVendorModels() {
@@ -2115,8 +2198,99 @@ export const useAppStore = defineStore('app', () => {
     }));
     voomPosts.value.unshift(post);
     await putEntity('voomPosts', post);
+    if (post.image && ['openai', 'novelai', 'pollinations'].includes(post.imageProvider ?? '')) {
+      await addGeneratedImage({
+        provider: post.imageProvider as ImageModuleId,
+        imageUrl: post.image,
+        title: `${post.authorName} 的 VOOM 配图`,
+        prompt: post.imageDescription || post.content,
+        negativePrompt: '',
+        model: settings.value?.voomImageModel || '',
+        size: '1024x1024',
+        source: 'voom',
+        createdAt: post.createdAt
+      });
+    }
     await recordVoomPostEvents(post, conversation.activeMode);
     return post;
+  }
+
+  function getVoomImageSizeLabel(provider: ImageModuleId) {
+    if (!settings.value) return '1024x1024';
+    if (provider === 'novelai') return `${settings.value.imageNovelAi.width}x${settings.value.imageNovelAi.height}`;
+    if (provider === 'pollinations') return `${settings.value.imagePollinations.width}x${settings.value.imagePollinations.height}`;
+    return settings.value.imageOpenAi.size || settings.value.imageSize || '1024x1024';
+  }
+
+  async function regenerateVoomPostImage(postId: string, description: string) {
+    const post = voomPosts.value.find((entry) => entry.id === postId);
+    const selectedModel = getSelectedImageModelOption(settings.value);
+    const imageDescription = description.trim();
+    if (!post || !settings.value) return null;
+    if (!imageDescription) {
+      showConfigAlert('请先填写 VOOM 配图描述。', '无法生成配图');
+      return null;
+    }
+    if (!selectedModel) {
+      showConfigAlert('请先在顶部切换按钮里选择一个已配置的生图模型。', '无法生成配图');
+      return null;
+    }
+
+    const provider = selectedModel.provider;
+    const promptPreset = getImagePromptPresetForProvider(settings.value, provider);
+    const positivePrompt = [promptPreset.positivePrompt, imageDescription].filter(Boolean).join(', ');
+    let imageSettings = settings.value;
+    const imageOverrides = {
+      positivePrompt,
+      negativePrompt: promptPreset.negativePrompt,
+      size: '1024x1024',
+      width: 1024,
+      height: 1024,
+      model: selectedModel.model
+    };
+
+    if (provider === 'openai') {
+      const [vendorId, ...modelParts] = selectedModel.model.split('::');
+      imageSettings = {
+        ...settings.value,
+        imageOpenAi: {
+          ...settings.value.imageOpenAi,
+          activeVendorId: vendorId || settings.value.imageOpenAi.activeVendorId
+        }
+      };
+      imageOverrides.model = modelParts.join('::') || settings.value.imageModel;
+    }
+
+    try {
+      const result = await generateImageByProvider(provider, imageSettings, imageOverrides);
+      const nextPost = {
+        ...post,
+        image: result.imageUrl,
+        imageDescription,
+        imageProvider: result.provider
+      };
+      await saveVoomPost(nextPost);
+      await addGeneratedImage({
+        provider: result.provider,
+        imageUrl: result.imageUrl,
+        title: `${voomAuthorNameForPost(post)} 的 VOOM 配图`,
+        prompt: positivePrompt,
+        negativePrompt: promptPreset.negativePrompt,
+        model: selectedModel.label,
+        size: getVoomImageSizeLabel(result.provider),
+        source: 'voom'
+      });
+      return nextPost;
+    } catch (error) {
+      await saveVoomPost({
+        ...post,
+        image: '/load.jpg',
+        imageDescription,
+        imageProvider: 'local'
+      });
+      showConfigAlert(error instanceof Error ? error.message : 'VOOM 配图生成失败。', '无法生成配图');
+      return null;
+    }
   }
 
   async function saveVoomPost(nextPost: VoomPost) {
@@ -2302,6 +2476,7 @@ export const useAppStore = defineStore('app', () => {
     sortedStickers,
     conversationSettings,
     conversationMemories,
+    generatedImages,
     settings,
     hydrate,
     userById,
@@ -2309,6 +2484,7 @@ export const useAppStore = defineStore('app', () => {
     conversationById,
     setActiveConversation,
     messagesForConversation,
+    generatedImagesForProvider,
     settingsForConversation,
     memoriesForConversation,
     stickersForGroup,
@@ -2349,6 +2525,8 @@ export const useAppStore = defineStore('app', () => {
     hasGitHubBackup,
     syncGitHubBackupHistory,
     saveSettings,
+    addGeneratedImage,
+    deleteGeneratedImage,
     refreshEnabledVendorModels,
     bindWorldBook,
     updateConversationMode,
@@ -2371,6 +2549,7 @@ export const useAppStore = defineStore('app', () => {
     sendStickerMessage,
     createUserVoomPost,
     createMomentFromConversation,
+    regenerateVoomPostImage,
     addVoomComment,
     toggleVoomLike,
     replyToVoomComments,

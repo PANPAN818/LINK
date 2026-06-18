@@ -1,13 +1,157 @@
 import { fileURLToPath, URL } from 'node:url';
+import type { IncomingMessage, ServerResponse } from 'node:http';
 import { defineConfig } from 'vite';
 import vue from '@vitejs/plugin-vue';
 import { VitePWA } from 'vite-plugin-pwa';
 
 const base = process.env.BASE_PATH || '/';
+const textProxyPath = '/__text-proxy';
+const imageProxyPath = '/__image-proxy';
+
+async function readRequestBody(request: IncomingMessage) {
+  const chunks: Buffer[] = [];
+  for await (const chunk of request) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  }
+  return Buffer.concat(chunks);
+}
+
+function getForwardHeader(request: IncomingMessage, name: string) {
+  const value = request.headers[name];
+  if (Array.isArray(value)) return value.join(', ');
+  return value;
+}
+
+function sendProxyError(response: ServerResponse, statusCode: number, message: string) {
+  response.statusCode = statusCode;
+  response.setHeader('Content-Type', 'text/plain; charset=utf-8');
+  response.end(message);
+}
 
 export default defineConfig({
   base,
+  server: {
+    proxy: {
+      '/__openai': {
+        target: 'https://api.openai.com',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/__openai/, '')
+      }
+    }
+  },
   plugins: [
+    {
+      name: 'link-openai-compatible-dev-proxy',
+      configureServer(server) {
+        server.middlewares.use(textProxyPath, async (request, response) => {
+          if (request.method === 'OPTIONS') {
+            response.statusCode = 204;
+            response.end();
+            return;
+          }
+
+          if (request.method !== 'POST') {
+            sendProxyError(response, 405, 'Text proxy only supports POST requests.');
+            return;
+          }
+
+          const requestUrl = new URL(request.url ?? '', 'http://localhost');
+          const target = requestUrl.searchParams.get('url')?.trim() ?? '';
+
+          let targetUrl: URL;
+          try {
+            targetUrl = new URL(target);
+          } catch {
+            sendProxyError(response, 400, 'Text proxy target URL is invalid.');
+            return;
+          }
+
+          if (!['http:', 'https:'].includes(targetUrl.protocol)) {
+            sendProxyError(response, 400, 'Text proxy target URL must use http or https.');
+            return;
+          }
+
+          try {
+            const headers = new Headers();
+            const contentType = getForwardHeader(request, 'content-type');
+            const authorization = getForwardHeader(request, 'authorization');
+            const accept = getForwardHeader(request, 'accept');
+            if (contentType) headers.set('Content-Type', contentType);
+            if (authorization) headers.set('Authorization', authorization);
+            if (accept) headers.set('Accept', accept);
+
+            const upstreamResponse = await fetch(targetUrl, {
+              method: 'POST',
+              headers,
+              body: await readRequestBody(request)
+            });
+
+            response.statusCode = upstreamResponse.status;
+            response.statusMessage = upstreamResponse.statusText;
+            const upstreamContentType = upstreamResponse.headers.get('content-type');
+            if (upstreamContentType) response.setHeader('Content-Type', upstreamContentType);
+            response.end(Buffer.from(await upstreamResponse.arrayBuffer()));
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            sendProxyError(response, 502, `OpenAI-compatible text proxy request failed: ${message}`);
+          }
+        });
+
+        server.middlewares.use(imageProxyPath, async (request, response) => {
+          if (request.method === 'OPTIONS') {
+            response.statusCode = 204;
+            response.end();
+            return;
+          }
+
+          if (request.method !== 'POST') {
+            sendProxyError(response, 405, 'Image proxy only supports POST requests.');
+            return;
+          }
+
+          const requestUrl = new URL(request.url ?? '', 'http://localhost');
+          const target = requestUrl.searchParams.get('url')?.trim() ?? '';
+
+          let targetUrl: URL;
+          try {
+            targetUrl = new URL(target);
+          } catch {
+            sendProxyError(response, 400, 'Image proxy target URL is invalid.');
+            return;
+          }
+
+          if (!['http:', 'https:'].includes(targetUrl.protocol)) {
+            sendProxyError(response, 400, 'Image proxy target URL must use http or https.');
+            return;
+          }
+
+          try {
+            const headers = new Headers();
+            const contentType = getForwardHeader(request, 'content-type');
+            const authorization = getForwardHeader(request, 'authorization');
+            const accept = getForwardHeader(request, 'accept');
+            if (contentType) headers.set('Content-Type', contentType);
+            if (authorization) headers.set('Authorization', authorization);
+            if (accept) headers.set('Accept', accept);
+
+            const upstreamResponse = await fetch(targetUrl, {
+              method: 'POST',
+              headers,
+              body: await readRequestBody(request)
+            });
+
+            response.statusCode = upstreamResponse.status;
+            response.statusMessage = upstreamResponse.statusText;
+            const upstreamContentType = upstreamResponse.headers.get('content-type');
+            if (upstreamContentType) response.setHeader('Content-Type', upstreamContentType);
+            response.end(Buffer.from(await upstreamResponse.arrayBuffer()));
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            sendProxyError(response, 502, `OpenAI-compatible image proxy request failed: ${message}`);
+          }
+        });
+      }
+    },
     vue(),
     VitePWA({
       registerType: 'autoUpdate',

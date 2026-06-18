@@ -74,7 +74,7 @@
         <input type="checkbox" :checked="enabledDraft" @change="toggleAutoBackup" />
         <div>
           <strong>自动后台备份</strong>
-          <span>{{ autoBackupLabel }}</span>
+          <span v-if="autoBackupLabel">{{ autoBackupLabel }}</span>
         </div>
       </label>
 
@@ -123,7 +123,7 @@
         </button>
       </section>
 
-      <div class="action-row">
+      <div class="action-row github-actions">
         <button class="secondary-action" type="button" :disabled="Boolean(githubBusy) || !githubToken.trim()" @click="createPrivateRepository">
           <Lock :size="16" />
           <span>创建私有仓库</span>
@@ -573,7 +573,6 @@ async function runGitHubImport() {
 }
 
 .card-head,
-.action-row,
 .field-with-action,
 .toggle-card,
 .progress-head,
@@ -604,12 +603,29 @@ async function runGitHubImport() {
 }
 
 .action-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
-  flex-wrap: wrap;
+  min-width: 0;
 }
 
 .compact-row {
-  flex-wrap: nowrap;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.github-actions {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.github-actions .primary-action {
+  grid-column: 1 / -1;
+}
+
+.github-actions .primary-action,
+.github-actions .secondary-action {
+  gap: 4px;
+  padding: 0 8px;
+  font-size: 12px;
 }
 
 .primary-action,
@@ -622,14 +638,31 @@ async function runGitHubImport() {
   border-radius: 12px;
   font-size: 13px;
   font-weight: 900;
+  line-height: 1;
+  white-space: nowrap;
 }
 
 .primary-action,
 .secondary-action {
-  flex: 1;
   gap: 6px;
+  width: 100%;
   min-width: 0;
   padding: 0 12px;
+}
+
+.primary-action span,
+.secondary-action span {
+  min-width: 0;
+  line-height: 1.1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.primary-action svg,
+.secondary-action svg,
+.icon-action svg {
+  flex: 0 0 auto;
 }
 
 .wide-action {
@@ -776,6 +809,7 @@ async function runGitHubImport() {
 .field input {
   min-width: 0;
   width: 100%;
+  min-height: 40px;
   border-radius: 12px;
   background: rgba(255, 255, 255, 0.86);
   padding: 11px 12px;
@@ -785,6 +819,7 @@ async function runGitHubImport() {
 
 .field-with-action {
   gap: 8px;
+  min-width: 0;
 }
 
 .icon-action {
@@ -831,14 +866,43 @@ async function runGitHubImport() {
   color: #a82424;
 }
 
-@media (max-width: 360px) {
-  .field-grid,
-  .action-row {
+@media (max-width: 380px) {
+  .github-actions {
     grid-template-columns: 1fr;
   }
 
-  .action-row {
-    display: grid;
+  .github-actions .primary-action {
+    grid-column: auto;
+  }
+}
+
+@media (max-width: 360px) {
+  .data-center {
+    gap: 12px;
+  }
+
+  .backup-card {
+    gap: 11px;
+    padding: 12px;
+    border-radius: 12px;
+  }
+
+  .field-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .github-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .github-actions .primary-action {
+    grid-column: auto;
+  }
+
+  .primary-action,
+  .secondary-action {
+    padding: 0 10px;
+    font-size: 12px;
   }
 }
 </style>

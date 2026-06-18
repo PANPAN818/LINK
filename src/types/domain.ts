@@ -297,6 +297,19 @@ export type ImageProviderType = 'openai' | 'novelai' | 'pollinations';
 
 export type ImageModuleId = ImageProviderType;
 
+export interface GeneratedImageRecord {
+  id: string;
+  provider: ImageModuleId;
+  imageUrl: string;
+  title: string;
+  prompt: string;
+  negativePrompt: string;
+  model: string;
+  size: string;
+  source: 'settings' | 'world-book' | 'voom';
+  createdAt: number;
+}
+
 export interface ApiVendorModel {
   id: string;
   nickname: string;
@@ -314,9 +327,30 @@ export interface ApiVendor {
   models: ApiVendorModel[];
 }
 
+export interface ImagePromptPreset {
+  id: string;
+  name: string;
+  positivePrompt: string;
+  negativePrompt: string;
+}
+
+export type NovelAiEndpointMode = 'proxy' | 'official';
+
+export interface NovelAiModelOption {
+  id: string;
+  label: string;
+}
+
+export interface PollinationsModelOption {
+  id: string;
+  label: string;
+}
+
 export interface OpenAiImageSettings {
   activeVendorId: string;
   size: string;
+  activePromptPresetId: string;
+  promptPresets: ImagePromptPreset[];
   positivePrompt: string;
   negativePrompt: string;
   lastImageUrl: string;
@@ -324,10 +358,14 @@ export interface OpenAiImageSettings {
 }
 
 export interface NovelAiImageSettings {
+  endpointMode: NovelAiEndpointMode;
   apiUrl: string;
   proxyUrl: string;
   apiKey: string;
   model: string;
+  availableModels: NovelAiModelOption[];
+  activePromptPresetId: string;
+  promptPresets: ImagePromptPreset[];
   positivePrompt: string;
   negativePrompt: string;
   width: number;
@@ -335,6 +373,13 @@ export interface NovelAiImageSettings {
   guidance: number;
   steps: number;
   sampler: string;
+  ucPreset: number;
+  qualityToggle: boolean;
+  sm: boolean;
+  smDyn: boolean;
+  dynamicThresholding: boolean;
+  cfgRescale: number;
+  noiseSchedule: string;
   seed: string;
   lastImageUrl: string;
 }
@@ -343,11 +388,18 @@ export interface PollinationsImageSettings {
   apiKey: string;
   referrer: string;
   model: string;
+  availableModels: PollinationsModelOption[];
+  activePromptPresetId: string;
+  promptPresets: ImagePromptPreset[];
   positivePrompt: string;
   negativePrompt: string;
   width: number;
   height: number;
   seed: string;
+  safe: string;
+  quality: string;
+  referenceImage: string;
+  transparent: boolean;
   enhance: boolean;
   nologo: boolean;
   private: boolean;
@@ -423,6 +475,7 @@ export interface AppSnapshot {
   stickers: Sticker[];
   conversationSettings: ConversationSettings[];
   conversationMemories: ConversationMemoryRecord[];
+  generatedImages: GeneratedImageRecord[];
   settings: AppSettings;
 }
 

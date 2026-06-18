@@ -9,9 +9,7 @@
         <button class="icon-button" type="button" aria-label="发布 VOOM" @click="openVoomPublisher">
           <SquarePen :size="24" />
         </button>
-        <button class="icon-button" type="button" aria-label="切换生图模型" @click="showImageModelPicker = true">
-          <ImagePlus :size="24" />
-        </button>
+        <ImageModelPickerButton :icon-size="24" />
       </div>
     </header>
 
@@ -38,8 +36,11 @@
       :post="post"
       :author-name="voomAuthorNameForPost(post)"
       :current-user-name="store.user?.nickname"
+      :can-regenerate-image="canRegenerateVoomImage"
+      :regenerating-image="regeneratingImagePostIds.includes(post.id)"
       :replying-thread="store.isReplyingVoomComments(post.id)"
       @comment="handleComment"
+      @regenerate-image="handleRegenerateImage"
       @reply-thread="store.replyToVoomComments"
       @toggle-like="store.toggleVoomLike"
     />
@@ -210,52 +211,26 @@
       </form>
     </AppModal>
 
-    <AppModal v-model="showImageModelPicker" title="VOOM 生图模型" variant="ins">
-      <section class="model-picker">
-        <div class="picker-copy">
-          <strong>{{ selectedModelLabel }}</strong>
-          <span>{{ imageModelOptions.length ? '角色发 VOOM 时会优先使用当前模型。' : '配置生图模型后会在这里显示。' }}</span>
-        </div>
-
-        <div v-if="imageModelOptions.length" class="model-list">
-          <button
-            v-for="option in imageModelOptions"
-            :key="option.key"
-            class="model-option"
-            :class="{ active: option.key === selectedModelKey }"
-            type="button"
-            @click="selectImageModel(option)"
-          >
-            <span class="model-provider">{{ option.providerLabel }}</span>
-            <strong>{{ option.label }}</strong>
-            <small>{{ option.detail }}</small>
-          </button>
-        </div>
-
-        <section v-else class="picker-empty">
-          <strong>暂无可切换模型</strong>
-          <p>先在 Image 页面配置 OpenAI 图片供应商、NovelAI 或 Pollinations。没有可用配置时，VOOM 会自动生成模拟图片卡片。</p>
-        </section>
-      </section>
-    </AppModal>
   </section>
 </template>
 
 <script setup lang="ts">
 import { computed, ref } from 'vue';
-import { FileText, Globe2, Image as ImageIcon, ImagePlus, LoaderCircle, Plus, Shuffle, SquarePen, Upload, UserRound, X } from 'lucide-vue-next';
+import { FileText, Globe2, Image as ImageIcon, LoaderCircle, Plus, Shuffle, SquarePen, Upload, UserRound, X } from 'lucide-vue-next';
 import AppModal from '@/components/common/AppModal.vue';
+import ImageModelPickerButton from '@/components/settings/ImageModelPickerButton.vue';
 import VoomPostCard from '@/components/voom/VoomPostCard.vue';
 import { useAppStore } from '@/stores/appStore';
-import type { AppSettings, ImageProviderType, VoomPost, VoomPostVisibility } from '@/types/domain';
+import type { VoomPost, VoomPostVisibility } from '@/types/domain';
 import { getCharacterDisplayName, getCharacterVoomAuthorName } from '@/utils/character';
+import { getSelectedImageModelOption } from '@/utils/settings';
 
 const store = useAppStore();
-const showImageModelPicker = ref(false);
 const showVoomPublisher = ref(false);
 const showUserVoomPublisher = ref(false);
 const creatingVoomPost = ref(false);
 const creatingUserVoomPost = ref(false);
+const regeneratingImagePostIds = ref<string[]>([]);
 const randomPublisherId = 'random';
 const selectedPublisherId = ref(randomPublisherId);
 const selectedUserVoomAccountId = ref('');
@@ -266,76 +241,8 @@ const userVoomImageDescription = ref('');
 const userVoomVisibility = ref<VoomPostVisibility>('public');
 const selectedUserVoomCharacterIds = ref<string[]>([]);
 
-interface ImageModelOption {
-  key: string;
-  provider: ImageProviderType;
-  providerLabel: string;
-  label: string;
-  detail: string;
-  model: string;
-}
-
-const imageModelOptions = computed<ImageModelOption[]>(() => {
-  const settings = store.settings;
-  if (!settings) return [];
-
-  const openAiOptions = settings.imageOpenAi.vendors.flatMap((vendor) => {
-    if (!vendor.enabled || !vendor.apiUrl.trim() || !vendor.apiPath.trim() || !vendor.apiKey.trim()) return [];
-    const models = vendor.models.length
-      ? vendor.models
-      : settings.imageModel.trim()
-        ? [{ id: settings.imageModel.trim(), nickname: '', selected: true }]
-        : [];
-
-    return models
-      .filter((model) => model.id.trim())
-      .map((model) => ({
-        key: createModelKey('openai', `${vendor.id}::${model.id}`),
-        provider: 'openai' as const,
-        providerLabel: 'OpenAI',
-        label: model.nickname || model.id,
-        detail: vendor.name,
-        model: `${vendor.id}::${model.id}`
-      }));
-  });
-
-  const novelAiOptions = settings.imageNovelAi.apiKey.trim() && (settings.imageNovelAi.proxyUrl.trim() || settings.imageNovelAi.apiUrl.trim()) && settings.imageNovelAi.model.trim()
-    ? [{
-        key: createModelKey('novelai', settings.imageNovelAi.model),
-        provider: 'novelai' as const,
-        providerLabel: 'NovelAI',
-        label: settings.imageNovelAi.model,
-        detail: `${settings.imageNovelAi.width} x ${settings.imageNovelAi.height}`,
-        model: settings.imageNovelAi.model
-      }]
-    : [];
-
-  const pollinationsOptions = settings.imagePollinations.apiKey.trim() && settings.imagePollinations.model.trim()
-    ? [{
-        key: createModelKey('pollinations', settings.imagePollinations.model),
-        provider: 'pollinations' as const,
-        providerLabel: 'Pollinations',
-        label: settings.imagePollinations.model,
-        detail: `${settings.imagePollinations.width} x ${settings.imagePollinations.height}`,
-        model: settings.imagePollinations.model
-      }]
-    : [];
-
-  return [...openAiOptions, ...novelAiOptions, ...pollinationsOptions];
-});
-
-const selectedModelKey = computed(() => {
-  const settings = store.settings;
-  if (!settings?.voomImageProvider) return imageModelOptions.value[0]?.key ?? '';
-  return createModelKey(settings.voomImageProvider, settings.voomImageModel);
-});
-
-const selectedModelLabel = computed(() => {
-  const selected = imageModelOptions.value.find((option) => option.key === selectedModelKey.value) ?? imageModelOptions.value[0];
-  return selected ? `${selected.providerLabel} · ${selected.label}` : '使用模拟图片卡片';
-});
-
 const publisherCharacters = computed(() => store.charactersForActiveUser);
+const canRegenerateVoomImage = computed(() => Boolean(getSelectedImageModelOption(store.settings)));
 
 const selectedUserVoomAccount = computed(() => {
   const selectedId = selectedUserVoomAccountId.value.trim();
@@ -371,34 +278,18 @@ function voomAuthorNameForPost(post: VoomPost) {
   return character ? getCharacterVoomAuthorName(character) : post.authorName;
 }
 
-function createModelKey(provider: ImageProviderType, model: string) {
-  return `${provider}:${model.trim()}`;
-}
-
-async function selectImageModel(option: ImageModelOption) {
-  const settings = store.settings;
-  if (!settings) return;
-
-  const nextSettings: AppSettings = {
-    ...settings,
-    voomImageProvider: option.provider,
-    voomImageModel: option.model
-  };
-
-  if (option.provider === 'openai') {
-    const [vendorId] = option.model.split('::');
-    nextSettings.imageOpenAi = {
-      ...settings.imageOpenAi,
-      activeVendorId: vendorId || settings.imageOpenAi.activeVendorId
-    };
-  }
-
-  await store.saveSettings(nextSettings);
-  showImageModelPicker.value = false;
-}
-
 async function handleComment(postId: string, content: string, parentId?: string) {
   await store.addVoomComment(postId, content, parentId ?? '');
+}
+
+async function handleRegenerateImage(postId: string, description: string) {
+  if (regeneratingImagePostIds.value.includes(postId)) return;
+  regeneratingImagePostIds.value = [...regeneratingImagePostIds.value, postId];
+  try {
+    await store.regenerateVoomPostImage(postId, description);
+  } finally {
+    regeneratingImagePostIds.value = regeneratingImagePostIds.value.filter((id) => id !== postId);
+  }
 }
 
 function openVoomPublisher() {

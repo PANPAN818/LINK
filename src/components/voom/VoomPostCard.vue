@@ -21,7 +21,7 @@
       </button>
     </header>
     <p>{{ postDisplayContent }}</p>
-    <figure class="post-visual" :class="{ mock: !post.image }">
+    <figure class="post-visual" :class="{ mock: !post.image }" @click="openVisualModal">
       <img v-if="post.image" :src="post.image" :alt="post.imageDescription || post.content" />
       <figcaption v-else>{{ visualDescription }}</figcaption>
     </figure>
@@ -54,12 +54,45 @@
       <input v-model="commentDraft" :placeholder="commentPlaceholder" />
       <button type="submit" :disabled="!commentDraft.trim()">发送</button>
     </form>
+
+    <AppModal v-model="showVisualModal" title="VOOM 配图" variant="ins">
+      <section class="visual-viewer" :class="{ flipped: visualFlipped }">
+        <button class="visual-flip-card" type="button" @click="toggleVisualFlip">
+          <span class="visual-face visual-image-face">
+            <img :src="modalImageSrc" :alt="visualDescription" />
+          </span>
+          <span class="visual-face visual-text-face">
+            <span>{{ descriptionDraft || visualDescription }}</span>
+          </span>
+        </button>
+
+        <label v-if="canRegenerateImage" class="visual-description-field">
+          <span>Description</span>
+          <textarea v-model="descriptionDraft" maxlength="500" placeholder="修改配图描述后重新生成。"></textarea>
+        </label>
+
+        <div class="visual-actions">
+          <button class="visual-secondary" type="button" @click="toggleVisualFlip">翻转</button>
+          <button
+            v-if="canRegenerateImage"
+            class="visual-primary"
+            type="button"
+            :disabled="regeneratingImage || !descriptionDraft.trim()"
+            @click="regenerateImage"
+          >
+            <LoaderCircle v-if="regeneratingImage" class="loading-icon" :size="15" />
+            <span>{{ regeneratingImage ? '生成中' : '重新生成' }}</span>
+          </button>
+        </div>
+      </section>
+    </AppModal>
   </article>
 </template>
 
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { BotMessageSquare, Heart, LoaderCircle, MessageCircle } from 'lucide-vue-next';
+import AppModal from '@/components/common/AppModal.vue';
 import type { VoomPost } from '@/types/domain';
 import { formatRelativeDate } from '@/utils/time';
 import { formatContentWithChineseTranslation } from '@/utils/translation';
@@ -68,6 +101,8 @@ const props = defineProps<{
   post: VoomPost;
   authorName?: string;
   currentUserName?: string;
+  canRegenerateImage?: boolean;
+  regeneratingImage?: boolean;
   replyingThread?: boolean;
 }>();
 
@@ -75,11 +110,15 @@ const emit = defineEmits<{
   'toggle-like': [postId: string];
   comment: [postId: string, content: string, parentId?: string];
   'reply-thread': [postId: string];
+  'regenerate-image': [postId: string, description: string];
 }>();
 
 const showComposer = ref(false);
 const commentDraft = ref('');
 const replyParentId = ref('');
+const showVisualModal = ref(false);
+const visualFlipped = ref(false);
+const descriptionDraft = ref('');
 const composerRef = ref<HTMLElement | null>(null);
 const likeSummaryRef = ref<HTMLElement | null>(null);
 const likeMeasureRef = ref<HTMLElement | null>(null);
@@ -92,6 +131,7 @@ const likedByMe = computed(() => Boolean(props.currentUserName && props.post.lik
 const replyTarget = computed(() => props.post.comments.find((comment) => comment.id === replyParentId.value));
 const commentPlaceholder = computed(() => replyTarget.value ? `回复 ${replyTarget.value.authorName}` : '评论这条 VOOM');
 const visualDescription = computed(() => props.post.imageDescription || '配图描述暂未保存。');
+const modalImageSrc = computed(() => props.post.image || '/load.jpg');
 const postDisplayContent = computed(() => formatContentWithChineseTranslation(props.post.content, props.post.contentTranslation));
 const fullLikeSummary = computed(() => props.post.likes.length ? `${props.post.likes.join('、')} 赞了` : '还没有点赞');
 const shortLikeSummary = computed(() => {
@@ -111,6 +151,23 @@ function openCommentComposer(parentId = '') {
   window.setTimeout(() => {
     document.addEventListener('pointerdown', handleOutsidePointerDown);
   });
+}
+
+function openVisualModal() {
+  descriptionDraft.value = visualDescription.value;
+  visualFlipped.value = !props.post.image;
+  showVisualModal.value = true;
+}
+
+function toggleVisualFlip() {
+  visualFlipped.value = !visualFlipped.value;
+}
+
+function regenerateImage() {
+  const description = descriptionDraft.value.trim();
+  if (!description || props.regeneratingImage) return;
+  emit('regenerate-image', props.post.id, description);
+  visualFlipped.value = false;
 }
 
 function submitComment() {
@@ -269,6 +326,7 @@ time {
   overflow: hidden;
   border-radius: 18px;
   background: #eff1f3;
+  cursor: zoom-in;
 }
 
 .post-visual img {
@@ -295,6 +353,123 @@ time {
   font-weight: 700;
   line-height: 1.6;
   text-align: center;
+}
+
+.visual-viewer {
+  display: grid;
+  gap: 12px;
+}
+
+.visual-flip-card {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  padding: 0;
+  border-radius: 18px;
+  background: transparent;
+  perspective: 1000px;
+}
+
+.visual-face {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid #edf0f2;
+  border-radius: 18px;
+  background: #ffffff;
+  backface-visibility: hidden;
+  transition: transform 0.28s ease;
+}
+
+.visual-image-face {
+  transform: rotateY(0deg);
+}
+
+.visual-text-face {
+  padding: 20px;
+  transform: rotateY(180deg);
+  color: #222222;
+  font-size: 14px;
+  font-weight: 800;
+  line-height: 1.65;
+  text-align: center;
+  white-space: pre-wrap;
+}
+
+.visual-viewer.flipped .visual-image-face {
+  transform: rotateY(180deg);
+}
+
+.visual-viewer.flipped .visual-text-face {
+  transform: rotateY(360deg);
+}
+
+.visual-image-face img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #f4f5f6;
+}
+
+.visual-description-field {
+  display: grid;
+  gap: 6px;
+}
+
+.visual-description-field > span {
+  color: #686b70;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.visual-description-field textarea {
+  min-height: 86px;
+  padding: 10px;
+  border: 1px solid #edf0f2;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #171717;
+  line-height: 1.55;
+  resize: vertical;
+}
+
+.visual-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.visual-actions:has(.visual-secondary:only-child) {
+  grid-template-columns: 1fr;
+}
+
+.visual-secondary,
+.visual-primary {
+  display: inline-grid;
+  grid-auto-flow: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 40px;
+  border-radius: 8px;
+  font-weight: 900;
+}
+
+.visual-secondary {
+  background: #f1f3f5;
+  color: #4f555c;
+}
+
+.visual-primary {
+  background: #171717;
+  color: #ffffff;
+}
+
+.visual-primary:disabled {
+  cursor: progress;
+  opacity: 0.68;
 }
 
 footer {

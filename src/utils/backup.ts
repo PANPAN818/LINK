@@ -17,7 +17,8 @@ const snapshotArrayKeys: Array<keyof Omit<AppSnapshot, 'settings'>> = [
   'stickerGroups',
   'stickers',
   'conversationSettings',
-  'conversationMemories'
+  'conversationMemories',
+  'generatedImages'
 ];
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -40,33 +41,36 @@ function sanitizeSnapshotForBackup(snapshot: AppSnapshot): AppSnapshot {
   return safeSnapshot;
 }
 
-function assertSnapshot(value: unknown): asserts value is AppSnapshot {
+function normalizeBackupSnapshot(value: unknown): AppSnapshot {
   if (!isRecord(value)) throw new Error('备份文件结构不正确。');
 
+  const snapshot: Record<string, unknown> = {
+    ...value,
+    settings: isRecord(value.settings) ? value.settings : {}
+  };
+
   for (const key of snapshotArrayKeys) {
-    if (!Array.isArray(value[key])) throw new Error(`备份文件缺少 ${key} 数据。`);
+    snapshot[key] = Array.isArray(value[key]) ? value[key] : [];
   }
 
-  if (!isRecord(value.settings)) throw new Error('备份文件缺少 settings 数据。');
+  return snapshot as unknown as AppSnapshot;
 }
 
 function toLinkBackupFile(value: unknown): LinkBackupFile {
   if (isRecord(value) && isRecord(value.snapshot)) {
-    assertSnapshot(value.snapshot);
     return {
       app: value.app === 'LINK' ? 'LINK' : 'LINK',
       backupVersion: value.backupVersion === 1 ? 1 : 1,
       exportedAt: Math.max(0, Number(value.exportedAt ?? 0) || 0),
-      snapshot: value.snapshot
+      snapshot: normalizeBackupSnapshot(value.snapshot)
     };
   }
 
-  assertSnapshot(value);
   return {
     app: 'LINK',
     backupVersion: 1,
     exportedAt: 0,
-    snapshot: value
+    snapshot: normalizeBackupSnapshot(value)
   };
 }
 
@@ -107,6 +111,12 @@ export function downloadLinkBackupFile(backup: LinkBackupFile, filename: string)
   const anchor = document.createElement('a');
   anchor.href = url;
   anchor.download = filename;
+  anchor.rel = 'noopener';
+  anchor.style.display = 'none';
+  document.body.appendChild(anchor);
   anchor.click();
-  window.setTimeout(() => URL.revokeObjectURL(url), 0);
+  window.setTimeout(() => {
+    anchor.remove();
+    URL.revokeObjectURL(url);
+  }, 0);
 }

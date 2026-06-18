@@ -163,6 +163,56 @@ async function githubApiFetch<T>(path: string, token: string, init: RequestInit 
   return await response.json() as T;
 }
 
+async function githubApiFetchText(path: string, token: string): Promise<string> {
+  const response = await fetch(`https://api.github.com${path}`, {
+    headers: {
+      Accept: 'application/vnd.github.raw',
+      Authorization: `Bearer ${token}`,
+      'X-GitHub-Api-Version': '2022-11-28'
+    }
+  });
+
+  if (!response.ok) {
+    throw new GitHubBackupError(await parseGitHubError(response), response.status);
+  }
+
+  return await response.text();
+}
+
+async function fetchGitHubDownloadUrl(url: string, token: string): Promise<string> {
+  const response = await fetch(url, {
+    headers: {
+      Accept: 'application/octet-stream',
+      Authorization: `Bearer ${token}`
+    }
+  });
+
+  if (!response.ok) {
+    throw new GitHubBackupError(await parseGitHubError(response), response.status);
+  }
+
+  return await response.text();
+}
+
+async function readGitHubFileText(apiPath: string, token: string, missingMessage: string) {
+  const content = await githubApiFetch<GitHubContentResponse>(apiPath, token);
+  if (content.type && content.type !== 'file') throw new GitHubBackupError('备份路径不是文件。');
+  if (content.content) {
+    if (content.encoding && content.encoding !== 'base64') throw new GitHubBackupError(`暂不支持的 GitHub 内容编码：${content.encoding}`);
+    return decodeBase64(content.content);
+  }
+
+  try {
+    const rawText = await githubApiFetchText(apiPath, token);
+    if (rawText) return rawText;
+  } catch (error) {
+    if (!content.download_url) throw error;
+  }
+
+  if (content.download_url) return await fetchGitHubDownloadUrl(content.download_url, token);
+  throw new GitHubBackupError(missingMessage);
+}
+
 function toBackupRepository(response: GitHubRepositoryResponse): GitHubBackupRepository {
   return {
     owner: response.owner.login,
@@ -187,6 +237,7 @@ export async function ensureGitHubBackupRepository(target: Pick<GitHubBackupTarg
 
   try {
     const existing = await githubApiFetch<GitHubRepositoryResponse>(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`, token);
+    if (!existing.private) throw new GitHubBackupError('同名仓库不是私有仓库，请更换仓库名或先在 GitHub 改为私有。');
     return toBackupRepository(existing);
   } catch (error) {
     if (!(error instanceof GitHubBackupError) || error.status !== 404) throw error;
@@ -243,12 +294,11 @@ export async function downloadGitHubBackup(target: GitHubBackupTarget) {
 
   if (!token || !owner || !repo) throw new GitHubBackupError('GitHub 备份配置不完整。');
 
-  const content = await githubApiFetch<GitHubContentResponse>(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/contents/${encodePath(path)}?ref=${encodeURIComponent(branch)}`, token);
-  if (content.type && content.type !== 'file') throw new GitHubBackupError('备份路径不是文件。');
-  if (!content.content) throw new GitHubBackupError('未找到 GitHub 备份文件内容。');
-  if (content.encoding && content.encoding !== 'base64') throw new GitHubBackupError(`暂不支持的 GitHub 内容编码：${content.encoding}`);
-
-  return decodeBase64(content.content);
+  return await readGitHubFileText(
+    `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/contents/${encodePath(path)}?ref=${encodeURIComponent(branch)}`,
+    token,
+    '未找到 GitHub 备份文件内容。'
+  );
 }
 
 export async function listGitHubBackupHistory(target: GitHubBackupTarget, limit = 3): Promise<GitHubBackupHistoryItem[]> {
@@ -277,16 +327,22 @@ export async function downloadGitHubBackupVersion(target: GitHubBackupTarget, re
 
   if (!token || !owner || !repo) throw new GitHubBackupError('GitHub 备份配置不完整。');
 
-  const content = await githubApiFetch<GitHubContentResponse>(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/contents/${encodePath(path)}?ref=${encodeURIComponent(ref)}`, token);
-  if (content.type && content.type !== 'file') throw new GitHubBackupError('备份路径不是文件。');
-  if (!content.content) throw new GitHubBackupError('未找到指定版本的 GitHub 备份文件内容。');
-  if (content.encoding && content.encoding !== 'base64') throw new GitHubBackupError(`暂不支持的 GitHub 内容编码：${content.encoding}`);
-
-  return decodeBase64(content.content);
+  return await readGitHubFileText(
+    `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/contents/${encodePath(path)}?ref=${encodeURIComponent(ref)}`,
+    token,
+    '未找到指定版本的 GitHub 备份文件内容。'
+  );
 }
 
 export function formatGitHubBackupError(error: unknown) {
-  if (error instanceof GitHubBackupError) return error.message;
+  if (error instanceof GitHubBackupError) {
+    if (error.status === 401) return 'GitHub token 无效或已过期，请重新登录或粘贴新 token。';
+    if (error.status === 403) return 'GitHub token 权限不足、API 限流，或浏览器阻止了请求。';
+    if (error.status === 404) return '没有找到 GitHub 仓库或备份文件，请先创建私有仓库并完成一次备份。';
+    if (error.status === 409) return 'GitHub 仓库还没有可用分支，请先创建私有仓库或检查默认分支。';
+    if (error.status === 422) return `GitHub 拒绝了本次操作：${error.message}`;
+    return error.message;
+  }
   if (error instanceof Error) return error.message;
   return 'GitHub 备份失败。';
 }

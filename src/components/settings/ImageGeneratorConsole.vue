@@ -36,13 +36,9 @@
 
           <p class="module-description">{{ module.description }}</p>
 
-          <p v-if="moduleFeedback[module.id]" class="module-feedback" :class="previewState[module.id] === 'error' ? 'error' : 'success'">
-            {{ moduleFeedback[module.id] }}
-          </p>
-
           <div class="module-actions">
-            <button class="primary-action action-pill" type="button" :disabled="previewState[module.id] === 'loading'" @click="triggerPreview(module.id)">
-              {{ previewState[module.id] === 'loading' ? '生图中' : '测试生图' }}
+            <button class="primary-action action-pill" type="button" @click="openGallery(module.id)">
+              图片仓库
             </button>
             <button class="secondary-action action-pill" type="button" @click="openModule(module.id)">配置模块</button>
           </div>
@@ -53,13 +49,10 @@
 </template>
 
 <script setup lang="ts">
-import { computed, reactive, ref, watch } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
-import { generateNovelAiImage, generateOpenAiImage, generatePollinationsImage } from '@/services/ai';
 import type { AppSettings, ImageModuleId } from '@/types/domain';
 import { getResolvedOpenAiImageConfig, normalizeAppSettings } from '@/utils/settings';
-
-type PreviewState = 'idle' | 'loading' | 'success' | 'error';
 
 const props = defineProps<{
   settings: AppSettings;
@@ -72,16 +65,6 @@ const emit = defineEmits<{
 const router = useRouter();
 const draft = ref<AppSettings>(normalizeAppSettings(props.settings));
 const activeModule = ref<ImageModuleId>('openai');
-const previewState = reactive<Record<ImageModuleId, PreviewState>>({
-  openai: 'idle',
-  novelai: 'idle',
-  pollinations: 'idle'
-});
-const moduleFeedback = reactive<Record<ImageModuleId, string>>({
-  openai: '',
-  novelai: '',
-  pollinations: ''
-});
 
 watch(
   () => props.settings,
@@ -94,19 +77,19 @@ watch(
 const modules = computed(() => {
   const openAiResolved = getResolvedOpenAiImageConfig(draft.value);
   const openAiConnected = Boolean(openAiResolved.endpoint.trim() && openAiResolved.apiKey.trim() && openAiResolved.model.trim());
-  const novelAiConnected = Boolean((draft.value.imageNovelAi.proxyUrl.trim() || draft.value.imageNovelAi.apiUrl.trim()) && draft.value.imageNovelAi.apiKey.trim());
-  const pollinationsConnected = Boolean(draft.value.imagePollinations.apiKey.trim());
+  const novelAiConnected = Boolean(draft.value.imageNovelAi.apiKey.trim() && draft.value.imageNovelAi.model.trim());
+  const pollinationsConnected = Boolean(draft.value.imagePollinations.apiKey.trim() && draft.value.imagePollinations.model.trim());
 
   return [
     {
       id: 'openai' as ImageModuleId,
-      kicker: 'GPT-Image2',
+      kicker: 'OpenAI Images',
       title: 'OpenAI',
-      description: '连接 OpenAI 兼容图片接口，用于生成角色与封面图片。',
+      description: '连接 OpenAI 兼容图片接口',
       summary: draft.value.imageOpenAi.activeVendorId
         ? `默认 ${draft.value.imageOpenAi.vendors.find((vendor) => vendor.id === draft.value.imageOpenAi.activeVendorId)?.name || '供应商'}`
         : '未选择供应商',
-      placeholder: 'GPT',
+      placeholder: 'OpenAI',
       preview: draft.value.imageOpenAi.lastImageUrl,
       connected: openAiConnected
     },
@@ -114,7 +97,7 @@ const modules = computed(() => {
       id: 'novelai' as ImageModuleId,
       kicker: 'NovelAI',
       title: 'NovelAI',
-      description: '连接 NovelAI 图片接口，用于生成角色与封面图片。',
+      description: '连接 NovelAI 图片接口',
       summary: `${draft.value.imageNovelAi.model} / ${draft.value.imageNovelAi.steps} steps`,
       placeholder: 'NAI',
       preview: draft.value.imageNovelAi.lastImageUrl,
@@ -124,7 +107,7 @@ const modules = computed(() => {
       id: 'pollinations' as ImageModuleId,
       kicker: 'Pollinations',
       title: 'Pollinations',
-      description: '连接 Pollinations 图片接口，用于生成角色与封面图片。',
+      description: '连接 Pollinations 图片接口',
       summary: `${draft.value.imagePollinations.model} / ${draft.value.imagePollinations.width}x${draft.value.imagePollinations.height}`,
       placeholder: 'PO',
       preview: draft.value.imagePollinations.lastImageUrl,
@@ -139,6 +122,10 @@ function openModule(moduleId: ImageModuleId) {
   void router.push({ name: 'image-module-settings', params: { module: moduleId } });
 }
 
+function openGallery(moduleId: ImageModuleId) {
+  void router.push({ name: 'image-gallery', params: { module: moduleId } });
+}
+
 function setActiveModule(moduleId: ImageModuleId) {
   activeModule.value = moduleId;
 }
@@ -151,61 +138,6 @@ defineExpose({
   submitSettings
 });
 
-function setModulePreview(moduleId: ImageModuleId, imageUrl: string) {
-  if (moduleId === 'openai') {
-    draft.value = normalizeAppSettings({
-      ...draft.value,
-      imageOpenAi: {
-        ...draft.value.imageOpenAi,
-        lastImageUrl: imageUrl
-      }
-    });
-    return;
-  }
-
-  if (moduleId === 'novelai') {
-    draft.value = normalizeAppSettings({
-      ...draft.value,
-      imageNovelAi: {
-        ...draft.value.imageNovelAi,
-        lastImageUrl: imageUrl
-      }
-    });
-    return;
-  }
-
-  draft.value = normalizeAppSettings({
-    ...draft.value,
-    imagePollinations: {
-      ...draft.value.imagePollinations,
-      lastImageUrl: imageUrl
-    }
-  });
-}
-
-function getErrorMessage(error: unknown) {
-  return error instanceof Error ? error.message : '图片请求失败，请稍后再试。';
-}
-
-async function triggerPreview(moduleId: ImageModuleId) {
-  previewState[moduleId] = 'loading';
-  moduleFeedback[moduleId] = '';
-
-  try {
-    const result = moduleId === 'openai'
-      ? await generateOpenAiImage(draft.value)
-      : moduleId === 'novelai'
-        ? await generateNovelAiImage(draft.value)
-        : await generatePollinationsImage(draft.value);
-
-    setModulePreview(moduleId, result.imageUrl);
-    previewState[moduleId] = 'success';
-    moduleFeedback[moduleId] = '预览已更新，保存后会同步到本地设置。';
-  } catch (error) {
-    previewState[moduleId] = 'error';
-    moduleFeedback[moduleId] = getErrorMessage(error);
-  }
-}
 </script>
 
 <style scoped>
@@ -404,6 +336,9 @@ async function triggerPreview(moduleId: ImageModuleId) {
 .module-actions .action-pill {
   flex: 1 1 0;
   min-width: 0;
+  padding-inline: 10px;
+  line-height: 1.2;
+  white-space: nowrap;
 }
 
 .module-actions .primary-action {

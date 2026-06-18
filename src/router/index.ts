@@ -10,6 +10,7 @@ import FanficPage from '@/pages/FanficPage.vue';
 import ProfilePage from '@/pages/ProfilePage.vue';
 import AddFriendPage from '@/pages/AddFriendPage.vue';
 import ServicesPage from '@/pages/ServicesPlaceholderPage.vue';
+import ImageGalleryPage from '@/pages/settings/ImageGalleryPage.vue';
 import ImageModuleSettingsPage from '@/pages/settings/ImageModuleSettingsPage.vue';
 import SettingsPage from '@/pages/settings/SettingsPage.vue';
 import StickersPage from '@/pages/StickersPage.vue';
@@ -33,6 +34,7 @@ export const router = createRouter({
     { path: '/world-book/:id/edit', name: 'world-book-edit', component: WorldBookEditorPage },
     { path: '/world-book/:id/delete', redirect: (to) => ({ name: 'world-book-edit', params: { id: String(to.params.id) } }) },
     { path: '/settings', name: 'settings', component: SettingsPage },
+    { path: '/settings/image/:module/gallery', name: 'image-gallery', component: ImageGalleryPage },
     { path: '/settings/image/:module', name: 'image-module-settings', component: ImageModuleSettingsPage },
     { path: '/chats', name: 'chats', component: ChatsPage },
     { path: '/chats/:id/settings', name: 'chat-settings', component: ChatSettingsPage, props: true },

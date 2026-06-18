@@ -7,7 +7,8 @@
       @open-menu="openChatSettings"
     />
 
-    <main ref="messageListRef" class="message-list" :style="messageListStyle">
+    <main ref="messageListRef" class="message-list" :style="messageListStyle" @scroll="handleMessageListScroll">
+      <div v-if="hasEarlierMessages" class="history-loader">上滑加载更早消息</div>
       <MessageBubble
         v-for="(message, index) in onlineMessages"
         :key="message.id"
@@ -233,19 +234,27 @@ const quoteTarget = ref<ChatMessageQuote | null>(null);
 const editDraft = ref('');
 const pendingDeleteIds = ref<string[]>([]);
 const pendingDeleteFromSelection = ref(false);
+const visibleMessageLimit = ref(60);
+const loadingEarlierMessages = ref(false);
+
+const initialMessageLimit = 60;
+const messageLoadStep = 30;
+const topLoadThreshold = 48;
 
 const conversation = computed(() => store.conversationById(props.id));
 const character = computed(() => (conversation.value ? store.characterById(conversation.value.charId) : undefined));
 const characterDisplayName = computed(() => character.value?.nickname || character.value?.name || '该好友');
 const boundUser = computed(() => (character.value ? store.userById(character.value.boundUserId) : null));
 const chatSettings = computed(() => store.settingsForConversation(props.id));
-const onlineMessages = computed(() => {
-  const messages = store.visibleMessagesForConversation(props.id).filter((message) => message.mode === 'online');
+const allOnlineMessages = computed(() => {
+  const messages = store.messagesForConversation(props.id).filter((message) => message.mode === 'online');
   const displayMessages = chatSettings.value.appearance.hideVoomNarration
     ? messages.filter((message) => !isVoomNarrationMessage(message))
     : messages;
   return mergeVoomLikeMessages(displayMessages);
 });
+const onlineMessages = computed(() => allOnlineMessages.value.slice(Math.max(0, allOnlineMessages.value.length - visibleMessageLimit.value)));
+const hasEarlierMessages = computed(() => visibleMessageLimit.value < allOnlineMessages.value.length);
 
 function shouldHideAvatar(index: number) {
   if (!chatSettings.value.appearance.showOnlyFirstAvatarInReply) return false;
@@ -259,7 +268,7 @@ const messageListStyle = computed(() => ({
   backgroundImage: chatSettings.value.appearance.backgroundImage ? `url(${chatSettings.value.appearance.backgroundImage})` : 'none'
 }));
 const hasPendingUserMessages = computed(() => {
-  const lastMessage = onlineMessages.value[onlineMessages.value.length - 1];
+  const lastMessage = allOnlineMessages.value[allOnlineMessages.value.length - 1];
   return lastMessage?.sender === 'user';
 });
 const selectedMessageCount = computed(() => selectedMessageIds.value.length);
@@ -286,20 +295,43 @@ async function scrollMessagesToBottom() {
   messageList.scrollTop = messageList.scrollHeight;
 }
 
+function resetMessageWindow() {
+  visibleMessageLimit.value = initialMessageLimit;
+}
+
+async function loadEarlierMessages() {
+  const messageList = messageListRef.value;
+  if (!messageList || !hasEarlierMessages.value || loadingEarlierMessages.value) return;
+  loadingEarlierMessages.value = true;
+  const previousScrollHeight = messageList.scrollHeight;
+  const previousScrollTop = messageList.scrollTop;
+  visibleMessageLimit.value = Math.min(allOnlineMessages.value.length, visibleMessageLimit.value + messageLoadStep);
+  await nextTick();
+  messageList.scrollTop = messageList.scrollHeight - previousScrollHeight + previousScrollTop;
+  loadingEarlierMessages.value = false;
+}
+
+function handleMessageListScroll() {
+  if ((messageListRef.value?.scrollTop ?? 0) > topLoadThreshold) return;
+  void loadEarlierMessages();
+}
+
 onMounted(async () => {
   await store.hydrate();
   await syncConversationState(props.id);
+  resetMessageWindow();
   await scrollMessagesToBottom();
 });
 
 watch(() => props.id, (id) => {
   void (async () => {
+    resetMessageWindow();
     await syncConversationState(id);
     await scrollMessagesToBottom();
   })();
 });
 
-watch(() => [onlineMessages.value.length, store.loadingReply], () => {
+watch(() => [allOnlineMessages.value.length, store.loadingReply], () => {
   void scrollMessagesToBottom();
 }, {
   flush: 'post'
@@ -571,6 +603,18 @@ async function enterOffline() {
   -webkit-overflow-scrolling: touch;
   overflow-anchor: none;
   scroll-padding-bottom: calc(8px + var(--keyboard-inset));
+}
+
+.history-loader {
+  margin: 3px auto 9px;
+  width: fit-content;
+  max-width: 100%;
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: rgba(245, 246, 248, 0.92);
+  color: #7b828a;
+  font-size: 12px;
+  line-height: 1.2;
 }
 
 .typing-indicator {

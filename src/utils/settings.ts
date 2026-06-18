@@ -1,7 +1,45 @@
-import type { ApiVendor, ApiVendorModel, AppSettings, GitHubBackupSettings, ImageProviderType, NovelAiImageSettings, OpenAiImageSettings, PollinationsImageSettings } from '@/types/domain';
+import type { ApiVendor, ApiVendorModel, AppSettings, GitHubBackupSettings, ImagePromptPreset, ImageProviderType, NovelAiImageSettings, OpenAiImageSettings, PollinationsImageSettings } from '@/types/domain';
 import { createId } from './id';
 
+export const novelAiOfficialApiUrl = 'https://image.novelai.net';
+export const novelAiProxyApiUrl = 'https://nai.lolidoll.cc.cd';
+
+export const defaultNovelAiModels = [
+  { id: 'nai-diffusion-4-5-full', label: 'NAI Diffusion Anime V4.5 Full' },
+  { id: 'nai-diffusion-4-5-curated', label: 'NAI Diffusion Anime V4.5 Curated' },
+  { id: 'nai-diffusion-4-5-curated-preview', label: 'NAI Diffusion Anime V4.5 Curated Preview' },
+  { id: 'nai-diffusion-4-full', label: 'NAI Diffusion Anime V4 Full' },
+  { id: 'nai-diffusion-4-curated-preview', label: 'NAI Diffusion Anime V4 Curated Preview' },
+  { id: 'nai-diffusion-3', label: 'NAI Diffusion Anime V3' },
+  { id: 'nai-diffusion-furry-3', label: 'NAI Diffusion Furry V3' }
+];
+
+export const defaultPollinationsModels = [
+  { id: 'zimage', label: 'Z-Image' },
+  { id: 'flux', label: 'Flux' },
+  { id: 'gptimage', label: 'GPT Image' },
+  { id: 'kontext', label: 'FLUX.1 Kontext' },
+  { id: 'seedream5', label: 'Seedream 5' },
+  { id: 'nanobanana', label: 'NanoBanana' },
+  { id: 'klein', label: 'Klein' },
+  { id: 'qwen-image', label: 'Qwen Image' }
+];
+
+export interface ConfiguredImageModelOption {
+  key: string;
+  provider: ImageProviderType;
+  providerLabel: string;
+  label: string;
+  detail: string;
+  model: string;
+}
+
 const imageProviderOrder: ImageProviderType[] = ['openai', 'novelai', 'pollinations'];
+const openAiImageGenerationPath = '/images/generations';
+const defaultPromptPresetName = '默认预设';
+const defaultOpenAiPromptPresetId = 'openai_default';
+const defaultNovelAiPromptPresetId = 'novelai_default';
+const defaultPollinationsPromptPresetId = 'pollinations_default';
 
 const defaultVendorAvatar = `data:image/svg+xml;utf8,${encodeURIComponent(`
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120">
@@ -44,16 +82,22 @@ export const defaultAppSettings: AppSettings = {
   imageOpenAi: {
     activeVendorId: '',
     size: '1024x1024',
+    activePromptPresetId: defaultOpenAiPromptPresetId,
+    promptPresets: [{ id: defaultOpenAiPromptPresetId, name: defaultPromptPresetName, positivePrompt: '', negativePrompt: '' }],
     positivePrompt: '',
     negativePrompt: '',
     lastImageUrl: '',
     vendors: []
   },
   imageNovelAi: {
-    apiUrl: 'https://image.novelai.net',
-    proxyUrl: '',
+    endpointMode: 'proxy',
+    apiUrl: novelAiOfficialApiUrl,
+    proxyUrl: novelAiProxyApiUrl,
     apiKey: '',
-    model: 'nai-diffusion-4-5-curated-preview',
+    model: defaultNovelAiModels[0].id,
+    availableModels: defaultNovelAiModels,
+    activePromptPresetId: defaultNovelAiPromptPresetId,
+    promptPresets: [{ id: defaultNovelAiPromptPresetId, name: defaultPromptPresetName, positivePrompt: '', negativePrompt: '' }],
     positivePrompt: '',
     negativePrompt: '',
     width: 832,
@@ -61,18 +105,32 @@ export const defaultAppSettings: AppSettings = {
     guidance: 6.5,
     steps: 28,
     sampler: 'k_euler_ancestral',
+    ucPreset: 0,
+    qualityToggle: true,
+    sm: false,
+    smDyn: false,
+    dynamicThresholding: false,
+    cfgRescale: 0,
+    noiseSchedule: 'native',
     seed: '',
     lastImageUrl: ''
   },
   imagePollinations: {
     apiKey: '',
     referrer: 'link-pwa',
-    model: 'flux',
+    model: 'zimage',
+    availableModels: defaultPollinationsModels,
+    activePromptPresetId: defaultPollinationsPromptPresetId,
+    promptPresets: [{ id: defaultPollinationsPromptPresetId, name: defaultPromptPresetName, positivePrompt: '', negativePrompt: '' }],
     positivePrompt: '',
     negativePrompt: '',
     width: 1024,
     height: 1024,
     seed: '',
+    safe: 'true',
+    quality: 'medium',
+    referenceImage: '',
+    transparent: false,
     enhance: true,
     nologo: true,
     private: true,
@@ -111,54 +169,191 @@ function normalizeImageProvider(provider: string | null | undefined): ImageProvi
   return imageProviderOrder.includes(normalized as ImageProviderType) ? normalized as ImageProviderType : '';
 }
 
+function normalizePromptPreset(preset: Partial<ImagePromptPreset> | null | undefined, fallbackName: string): ImagePromptPreset | null {
+  const id = String(preset?.id ?? '').trim();
+  if (!id) return null;
+
+  return {
+    id,
+    name: String(preset?.name ?? fallbackName).trim(),
+    positivePrompt: String(preset?.positivePrompt ?? '').trim(),
+    negativePrompt: String(preset?.negativePrompt ?? '').trim()
+  };
+}
+
+function normalizePromptPresetState(
+  presets: Partial<ImagePromptPreset>[] | null | undefined,
+  options: {
+    activePresetId: string | null | undefined;
+    defaultId: string;
+    defaultName: string;
+    legacyPositivePrompt: string;
+    legacyNegativePrompt: string;
+  }
+) {
+  const normalizedPresets = Array.isArray(presets)
+    ? presets
+        .map((preset, index) => normalizePromptPreset(preset, `${options.defaultName} ${index + 1}`))
+        .filter((preset): preset is ImagePromptPreset => Boolean(preset))
+        .map((preset, index) => ({
+          ...preset,
+          name: preset.name || `${options.defaultName} ${index + 1}`
+        }))
+    : [];
+
+  const promptPresets = normalizedPresets.length
+    ? normalizedPresets
+    : [{
+        id: options.defaultId,
+        name: options.defaultName,
+        positivePrompt: options.legacyPositivePrompt,
+        negativePrompt: options.legacyNegativePrompt
+      }];
+
+  const requestedActiveId = String(options.activePresetId ?? '').trim();
+  const activePreset = promptPresets.find((preset) => preset.id === requestedActiveId) ?? promptPresets[0];
+
+  return {
+    activePromptPresetId: activePreset.id,
+    promptPresets,
+    positivePrompt: activePreset.positivePrompt,
+    negativePrompt: activePreset.negativePrompt
+  };
+}
+
 function normalizeOpenAiImageSettings(
   settings: Partial<OpenAiImageSettings> | null | undefined,
   fallback: Pick<AppSettings, 'imageModel' | 'imageSize' | 'imagePromptPrefix'>
 ): OpenAiImageSettings {
   const vendors = Array.isArray(settings?.vendors)
-    ? settings.vendors.map((vendor) => normalizeVendor(vendor)).filter((vendor) => vendor.name)
+    ? settings.vendors.map((vendor) => normalizeImageVendor(vendor)).filter((vendor) => vendor.name)
     : [];
 
   const activeVendorId = String(settings?.activeVendorId ?? '').trim();
+  const promptState = normalizePromptPresetState(settings?.promptPresets, {
+    activePresetId: settings?.activePromptPresetId,
+    defaultId: defaultOpenAiPromptPresetId,
+    defaultName: defaultPromptPresetName,
+    legacyPositivePrompt: String(settings?.positivePrompt ?? fallback.imagePromptPrefix ?? '').trim(),
+    legacyNegativePrompt: String(settings?.negativePrompt ?? '').trim()
+  });
 
   return {
     activeVendorId,
     size: String(settings?.size ?? fallback.imageSize ?? defaultAppSettings.imageOpenAi.size).trim() || defaultAppSettings.imageOpenAi.size,
-    positivePrompt: String(settings?.positivePrompt ?? fallback.imagePromptPrefix ?? '').trim(),
-    negativePrompt: String(settings?.negativePrompt ?? '').trim(),
+    activePromptPresetId: promptState.activePromptPresetId,
+    promptPresets: promptState.promptPresets,
+    positivePrompt: promptState.positivePrompt,
+    negativePrompt: promptState.negativePrompt,
     lastImageUrl: String(settings?.lastImageUrl ?? '').trim(),
     vendors
   };
 }
 
+function normalizeNovelAiModelOption(model: Partial<{ id: string; label: string; name: string; nickname: string }> | string | null | undefined) {
+  const id = typeof model === 'string' ? model.trim() : String(model?.id ?? model?.name ?? '').trim();
+  if (!id) return null;
+  const label = typeof model === 'string' ? id : String(model?.label ?? model?.nickname ?? model?.name ?? id).trim();
+  return { id, label: label || id };
+}
+
+function normalizeNovelAiModels(models: NovelAiImageSettings['availableModels'] | null | undefined, selectedModel: string) {
+  const byId = new Map(defaultNovelAiModels.map((model) => [model.id, model]));
+  if (Array.isArray(models)) {
+    models.forEach((model) => {
+      const normalizedModel = normalizeNovelAiModelOption(model);
+      if (normalizedModel) byId.set(normalizedModel.id, normalizedModel);
+    });
+  }
+  if (selectedModel && !byId.has(selectedModel)) byId.set(selectedModel, { id: selectedModel, label: selectedModel });
+  return [...byId.values()];
+}
+
+function normalizePollinationsModelOption(model: Partial<{ id: string; label: string; name: string; model: string; title: string }> | string | null | undefined) {
+  const id = typeof model === 'string' ? model.trim() : String(model?.id ?? model?.model ?? model?.name ?? '').trim();
+  if (!id) return null;
+  const label = typeof model === 'string' ? id : String(model?.label ?? model?.title ?? model?.name ?? id).trim();
+  return { id, label: label || id };
+}
+
+function normalizePollinationsModels(models: PollinationsImageSettings['availableModels'] | null | undefined, selectedModel: string) {
+  const byId = new Map(defaultPollinationsModels.map((model) => [model.id, model]));
+  if (Array.isArray(models)) {
+    models.forEach((model) => {
+      const normalizedModel = normalizePollinationsModelOption(model);
+      if (normalizedModel) byId.set(normalizedModel.id, normalizedModel);
+    });
+  }
+  if (selectedModel && !byId.has(selectedModel)) byId.set(selectedModel, { id: selectedModel, label: selectedModel });
+  return [...byId.values()];
+}
+
 function normalizeNovelAiImageSettings(settings: Partial<NovelAiImageSettings> | null | undefined): NovelAiImageSettings {
+  const promptState = normalizePromptPresetState(settings?.promptPresets, {
+    activePresetId: settings?.activePromptPresetId,
+    defaultId: defaultNovelAiPromptPresetId,
+    defaultName: defaultPromptPresetName,
+    legacyPositivePrompt: String(settings?.positivePrompt ?? '').trim(),
+    legacyNegativePrompt: String(settings?.negativePrompt ?? '').trim()
+  });
+
+  const selectedModel = String(settings?.model ?? defaultAppSettings.imageNovelAi.model).trim() || defaultAppSettings.imageNovelAi.model;
+
   return {
-    apiUrl: String(settings?.apiUrl ?? defaultAppSettings.imageNovelAi.apiUrl).trim() || defaultAppSettings.imageNovelAi.apiUrl,
-    proxyUrl: String(settings?.proxyUrl ?? '').trim(),
+    endpointMode: settings?.endpointMode === 'official' ? 'official' : 'proxy',
+    apiUrl: novelAiOfficialApiUrl,
+    proxyUrl: novelAiProxyApiUrl,
     apiKey: String(settings?.apiKey ?? '').trim(),
-    model: String(settings?.model ?? defaultAppSettings.imageNovelAi.model).trim() || defaultAppSettings.imageNovelAi.model,
-    positivePrompt: String(settings?.positivePrompt ?? '').trim(),
-    negativePrompt: String(settings?.negativePrompt ?? '').trim(),
+    model: selectedModel,
+    availableModels: normalizeNovelAiModels(settings?.availableModels, selectedModel),
+    activePromptPresetId: promptState.activePromptPresetId,
+    promptPresets: promptState.promptPresets,
+    positivePrompt: promptState.positivePrompt,
+    negativePrompt: promptState.negativePrompt,
     width: Math.max(320, Number(settings?.width ?? defaultAppSettings.imageNovelAi.width) || defaultAppSettings.imageNovelAi.width),
     height: Math.max(320, Number(settings?.height ?? defaultAppSettings.imageNovelAi.height) || defaultAppSettings.imageNovelAi.height),
     guidance: Math.max(1, Number(settings?.guidance ?? defaultAppSettings.imageNovelAi.guidance) || defaultAppSettings.imageNovelAi.guidance),
     steps: Math.max(1, Math.round(Number(settings?.steps ?? defaultAppSettings.imageNovelAi.steps) || defaultAppSettings.imageNovelAi.steps)),
     sampler: String(settings?.sampler ?? defaultAppSettings.imageNovelAi.sampler).trim() || defaultAppSettings.imageNovelAi.sampler,
+    ucPreset: Math.min(4, Math.max(0, Math.round(Number(settings?.ucPreset ?? defaultAppSettings.imageNovelAi.ucPreset) || 0))),
+    qualityToggle: settings?.qualityToggle ?? defaultAppSettings.imageNovelAi.qualityToggle,
+    sm: settings?.sm ?? defaultAppSettings.imageNovelAi.sm,
+    smDyn: settings?.smDyn ?? defaultAppSettings.imageNovelAi.smDyn,
+    dynamicThresholding: settings?.dynamicThresholding ?? defaultAppSettings.imageNovelAi.dynamicThresholding,
+    cfgRescale: Math.max(0, Number(settings?.cfgRescale ?? defaultAppSettings.imageNovelAi.cfgRescale) || 0),
+    noiseSchedule: String(settings?.noiseSchedule ?? defaultAppSettings.imageNovelAi.noiseSchedule).trim() || defaultAppSettings.imageNovelAi.noiseSchedule,
     seed: String(settings?.seed ?? '').trim(),
     lastImageUrl: String(settings?.lastImageUrl ?? '').trim()
   };
 }
 
 function normalizePollinationsImageSettings(settings: Partial<PollinationsImageSettings> | null | undefined): PollinationsImageSettings {
+  const promptState = normalizePromptPresetState(settings?.promptPresets, {
+    activePresetId: settings?.activePromptPresetId,
+    defaultId: defaultPollinationsPromptPresetId,
+    defaultName: defaultPromptPresetName,
+    legacyPositivePrompt: String(settings?.positivePrompt ?? '').trim(),
+    legacyNegativePrompt: String(settings?.negativePrompt ?? '').trim()
+  });
+
+  const selectedModel = String(settings?.model ?? defaultAppSettings.imagePollinations.model).trim() || defaultAppSettings.imagePollinations.model;
+
   return {
     apiKey: String(settings?.apiKey ?? '').trim(),
     referrer: String(settings?.referrer ?? defaultAppSettings.imagePollinations.referrer).trim() || defaultAppSettings.imagePollinations.referrer,
-    model: String(settings?.model ?? defaultAppSettings.imagePollinations.model).trim() || defaultAppSettings.imagePollinations.model,
-    positivePrompt: String(settings?.positivePrompt ?? '').trim(),
-    negativePrompt: String(settings?.negativePrompt ?? '').trim(),
+    model: selectedModel,
+    availableModels: normalizePollinationsModels(settings?.availableModels, selectedModel),
+    activePromptPresetId: promptState.activePromptPresetId,
+    promptPresets: promptState.promptPresets,
+    positivePrompt: promptState.positivePrompt,
+    negativePrompt: promptState.negativePrompt,
     width: Math.max(320, Number(settings?.width ?? defaultAppSettings.imagePollinations.width) || defaultAppSettings.imagePollinations.width),
     height: Math.max(320, Number(settings?.height ?? defaultAppSettings.imagePollinations.height) || defaultAppSettings.imagePollinations.height),
     seed: String(settings?.seed ?? '').trim(),
+    safe: String(settings?.safe ?? defaultAppSettings.imagePollinations.safe).trim() || defaultAppSettings.imagePollinations.safe,
+    quality: String(settings?.quality ?? defaultAppSettings.imagePollinations.quality).trim() || defaultAppSettings.imagePollinations.quality,
+    referenceImage: String(settings?.referenceImage ?? '').trim(),
+    transparent: settings?.transparent ?? defaultAppSettings.imagePollinations.transparent,
     enhance: settings?.enhance ?? defaultAppSettings.imagePollinations.enhance,
     nologo: settings?.nologo ?? defaultAppSettings.imagePollinations.nologo,
     private: settings?.private ?? defaultAppSettings.imagePollinations.private,
@@ -261,14 +456,44 @@ function normalizeVendor(vendor: Partial<ApiVendor> | null | undefined, fallback
   };
 }
 
+function normalizeImageVendor(vendor: Partial<ApiVendor> | null | undefined, fallbackId?: string): ApiVendor {
+  const normalizedVendor = normalizeVendor(vendor, fallbackId);
+  const apiPath = normalizeOpenAiImagePath(vendor?.apiPath);
+  return {
+    ...normalizedVendor,
+    apiPath
+  };
+}
+
 export function createApiVendor(overrides: Partial<ApiVendor> = {}): ApiVendor {
   return normalizeVendor(overrides);
+}
+
+export function createImageApiVendor(overrides: Partial<ApiVendor> = {}): ApiVendor {
+  return normalizeImageVendor({ apiPath: openAiImageGenerationPath, ...overrides });
 }
 
 export function buildApiEndpoint(apiUrl: string, apiPath: string) {
   const url = apiUrl.trim().replace(/\/+$/, '');
   const path = `/${apiPath.trim().replace(/^\/+/, '')}`;
   return `${url}${path}`;
+}
+
+function buildOpenAiImageEndpoint(apiUrl: string, apiPath: string) {
+  const normalizedApiUrl = apiUrl.trim().replace(/\/+$/, '');
+  const normalizedPath = normalizeOpenAiImagePath(apiPath);
+  const endpoint = `${normalizedApiUrl}${normalizedPath}`;
+  if (import.meta.env.DEV && /^https?:\/\//i.test(normalizedApiUrl)) {
+    return `/__image-proxy?url=${encodeURIComponent(endpoint)}`;
+  }
+  return endpoint;
+}
+
+function normalizeOpenAiImagePath(apiPath: unknown) {
+  const normalizedPath = `/${String(apiPath ?? '').trim().replace(/^\/+/, '')}`;
+  return !normalizedPath.trim() || normalizedPath === '/' || normalizedPath === '/chat/completions'
+    ? openAiImageGenerationPath
+    : normalizedPath;
 }
 
 export function getSelectedVendorModels(vendor: ApiVendor) {
@@ -297,6 +522,10 @@ export function mergeVendorModels(vendor: ApiVendor, modelIds: string[]) {
         };
       })
   }, vendor.id);
+}
+
+export function mergeImageVendorModels(vendor: ApiVendor, modelIds: string[]) {
+  return normalizeImageVendor(mergeVendorModels(vendor, modelIds), vendor.id);
 }
 
 export function getPreferredApiVendor(settings?: AppSettings | null) {
@@ -354,7 +583,7 @@ export function getResolvedOpenAiImageConfig(settings?: AppSettings | null) {
       ?? null;
 
     return {
-      endpoint: buildApiEndpoint(preferredVendor.apiUrl, preferredVendor.apiPath || '/images/generations'),
+      endpoint: buildOpenAiImageEndpoint(preferredVendor.apiUrl, preferredVendor.apiPath || openAiImageGenerationPath),
       apiKey: preferredVendor.apiKey,
       model: preferredModel?.id ?? settings?.imageModel?.trim() ?? defaultAppSettings.imageModel,
       size: imageSettings.size
@@ -380,7 +609,7 @@ export function isImageProviderConfigured(provider: ImageProviderType, settings?
   }
 
   if (provider === 'novelai') {
-    return Boolean((settings.imageNovelAi.proxyUrl.trim() || settings.imageNovelAi.apiUrl.trim()) && settings.imageNovelAi.apiKey.trim() && settings.imageNovelAi.model.trim());
+    return Boolean(settings.imageNovelAi.apiKey.trim() && settings.imageNovelAi.model.trim());
   }
 
   return Boolean(settings.imagePollinations.apiKey.trim() && settings.imagePollinations.model.trim());
@@ -395,6 +624,79 @@ export function getPreferredVoomImageProvider(settings?: AppSettings | null): Im
   const selectedProvider = normalizeImageProvider(settings?.voomImageProvider);
   if (selectedProvider && configuredProviders.includes(selectedProvider)) return selectedProvider;
   return configuredProviders[0] ?? null;
+}
+
+export function createImageModelKey(provider: ImageProviderType, model: string) {
+  return `${provider}:${model.trim()}`;
+}
+
+export function getConfiguredImageModelOptions(settings?: AppSettings | null): ConfiguredImageModelOption[] {
+  if (!settings) return [];
+
+  const openAiOptions = settings.imageOpenAi.vendors.flatMap((vendor) => {
+    if (!vendor.enabled || !vendor.apiUrl.trim() || !vendor.apiPath.trim() || !vendor.apiKey.trim()) return [];
+    const model = vendor.models.find((item) => item.selected) ?? vendor.models[0] ?? (settings.imageModel.trim() ? { id: settings.imageModel.trim(), nickname: '', selected: true } : null);
+    if (!model?.id.trim()) return [];
+    const modelSelection = `${vendor.id}::${model.id}`;
+    return [{
+      key: createImageModelKey('openai', modelSelection),
+      provider: 'openai' as const,
+      providerLabel: 'OpenAI',
+      label: model.nickname || model.id,
+      detail: vendor.name,
+      model: modelSelection
+    }];
+  });
+
+  const novelAiOptions = settings.imageNovelAi.apiKey.trim() && settings.imageNovelAi.model.trim()
+    ? [{
+        key: createImageModelKey('novelai', settings.imageNovelAi.model),
+        provider: 'novelai' as const,
+        providerLabel: 'NovelAI',
+        label: settings.imageNovelAi.availableModels.find((model) => model.id === settings.imageNovelAi.model)?.label || settings.imageNovelAi.model,
+        detail: `${settings.imageNovelAi.width} x ${settings.imageNovelAi.height}`,
+        model: settings.imageNovelAi.model
+      }]
+    : [];
+
+  const pollinationsOptions = settings.imagePollinations.apiKey.trim() && settings.imagePollinations.model.trim()
+    ? [{
+        key: createImageModelKey('pollinations', settings.imagePollinations.model),
+        provider: 'pollinations' as const,
+        providerLabel: 'Pollinations',
+        label: settings.imagePollinations.availableModels.find((model) => model.id === settings.imagePollinations.model)?.label || settings.imagePollinations.model,
+        detail: `${settings.imagePollinations.width} x ${settings.imagePollinations.height}`,
+        model: settings.imagePollinations.model
+      }]
+    : [];
+
+  return [...openAiOptions, ...novelAiOptions, ...pollinationsOptions];
+}
+
+export function getSelectedImageModelOption(settings?: AppSettings | null) {
+  const options = getConfiguredImageModelOptions(settings);
+  const selectedProvider = normalizeImageProvider(settings?.voomImageProvider);
+  const selectedKey = selectedProvider ? createImageModelKey(selectedProvider, settings?.voomImageModel ?? '') : '';
+  return options.find((option) => option.key === selectedKey) ?? options[0] ?? null;
+}
+
+export function getImagePromptPresetForProvider(settings: AppSettings, provider: ImageProviderType) {
+  if (provider === 'openai') {
+    return {
+      positivePrompt: settings.imageOpenAi.positivePrompt,
+      negativePrompt: settings.imageOpenAi.negativePrompt
+    };
+  }
+  if (provider === 'novelai') {
+    return {
+      positivePrompt: settings.imageNovelAi.positivePrompt,
+      negativePrompt: settings.imageNovelAi.negativePrompt
+    };
+  }
+  return {
+    positivePrompt: settings.imagePollinations.positivePrompt,
+    negativePrompt: settings.imagePollinations.negativePrompt
+  };
 }
 
 export function normalizeAppSettings(settings?: Partial<AppSettings> | null): AppSettings {

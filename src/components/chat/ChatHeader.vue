@@ -1,10 +1,12 @@
 <template>
   <header class="chat-header">
-    <button class="icon-button" type="button" aria-label="返回" @click="router.back()">
-      <ChevronLeft :size="24" />
-    </button>
-    <div class="chat-person">
-      <strong>{{ displayName }}</strong>
+    <div class="chat-title-row">
+      <button class="icon-button" type="button" aria-label="返回" @click="router.back()">
+        <ChevronLeft :size="24" />
+      </button>
+      <div class="chat-person">
+        <strong>{{ displayName }}</strong>
+      </div>
     </div>
     <div class="icon-row">
       <button v-if="mode === 'online'" class="icon-button" type="button" aria-label="进入线下模式" @click="$emit('offline')">
@@ -51,7 +53,7 @@ const displayName = computed(() => getCharacterDisplayName(props.character));
   top: 0;
   z-index: 10;
   display: grid;
-  grid-template-columns: 36px minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   min-height: 42px;
   padding: calc(3px + var(--safe-top)) calc(10px + var(--safe-right)) 3px calc(10px + var(--safe-left));
@@ -59,17 +61,31 @@ const displayName = computed(() => getCharacterDisplayName(props.character));
   backdrop-filter: blur(16px);
 }
 
+.chat-title-row {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--top-icon-gap);
+}
+
 .chat-person {
   min-width: 0;
-  display: grid;
-  gap: 2px;
+  display: flex;
+  align-items: center;
+  min-height: var(--top-icon-button-height);
+  padding: 0 2px;
 }
 
 .chat-person strong {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 14px;
+  font-size: var(--compact-heading-font-size);
+  line-height: 1;
+}
+
+:global(#app .mobile-shell .screen .chat-header .chat-person strong) {
+  font-size: var(--compact-heading-font-size);
 }
 
 .icon-row {

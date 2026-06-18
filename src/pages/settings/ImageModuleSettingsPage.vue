@@ -4,15 +4,11 @@
       <button class="image-module-title-button" type="button" aria-label="返回图片设置" @click="goBack">
         <h1 class="top-title">{{ activeMeta.title }}</h1>
       </button>
-
-      <button class="image-module-save-button" type="button" aria-label="保存图片模块设置" title="保存图片模块设置" @click="saveModuleSettings">
-        <Save :size="18" stroke-width="2.4" />
-      </button>
     </header>
 
     <main class="image-module-main">
       <section v-if="store.ready" class="image-module-panel">
-        <ImageModuleConfigurator ref="configuratorRef" :settings="currentSettings" :module-id="activeModule" @save="saveSettings" />
+        <ImageModuleConfigurator :settings="currentSettings" :module-id="activeModule" @save="saveSettings" />
       </section>
       <section v-else class="loading-card">
         <p>正在加载图片设置...</p>
@@ -22,9 +18,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { Save } from 'lucide-vue-next';
 import ImageModuleConfigurator from '@/components/settings/ImageModuleConfigurator.vue';
 import { useAppStore } from '@/stores/appStore';
 import type { AppSettings, ImageModuleId } from '@/types/domain';
@@ -39,7 +34,6 @@ const moduleMetas = [
 const route = useRoute();
 const router = useRouter();
 const store = useAppStore();
-const configuratorRef = ref<InstanceType<typeof ImageModuleConfigurator> | null>(null);
 
 const currentSettings = computed<AppSettings>(() => normalizeAppSettings(store.settings));
 const activeModule = computed<ImageModuleId>(() => {
@@ -56,10 +50,6 @@ function goBack() {
   void router.push({ name: 'settings', query: { tab: 'image' } });
 }
 
-function saveModuleSettings() {
-  configuratorRef.value?.submitSettings();
-}
-
 async function saveSettings(nextSettings: AppSettings) {
   await store.saveSettings(nextSettings);
 }
@@ -69,6 +59,7 @@ async function saveSettings(nextSettings: AppSettings) {
 .image-module-page {
   display: flex;
   flex-direction: column;
+  min-width: 0;
   background:
     radial-gradient(circle at 8% 0%, rgba(255, 218, 227, 0.54), transparent 30%),
     radial-gradient(circle at 94% 10%, rgba(6, 199, 85, 0.14), transparent 28%),
@@ -79,6 +70,7 @@ async function saveSettings(nextSettings: AppSettings) {
   align-items: center;
   justify-content: flex-start;
   gap: 12px;
+  min-width: 0;
   background: rgba(251, 252, 251, 0.9);
   backdrop-filter: blur(18px);
 }
@@ -95,23 +87,15 @@ async function saveSettings(nextSettings: AppSettings) {
 .image-module-title-button .top-title {
   margin: 0;
   text-align: left;
-}
-
-.image-module-save-button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 34px;
-  padding: 0 12px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.88);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.92);
-  color: #111111;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .image-module-main {
   flex: 1;
   min-height: 0;
+  min-width: 0;
   width: 100%;
   max-width: 760px;
   margin: 0 auto;
@@ -124,6 +108,7 @@ async function saveSettings(nextSettings: AppSettings) {
 .image-module-panel,
 .loading-card {
   display: grid;
+  min-width: 0;
   padding: 16px;
   border: 1px solid rgba(17, 17, 17, 0.04);
   border-radius: 22px;
@@ -147,13 +132,13 @@ async function saveSettings(nextSettings: AppSettings) {
 
 @media (max-width: 420px) {
   .image-module-main {
-    padding-inline: 12px;
+    padding-inline: max(10px, var(--safe-left)) max(10px, var(--safe-right));
   }
 
   .image-module-panel,
   .loading-card {
-    padding: 14px;
-    border-radius: 20px;
+    padding: 12px;
+    border-radius: 18px;
   }
 }
 </style>
