@@ -2281,13 +2281,14 @@ export const useAppStore = defineStore('app', () => {
         source: 'voom'
       });
       return nextPost;
-    } catch {
+    } catch (error) {
       await saveVoomPost({
         ...post,
         image: '/load.jpg',
         imageDescription,
         imageProvider: 'local'
       });
+      showConfigAlert(error instanceof Error ? error.message : 'VOOM 配图生成失败：没有返回错误详情。', '无法生成配图');
       return null;
     }
   }

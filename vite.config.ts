@@ -8,6 +8,8 @@ const base = process.env.BASE_PATH || '/';
 const textProxyPath = '/__text-proxy';
 const imageProxyPath = '/__image-proxy';
 const openAiImageGeneratePath = '/__openai-image-generate';
+const openAiModelsPath = '/__openai-models';
+const imageDownloadPath = '/__image-download';
 
 async function readRequestBody(request: IncomingMessage) {
   const chunks: Buffer[] = [];
@@ -240,6 +242,99 @@ export default defineConfig({
           } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
             sendJson(response, 502, createProxyErrorPayload(`OpenAI image generation proxy could not reach upstream: ${message}`, 'upstream_unreachable'));
+          }
+        });
+
+        server.middlewares.use(openAiModelsPath, async (request, response) => {
+          if (request.method === 'OPTIONS') {
+            response.statusCode = 204;
+            response.end();
+            return;
+          }
+
+          if (request.method !== 'POST') {
+            sendJson(response, 405, createProxyErrorPayload('OpenAI models proxy only supports POST requests.', 'method_not_allowed'));
+            return;
+          }
+
+          let payload: Record<string, unknown>;
+          try {
+            payload = JSON.parse((await readRequestBody(request)).toString('utf8')) as Record<string, unknown>;
+          } catch {
+            sendJson(response, 400, createProxyErrorPayload('OpenAI models proxy received invalid JSON.', 'invalid_json'));
+            return;
+          }
+
+          const apiUrl = String(payload.apiUrl ?? '').trim().replace(/\/+$/, '');
+          const apiKey = String(payload.apiKey ?? '').trim();
+          if (!apiUrl) {
+            sendJson(response, 400, createProxyErrorPayload('OpenAI models proxy requires apiUrl.', 'missing_api_url'));
+            return;
+          }
+
+          let targetUrl: URL;
+          try {
+            targetUrl = new URL(`${apiUrl}/models`);
+          } catch {
+            sendJson(response, 400, createProxyErrorPayload('OpenAI models endpoint is invalid.', 'invalid_endpoint'));
+            return;
+          }
+
+          if (!['http:', 'https:'].includes(targetUrl.protocol)) {
+            sendJson(response, 400, createProxyErrorPayload('OpenAI models endpoint must use http or https.', 'invalid_endpoint_protocol'));
+            return;
+          }
+
+          try {
+            const upstreamResponse = await fetch(targetUrl, {
+              method: 'GET',
+              headers: {
+                Accept: 'application/json',
+                ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {})
+              }
+            });
+
+            response.statusCode = upstreamResponse.status;
+            response.statusMessage = upstreamResponse.statusText;
+            response.setHeader('Content-Type', upstreamResponse.headers.get('content-type') || 'application/json; charset=utf-8');
+            response.end(Buffer.from(await upstreamResponse.arrayBuffer()));
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            sendJson(response, 502, createProxyErrorPayload(`OpenAI models proxy could not reach upstream: ${message}`, 'upstream_unreachable'));
+          }
+        });
+
+        server.middlewares.use(imageDownloadPath, async (request, response) => {
+          if (request.method !== 'GET') {
+            sendProxyError(response, 405, 'Image download proxy only supports GET requests.');
+            return;
+          }
+
+          const requestUrl = new URL(request.url ?? '', 'http://localhost');
+          const target = requestUrl.searchParams.get('url')?.trim() ?? '';
+          let targetUrl: URL;
+          try {
+            targetUrl = new URL(target);
+          } catch {
+            sendProxyError(response, 400, 'Image download target URL is invalid.');
+            return;
+          }
+
+          if (!['http:', 'https:'].includes(targetUrl.protocol)) {
+            sendProxyError(response, 400, 'Image download target URL must use http or https.');
+            return;
+          }
+
+          try {
+            const upstreamResponse = await fetch(targetUrl, { method: 'GET' });
+            response.statusCode = upstreamResponse.status;
+            response.statusMessage = upstreamResponse.statusText;
+            const upstreamContentType = upstreamResponse.headers.get('content-type');
+            if (upstreamContentType) response.setHeader('Content-Type', upstreamContentType);
+            response.end(Buffer.from(await upstreamResponse.arrayBuffer()));
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            sendProxyError(response, 502, `Image download proxy request failed: ${message}`);
           }
         });
       }
