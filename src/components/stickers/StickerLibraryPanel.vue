@@ -610,8 +610,8 @@ async function deleteSelectedSticker() {
   width: 100%;
   aspect-ratio: 1;
   border-radius: 12px;
-  object-fit: cover;
-  background: #eff1f3;
+  object-fit: contain;
+  background: transparent;
 }
 
 .sticker-tile span {

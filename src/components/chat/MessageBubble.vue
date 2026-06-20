@@ -656,7 +656,7 @@ watch(() => props.message.image?.url, () => {
   width: min(96px, 30vw);
   aspect-ratio: 1;
   border-radius: 10px;
-  object-fit: cover;
+  object-fit: contain;
   background: transparent;
 }
 

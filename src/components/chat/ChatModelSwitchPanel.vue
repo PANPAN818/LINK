@@ -52,6 +52,8 @@ const draft = reactive<ConversationSettings>(normalizeConversationSettings(null,
 const settingsDraft = reactive<AppSettings>(normalizeAppSettings(null));
 const isGlobal = computed(() => props.variant === 'global');
 const panelTitle = computed(() => (isGlobal.value ? '全局模型切换' : '模型切换'));
+const currentConversationSettings = computed(() => normalizeConversationSettings(store.settingsForConversation(props.conversationId), props.conversationId));
+const currentGlobalSettings = computed(() => normalizeAppSettings(store.settings));
 
 const groupedModels = computed(() => {
   return (store.settings?.apiVendors ?? [])
@@ -72,25 +74,26 @@ const groupedModels = computed(() => {
 });
 
 watch(
-  () => [props.conversationId, store.conversationSettings.length, props.modelValue] as const,
+  () => [props.conversationId, currentConversationSettings.value, props.modelValue] as const,
   () => {
     if (isGlobal.value) return;
-    Object.assign(draft, normalizeConversationSettings(store.settingsForConversation(props.conversationId), props.conversationId));
+    Object.assign(draft, currentConversationSettings.value);
   },
   { immediate: true }
 );
 
 watch(
-  () => [store.settings, props.modelValue] as const,
+  () => [currentGlobalSettings.value, props.modelValue] as const,
   () => {
     if (!isGlobal.value) return;
-    Object.assign(settingsDraft, normalizeAppSettings(store.settings));
+    Object.assign(settingsDraft, currentGlobalSettings.value);
   },
   { immediate: true }
 );
 
 function modelValueFor(scope: ChatModelScope) {
-  return isGlobal.value ? settingsDraft.modelOverrides[scope] : draft.modelOverrides[scope];
+  if (isGlobal.value) return settingsDraft.modelOverrides[scope];
+  return draft.modelOverrides[scope].trim() || currentGlobalSettings.value.modelOverrides[scope];
 }
 
 function fallbackLabel(scope: ChatModelScope) {
@@ -107,13 +110,15 @@ function fallbackLabel(scope: ChatModelScope) {
 function updateModel(scope: ChatModelScope, event: Event) {
   const value = (event.target as HTMLSelectElement).value;
   if (isGlobal.value) {
-    void store.saveSettings(normalizeAppSettings({
+    const nextSettings = normalizeAppSettings({
       ...settingsDraft,
       modelOverrides: {
         ...settingsDraft.modelOverrides,
         [scope]: value
       }
-    }));
+    });
+    Object.assign(settingsDraft, nextSettings);
+    void store.saveSettings(nextSettings);
     return;
   }
 

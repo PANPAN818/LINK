@@ -24,10 +24,18 @@ interface CreateUserVoomPostPayload {
   characterIds: string[];
 }
 
+type ConversationSummaryResultStatus = 'created' | 'updated' | 'existing' | 'busy';
+
+interface ConversationSummaryResult {
+  record: ConversationMemoryRecord;
+  status: ConversationSummaryResultStatus;
+}
+
 export const useAppStore = defineStore('app', () => {
   const ready = ref(false);
   let hydratePromise: Promise<void> | null = null;
   let githubBackupRunning = false;
+  const summarizingConversationRanges = new Set<string>();
   const generatingMomentConversationIds = new Set<string>();
   const loadingReply = ref(false);
   const replyingVoomCommentPostIds = ref<string[]>([]);
@@ -117,11 +125,11 @@ export const useAppStore = defineStore('app', () => {
       stickerGroups: dedupedGroups,
       stickers: dedupedStickers,
       conversationSettings: snapshot.conversationSettings.map((entry) => normalizeConversationSettings(entry, entry.conversationId)),
-      conversationMemories: snapshot.conversationMemories.map((memory) => ({
+      conversationMemories: dedupeConversationMemories(snapshot.conversationMemories.map((memory) => ({
         ...memory,
         kind: ageMemoryKind(memory.createdAt),
         vector: Array.isArray(memory.vector) ? memory.vector : []
-      })),
+      }))).memories,
       generatedImages: normalizeGeneratedImages(snapshot.generatedImages ?? []),
       settings: normalizeAppSettings({
         ...defaultSettings,
@@ -129,6 +137,52 @@ export const useAppStore = defineStore('app', () => {
         activeUserId: snapshot.settings.activeUserId || normalizedUsers[0].id
       })
     };
+  }
+
+  function getMemoryRangeKey(memory: Pick<ConversationMemoryRecord, 'conversationId' | 'mode' | 'startFloor' | 'endFloor' | 'isMergedSummary'>) {
+    return `${memory.conversationId}:${memory.mode}:${memory.isMergedSummary ? 'merged' : 'single'}:${memory.startFloor}-${memory.endFloor}`;
+  }
+
+  function isSameMemoryRange(
+    memory: Pick<ConversationMemoryRecord, 'conversationId' | 'mode' | 'startFloor' | 'endFloor' | 'isMergedSummary'>,
+    target: Pick<ConversationMemoryRecord, 'conversationId' | 'mode' | 'startFloor' | 'endFloor' | 'isMergedSummary'>
+  ) {
+    return getMemoryRangeKey(memory) === getMemoryRangeKey(target);
+  }
+
+  function sortMemoriesByFreshness(memories: ConversationMemoryRecord[]) {
+    return [...memories].sort((left, right) => {
+      if (right.updatedAt !== left.updatedAt) return right.updatedAt - left.updatedAt;
+      if (right.createdAt !== left.createdAt) return right.createdAt - left.createdAt;
+      return right.id.localeCompare(left.id);
+    });
+  }
+
+  function dedupeConversationMemories(memories: ConversationMemoryRecord[]) {
+    const latestByRange = new Map<string, ConversationMemoryRecord>();
+    const duplicateIds: string[] = [];
+
+    for (const memory of sortMemoriesByFreshness(memories)) {
+      const rangeKey = getMemoryRangeKey(memory);
+      if (latestByRange.has(rangeKey)) {
+        duplicateIds.push(memory.id);
+        continue;
+      }
+      latestByRange.set(rangeKey, memory);
+    }
+
+    return {
+      memories: [...latestByRange.values()],
+      duplicateIds
+    };
+  }
+
+  async function removeDuplicateConversationMemories(memories: ConversationMemoryRecord[]) {
+    const { memories: dedupedMemories, duplicateIds } = dedupeConversationMemories(memories);
+    if (duplicateIds.length) {
+      await Promise.all(duplicateIds.map((memoryId) => deleteEntity('conversationMemories', memoryId)));
+    }
+    return dedupedMemories;
   }
 
   function keepDeviceGitHubBackupSettings(snapshot: AppSnapshot): AppSnapshot {
@@ -154,7 +208,7 @@ export const useAppStore = defineStore('app', () => {
     stickerGroups.value = snapshot.stickerGroups;
     stickers.value = snapshot.stickers;
     conversationSettings.value = snapshot.conversationSettings;
-    conversationMemories.value = snapshot.conversationMemories;
+    conversationMemories.value = dedupeConversationMemories(snapshot.conversationMemories).memories;
     generatedImages.value = snapshot.generatedImages;
     settings.value = snapshot.settings;
     activeConversationId.value = null;
@@ -201,11 +255,11 @@ export const useAppStore = defineStore('app', () => {
       ]);
     }
     conversationSettings.value = snapshot.conversationSettings.map((entry) => normalizeConversationSettings(entry, entry.conversationId));
-    conversationMemories.value = snapshot.conversationMemories.map((memory) => ({
+    conversationMemories.value = await removeDuplicateConversationMemories(snapshot.conversationMemories.map((memory) => ({
       ...memory,
       kind: ageMemoryKind(memory.createdAt),
       vector: Array.isArray(memory.vector) ? memory.vector : []
-    }));
+    })));
     generatedImages.value = normalizeGeneratedImages(snapshot.generatedImages ?? []);
     settings.value = normalizeAppSettings({
       ...snapshot.settings,
@@ -1652,7 +1706,7 @@ export const useAppStore = defineStore('app', () => {
     return userMessage;
   }
 
-  async function summarizeConversationWindow(conversationId: string, options: { forceStartFloor?: number; forceEndFloor?: number; hiddenStartFloor?: number; hiddenEndFloor?: number; allowPartial?: boolean } = {}) {
+  async function summarizeConversationWindow(conversationId: string, options: { forceStartFloor?: number; forceEndFloor?: number; hiddenStartFloor?: number; hiddenEndFloor?: number; allowPartial?: boolean; replaceMemoryId?: string } = {}): Promise<ConversationSummaryResult | null> {
     const conversation = conversationById(conversationId);
     if (!conversation) return null;
     const chatSettings = settingsForConversation(conversationId);
@@ -1685,46 +1739,92 @@ export const useAppStore = defineStore('app', () => {
 
     if (!range || !range.sourceMessages.length) return null;
 
-    const character = characterById(conversation.charId);
-    const characterName = character?.nickname || character?.name || '角色';
-    const boundUser = character ? userById(character.boundUserId) ?? user.value : user.value;
-    const userSenderName = boundUser?.name || boundUser?.nickname || '我';
-    const modelOverride = getConversationTextModelOverride(chatSettings, 'summary', conversation.activeMode);
-    const floorMap = getMessageFloorMap(conversationMessages);
-    const summary = await generateConversationSummary({
-      messages: range.sourceMessages.map((message) => {
-        const floor = floorMap.get(message.id) ?? range.startFloor;
-        const sender = message.sender === 'user' ? userSenderName : message.sender === 'char' ? character?.nickname || '角色' : '系统';
-        return `${floor}楼 ${sender}: ${message.content}`;
-      }).join('\n'),
-      previousSummary: getMemoryContext(memories),
-      settings: settings.value ?? undefined,
-      modelOverride,
-      promptOverride: renderCharacterMemoryPrompt(chatSettings.memory.summaryPrompt, characterName)
-    });
-    const hasHiddenRange = chatSettings.memory.hideSummarizedMessages && range.hiddenStartFloor > 0 && range.hiddenEndFloor >= range.hiddenStartFloor;
-    const vector = chatSettings.memory.vectorMemoryEnabled
-      ? await generateEmbeddingVector({
-          text: summary,
-          settings: settings.value ?? undefined,
-          modelOverride
-        })
-      : [];
-    const record = createMemoryRecord({
+    const rangeIdentity = {
       conversationId,
       mode: conversation.activeMode,
       startFloor: range.startFloor,
       endFloor: range.endFloor,
-      hiddenStartFloor: hasHiddenRange ? range.hiddenStartFloor : 0,
-      hiddenEndFloor: hasHiddenRange ? range.hiddenEndFloor : 0,
-      summary,
-      sourceMessages: range.sourceMessages,
-      model: modelOverride || settings.value?.model || '',
-      vector
-    });
-    conversationMemories.value.push(record);
-    await putEntity('conversationMemories', record);
-    return record;
+      isMergedSummary: false
+    } satisfies Pick<ConversationMemoryRecord, 'conversationId' | 'mode' | 'startFloor' | 'endFloor' | 'isMergedSummary'>;
+    const rangeKey = getMemoryRangeKey(rangeIdentity);
+    const replacingMemory = options.replaceMemoryId
+      ? memories.find((memory) => memory.id === options.replaceMemoryId)
+      : null;
+    const existingMemory = memories.find((memory) => isSameMemoryRange(memory, rangeIdentity));
+    if (existingMemory && existingMemory.id !== options.replaceMemoryId) {
+      return { record: existingMemory, status: 'existing' };
+    }
+    if (summarizingConversationRanges.has(rangeKey)) {
+      const currentMemory = existingMemory ?? replacingMemory;
+      return currentMemory ? { record: currentMemory, status: 'busy' } : null;
+    }
+    summarizingConversationRanges.add(rangeKey);
+
+    try {
+      const character = characterById(conversation.charId);
+      const characterName = character?.nickname || character?.name || '角色';
+      const boundUser = character ? userById(character.boundUserId) ?? user.value : user.value;
+      const userSenderName = boundUser?.name || boundUser?.nickname || '我';
+      const modelOverride = getConversationTextModelOverride(chatSettings, 'summary', conversation.activeMode);
+      const floorMap = getMessageFloorMap(conversationMessages);
+      const summary = await generateConversationSummary({
+        messages: range.sourceMessages.map((message) => {
+          const floor = floorMap.get(message.id) ?? range.startFloor;
+          const sender = message.sender === 'user' ? userSenderName : message.sender === 'char' ? character?.nickname || '角色' : '系统';
+          return `${floor}楼 ${sender}: ${message.content}`;
+        }).join('\n'),
+        previousSummary: getMemoryContext(memoriesForConversation(conversationId)),
+        settings: settings.value ?? undefined,
+        modelOverride,
+        promptOverride: renderCharacterMemoryPrompt(chatSettings.memory.summaryPrompt, characterName)
+      });
+      const hasHiddenRange = chatSettings.memory.hideSummarizedMessages && range.hiddenStartFloor > 0 && range.hiddenEndFloor >= range.hiddenStartFloor;
+      const vector = chatSettings.memory.vectorMemoryEnabled
+        ? await generateEmbeddingVector({
+            text: summary,
+            settings: settings.value ?? undefined,
+            modelOverride
+          })
+        : [];
+      const existingAfterGeneration = memoriesForConversation(conversationId).find((memory) => isSameMemoryRange(memory, rangeIdentity));
+      if (existingAfterGeneration && existingAfterGeneration.id !== options.replaceMemoryId) {
+        return { record: existingAfterGeneration, status: 'existing' };
+      }
+      const nextRecord = createMemoryRecord({
+        conversationId,
+        mode: conversation.activeMode,
+        startFloor: range.startFloor,
+        endFloor: range.endFloor,
+        hiddenStartFloor: hasHiddenRange ? range.hiddenStartFloor : 0,
+        hiddenEndFloor: hasHiddenRange ? range.hiddenEndFloor : 0,
+        summary,
+        sourceMessages: range.sourceMessages,
+        model: modelOverride || settings.value?.model || '',
+        vector
+      });
+      if (replacingMemory) {
+        const record = {
+          ...replacingMemory,
+          mode: conversation.activeMode,
+          startFloor: nextRecord.startFloor,
+          endFloor: nextRecord.endFloor,
+          hiddenStartFloor: nextRecord.hiddenStartFloor,
+          hiddenEndFloor: nextRecord.hiddenEndFloor,
+          summary: nextRecord.summary,
+          tokenCount: nextRecord.tokenCount,
+          vector: [...nextRecord.vector],
+          sourceMessageIds: [...nextRecord.sourceMessageIds],
+          model: nextRecord.model
+        };
+        await updateMemoryRecord(record);
+        return { record, status: 'updated' };
+      }
+      conversationMemories.value = [...conversationMemories.value, nextRecord];
+      await putEntity('conversationMemories', nextRecord);
+      return { record: nextRecord, status: 'created' };
+    } finally {
+      summarizingConversationRanges.delete(rangeKey);
+    }
   }
 
   async function maybeAutoSummarizeConversation(conversationId: string) {
@@ -1752,9 +1852,24 @@ export const useAppStore = defineStore('app', () => {
       })),
       updatedAt: Date.now()
     };
+    const duplicateIds = new Set(
+      conversationMemories.value
+        .filter((memory) => memory.id !== normalizedMemory.id && isSameMemoryRange(memory, normalizedMemory))
+        .map((memory) => memory.id)
+    );
     const index = conversationMemories.value.findIndex((memory) => memory.id === normalizedMemory.id);
-    if (index >= 0) conversationMemories.value[index] = normalizedMemory;
-    else conversationMemories.value.push(normalizedMemory);
+    if (index >= 0) {
+      conversationMemories.value[index] = normalizedMemory;
+      conversationMemories.value = conversationMemories.value.filter((memory) => !duplicateIds.has(memory.id));
+    } else {
+      conversationMemories.value = [
+        ...conversationMemories.value.filter((memory) => !duplicateIds.has(memory.id)),
+        normalizedMemory
+      ];
+    }
+    if (duplicateIds.size) {
+      await Promise.all([...duplicateIds].map((memoryId) => deleteEntity('conversationMemories', memoryId)));
+    }
     await putEntity('conversationMemories', normalizedMemory);
   }
 
@@ -1766,10 +1881,12 @@ export const useAppStore = defineStore('app', () => {
   async function resummarizeMemory(memoryId: string) {
     const memory = conversationMemories.value.find((entry) => entry.id === memoryId);
     if (!memory) return null;
-    await deleteMemoryRecord(memory.id);
     return summarizeConversationWindow(memory.conversationId, {
       forceStartFloor: memory.startFloor,
-      forceEndFloor: memory.endFloor
+      forceEndFloor: memory.endFloor,
+      hiddenStartFloor: memory.hiddenStartFloor,
+      hiddenEndFloor: memory.hiddenEndFloor,
+      replaceMemoryId: memory.id
     });
   }
 

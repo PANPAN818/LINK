@@ -414,8 +414,8 @@ function countForGroup(groupId: string) {
   width: 76px;
   height: 76px;
   border-radius: 16px;
-  object-fit: cover;
-  background: #eef1f4;
+  object-fit: contain;
+  background: transparent;
 }
 
 .sticker-editor-lines {

@@ -578,12 +578,17 @@ async function manualSummarize() {
   if (!canManualSummarize.value) return;
   summarizing.value = true;
   try {
-    await store.summarizeConversationWindow(props.conversationId, {
+    const result = await store.summarizeConversationWindow(props.conversationId, {
       forceStartFloor: Math.max(1, Math.floor(Number(manualSummary.startFloor))),
       forceEndFloor: Math.max(1, Math.floor(Number(manualSummary.endFloor))),
       hiddenStartFloor: Math.max(0, Math.floor(Number(manualSummary.hiddenStartFloor) || 0)),
       hiddenEndFloor: Math.max(0, Math.floor(Number(manualSummary.hiddenEndFloor) || 0))
     });
+    if (result?.status === 'existing') {
+      store.showConfigAlert(`该楼层范围 ${result.record.startFloor}-${result.record.endFloor} 楼已存在总结，可直接编辑或先删除后重建。`, '总结已存在');
+    } else if (result?.status === 'busy') {
+      store.showConfigAlert(`该楼层范围 ${result.record.startFloor}-${result.record.endFloor} 楼正在总结中，请稍后刷新记忆空间。`, '总结进行中');
+    }
     fillLatestRange();
   } finally {
     summarizing.value = false;
@@ -606,7 +611,12 @@ function fillLatestRange() {
 async function resummarize(memoryId: string) {
   summarizing.value = true;
   try {
-    await store.resummarizeMemory(memoryId);
+    const result = await store.resummarizeMemory(memoryId);
+    if (result?.status === 'updated') {
+      store.showConfigAlert(`已更新 ${result.record.startFloor}-${result.record.endFloor} 楼的总结。`, '重总结完成');
+    } else if (result?.status === 'busy') {
+      store.showConfigAlert(`该楼层范围 ${result.record.startFloor}-${result.record.endFloor} 楼正在总结中，请稍后再试。`, '总结进行中');
+    }
   } finally {
     summarizing.value = false;
   }
