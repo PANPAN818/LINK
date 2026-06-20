@@ -432,6 +432,7 @@ export function buildPrompt(context: PromptContext) {
     `世界书：\n${renderWorldBooks(selectedWorldBooks, context) || '无启用条目。'}`,
     'Sticker / 图片 / 语音 / 定位 / 转账规则：用户发送 Sticker 时，文字描述是用户提供的贴纸含义。用户发送真实图片时，若本次请求附带图片，你可以观察图片内容；用户发送文字描述卡片时，必须理解为“用户发送了一张图片，图片内容为描述文本”，虽然没有真实图片文件，也要按图片内容参与对话。用户或角色发送语音时，必须理解为对方用语音消息说出了对应文字内容，不要把它当成普通打字消息；角色也可以在合适时用 voice 项主动发送语音条。用户发送定位时，必须理解为用户把自己的当前位置发给了你，并告知了用户与角色之间的距离；角色也可以在合适时用 location 项主动发送自己的定位。用户发送转账时，必须理解为用户确实向你发起了对应金额的转账；你可以在后续按角色意愿接收或拒绝。角色也可以在合适时用 transfer 项主动向用户转账，等待用户接收或拒绝。若未附带真实图片，不要臆造描述之外的图片细节。',
     `角色可用 Stickers：\n${renderAvailableStickers(context)}`,
+    context.replyInstruction ? `本次生成任务：\n${context.replyInstruction}` : '',
     `最近对话：\n${history || '暂无。'}`
   ].filter(Boolean).join('\n\n');
 }

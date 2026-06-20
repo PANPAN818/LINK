@@ -1,5 +1,5 @@
 <template>
-  <section v-if="conversation && character" class="screen no-tabs offline-room">
+  <section v-if="conversation && character" class="screen no-tabs offline-room" :style="chatSurfaceStyle">
     <ChatHeader
       :character="character"
       mode="offline"
@@ -30,7 +30,7 @@
     </main>
 
     <MessageComposer
-      :disabled="store.loadingReply"
+      :disabled="currentConversationReplying"
       placeholder="输入行动或对白"
       @prepare-focus="captureKeyboardScrollAnchor"
       @focus="startKeyboardScrollGuard"
@@ -42,13 +42,13 @@
     <AppModal v-model="showProfile" title="角色主页" :show-header="false" variant="profile-ins">
       <CharacterProfileSheet v-if="character" :character="character" :posts="store.sortedVoomPosts" @save="saveCharacterProfile" />
     </AppModal>
-    <StickerLibraryModal v-model="showStickers" :conversation-id="props.id" />
+    <StickerLibraryModal v-model="showStickers" :conversation-id="props.id" :disabled="currentConversationReplying" />
   </section>
   <section v-else class="screen no-tabs empty-state">会话不存在</section>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { BookOpenText } from 'lucide-vue-next';
 import AppModal from '@/components/common/AppModal.vue';
@@ -72,10 +72,12 @@ const router = useRouter();
 const showProfile = ref(false);
 const showStickers = ref(false);
 const offlineScrollRef = ref<HTMLElement | null>(null);
+let proactiveReplyTimer: number | undefined;
 const conversation = computed(() => store.conversationById(props.id));
 const character = computed(() => (conversation.value ? store.characterById(conversation.value.charId) : undefined));
 const characterDisplayName = computed(() => (character.value ? getCharacterDisplayName(character.value) : ''));
 const chatSettings = computed(() => store.settingsForConversation(props.id));
+const currentConversationReplying = computed(() => store.isConversationReplying(props.id));
 const offlineMessages = computed(() => {
   const messages = store.visibleMessagesForConversation(props.id).filter((message) => message.mode === 'offline');
   const displayMessages = chatSettings.value.appearance.hideVoomNarration
@@ -83,9 +85,13 @@ const offlineMessages = computed(() => {
     : messages;
   return mergeVoomLikeMessages(displayMessages);
 });
-const scrollStyle = computed(() => ({
+const chatSurfaceStyle = computed(() => ({
   backgroundColor: chatSettings.value.appearance.backgroundColor,
   backgroundImage: chatSettings.value.appearance.backgroundImage ? `url(${chatSettings.value.appearance.backgroundImage})` : 'none'
+}));
+const scrollStyle = computed(() => ({
+  backgroundColor: 'transparent',
+  backgroundImage: 'none'
 }));
 const { captureKeyboardScrollAnchor, releaseKeyboardScrollGuard, startKeyboardScrollGuard, stopKeyboardScrollGuard } = useKeyboardScrollGuard(offlineScrollRef);
 
@@ -100,10 +106,17 @@ async function syncConversationState(id: string) {
 onMounted(async () => {
   await store.hydrate();
   await syncConversationState(props.id);
+  void store.maybeRequestProactiveReply(props.id);
+  proactiveReplyTimer = window.setInterval(() => {
+    void store.maybeRequestProactiveReply(props.id);
+  }, 60_000);
 });
 
 watch(() => props.id, (id) => {
-  void syncConversationState(id);
+  void (async () => {
+    await syncConversationState(id);
+    void store.maybeRequestProactiveReply(id);
+  })();
 });
 
 async function send(content: string) {
@@ -128,6 +141,10 @@ async function exitOffline() {
   await store.updateConversationMode(props.id, 'online');
   await router.push(`/chats/${props.id}`);
 }
+
+onBeforeUnmount(() => {
+  if (proactiveReplyTimer !== undefined) window.clearInterval(proactiveReplyTimer);
+});
 </script>
 
 <style scoped>
@@ -136,7 +153,15 @@ async function exitOffline() {
   flex-direction: column;
   overflow: hidden;
   padding-bottom: 0;
-  background: #fbfaf7;
+  background-position: center;
+  background-size: cover;
+}
+
+.offline-room :deep(.chat-header),
+.offline-room :deep(.composer) {
+  background: transparent;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
 }
 
 .offline-scroll {
@@ -145,8 +170,6 @@ async function exitOffline() {
   overflow-y: auto;
   overscroll-behavior: contain;
   padding: 12px 15px calc(16px + var(--keyboard-inset));
-  background-position: center;
-  background-size: cover;
   -webkit-overflow-scrolling: touch;
   overflow-anchor: none;
   scroll-padding-bottom: calc(16px + var(--keyboard-inset));

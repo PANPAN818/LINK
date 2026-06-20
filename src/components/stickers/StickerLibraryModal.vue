@@ -2,6 +2,7 @@
   <AppModal :model-value="modelValue" title="Stickers" :show-header="false" variant="ins" @update:model-value="emit('update:modelValue', $event)">
     <StickerLibraryPanel
       :conversation-id="conversationId"
+      :disabled="disabled"
       :show-toolbar-actions="false"
       show-manage-action
       presentation="modal"
@@ -19,6 +20,7 @@ import StickerLibraryPanel from '@/components/stickers/StickerLibraryPanel.vue';
 defineProps<{
   modelValue: boolean;
   conversationId?: string;
+  disabled?: boolean;
 }>();
 
 const emit = defineEmits<{

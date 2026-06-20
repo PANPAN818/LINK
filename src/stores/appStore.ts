@@ -2,7 +2,7 @@ import { computed, ref, toRaw } from 'vue';
 import { defineStore } from 'pinia';
 import { deleteEntity, loadSnapshot, putEntity, replaceSnapshot } from '@/data/db';
 import { defaultSettings, defaultStickerGroups } from '@/data/seed';
-import type { AppSettings, AppSnapshot, CharacterProfile, ChatImageAttachment, ChatImageCandidate, ChatLocationAttachment, ChatMessage, ChatMessageQuote, ChatMode, ChatModelScope, ChatTransferAttachment, ChatTransferStatus, ChatVoiceAttachment, Conversation, ConversationMemoryRecord, ConversationSettings, GeneratedImageRecord, ImageModuleId, Sticker, StickerGroup, UserProfile, VisualProfile, VoomComment, VoomImageCandidate, VoomPost, VoomPostVisibility, WorldBookEntry } from '@/types/domain';
+import type { AppSettings, AppSnapshot, CharacterProfile, ChatImageAttachment, ChatImageCandidate, ChatLocationAttachment, ChatMessage, ChatMessageQuote, ChatMode, ChatModelScope, ChatTransferAttachment, ChatTransferStatus, ChatVoiceAttachment, Conversation, ConversationMemoryRecord, ConversationSettings, GeneratedImageRecord, ImageModuleId, Sticker, StickerGroup, UserProfile, VisualProfile, VoomComment, VoomFrequency, VoomImageCandidate, VoomPost, VoomPostVisibility, WorldBookEntry } from '@/types/domain';
 import { createAccountId, createId } from '@/utils/id';
 import { getCharacterVoomAuthorName, normalizeCharacterMindStateLines, normalizeCharacterProfile } from '@/utils/character';
 import { normalizeUserProfile, normalizeVisualProfile } from '@/utils/profile';
@@ -15,6 +15,7 @@ import { estimateRoleplayReplyInputTokens, fetchVendorModels, generateConversati
 import { GitHubBackupError, downloadGitHubBackup, downloadGitHubBackupVersion, ensureGitHubBackupRepository, formatGitHubBackupError, listGitHubBackupHistory, uploadGitHubBackup } from '@/services/githubBackup';
 import { synthesizeMinimaxSpeech } from '@/services/tts';
 import { createLinkBackupFile, parseLinkBackupFileText, parseLinkBackupText } from '@/utils/backup';
+import { getVoomFrequencyChance } from '@/utils/voom';
 
 interface CreateUserVoomPostPayload {
   userId: string;
@@ -38,7 +39,8 @@ export const useAppStore = defineStore('app', () => {
   let githubBackupRunning = false;
   const summarizingConversationRanges = new Set<string>();
   const generatingMomentConversationIds = new Set<string>();
-  const loadingReply = ref(false);
+  const replyingConversationIds = ref<string[]>([]);
+  const loadingReply = computed(() => replyingConversationIds.value.length > 0);
   const replyingVoomCommentPostIds = ref<string[]>([]);
   const configAlert = ref({ open: false, title: '提示', message: '' });
   const users = ref<UserProfile[]>([]);
@@ -448,6 +450,41 @@ export const useAppStore = defineStore('app', () => {
 
   function isReplyingVoomComments(postId: string) {
     return replyingVoomCommentPostIds.value.includes(postId);
+  }
+
+  function isConversationReplying(conversationId: string) {
+    return replyingConversationIds.value.includes(conversationId);
+  }
+
+  function startConversationReply(conversationId: string) {
+    if (isConversationReplying(conversationId)) return false;
+    replyingConversationIds.value = [...replyingConversationIds.value, conversationId];
+    return true;
+  }
+
+  function finishConversationReply(conversationId: string) {
+    replyingConversationIds.value = replyingConversationIds.value.filter((id) => id !== conversationId);
+  }
+
+  function proactiveReplyCooldownMs(frequency: VoomFrequency) {
+    return {
+      'very-low': 6 * 60 * 60 * 1000,
+      low: 3 * 60 * 60 * 1000,
+      medium: 60 * 60 * 1000,
+      high: 30 * 60 * 1000,
+      'very-high': 10 * 60 * 1000,
+      always: 2 * 60 * 1000
+    }[frequency];
+  }
+
+  async function touchProactiveReplyAttempt(chatSettings: ConversationSettings, timestamp = Date.now()) {
+    await saveConversationSettings({
+      ...chatSettings,
+      proactiveReply: {
+        ...chatSettings.proactiveReply,
+        lastTriggeredAt: timestamp
+      }
+    });
   }
 
   function conversationForVoomPost(post: VoomPost) {
@@ -2246,9 +2283,9 @@ export const useAppStore = defineStore('app', () => {
     }));
   }
 
-  async function requestRoleplayReply(conversationId: string, options?: { generateMoment?: boolean }) {
+  async function requestRoleplayReply(conversationId: string, options?: { generateMoment?: boolean; proactive?: boolean }) {
     const conversation = conversationById(conversationId);
-    if (!conversation || loadingReply.value) return;
+    if (!conversation || isConversationReplying(conversationId)) return;
     const character = characterById(conversation.charId);
     if (!character) return;
     const boundUser = userById(character.boundUserId) ?? user.value;
@@ -2260,7 +2297,6 @@ export const useAppStore = defineStore('app', () => {
       return message.sender === 'user' && !previousMessages.some((previous) => previous.sender === 'char');
     }).reverse();
 
-    if (!lastUserMessages.length) return;
     const userMessageText = lastUserMessages.map((message) => messageReadableContent(message)).join('\n');
     const chatSettings = settingsForConversation(conversationId);
     const modelOverride = getConversationTextModelOverride(chatSettings, conversation.activeMode);
@@ -2269,7 +2305,7 @@ export const useAppStore = defineStore('app', () => {
       return;
     }
 
-    loadingReply.value = true;
+    if (!startConversationReply(conversationId)) return;
     try {
       if (chatSettings.stickerVisionEnabled) {
         await localizeRecentStickerMessagesForVision(conversationId);
@@ -2287,6 +2323,9 @@ export const useAppStore = defineStore('app', () => {
         stickerVisionEnabled: chatSettings.stickerVisionEnabled,
         narrationModeEnabled: chatSettings.narrationModeEnabled,
         timeAwareness: chatSettings.timeAwareness,
+        replyInstruction: options?.proactive
+          ? `这不是用户刚发来的新消息，而是${character.nickname || character.name}在自己的生活节奏里主动联系${boundUser.nickname || boundUser.name}。请基于最近对话、关系状态、时间流逝和角色当前生活，生成一组自然的主动消息；不要假装用户刚说了什么，也不要替用户发言。`
+          : undefined,
         availableStickers: availableCharacterStickers.map((sticker) => ({
           stickerId: sticker.id,
           description: sticker.description,
@@ -2642,7 +2681,7 @@ export const useAppStore = defineStore('app', () => {
     } catch (error) {
       showConfigAlert(error instanceof Error ? error.message : 'AI 回复失败，请检查 API 模型配置。', '回复异常');
     } finally {
-      loadingReply.value = false;
+      finishConversationReply(conversationId);
     }
   }
 
@@ -2658,7 +2697,7 @@ export const useAppStore = defineStore('app', () => {
 
   async function regenerateLatestReply(conversationId: string) {
     const conversation = conversationById(conversationId);
-    if (!conversation || loadingReply.value) return false;
+    if (!conversation || isConversationReplying(conversationId)) return false;
 
     const conversationMessages = messagesForConversation(conversationId).filter((message) => message.mode === conversation.activeMode);
     let latestCharIndex = -1;
@@ -2695,6 +2734,27 @@ export const useAppStore = defineStore('app', () => {
     await deleteMessages(messagesToRemove.map((message) => message.id));
 
     await requestRoleplayReply(conversationId);
+    return true;
+  }
+
+  async function maybeRequestProactiveReply(conversationId: string) {
+    const conversation = conversationById(conversationId);
+    if (!conversation || isConversationReplying(conversationId)) return false;
+    const chatSettings = settingsForConversation(conversationId);
+    if (!chatSettings.proactiveReply.enabled) return false;
+
+    const conversationMessages = messagesForConversation(conversationId).filter((message) => message.mode === conversation.activeMode);
+    const latestMessage = conversationMessages[conversationMessages.length - 1];
+    if (latestMessage?.sender === 'user') return false;
+
+    const now = Date.now();
+    const cooldown = proactiveReplyCooldownMs(chatSettings.proactiveReply.frequency);
+    if (chatSettings.proactiveReply.lastTriggeredAt && now - chatSettings.proactiveReply.lastTriggeredAt < cooldown) return false;
+
+    await touchProactiveReplyAttempt(chatSettings, now);
+    if (Math.random() >= getVoomFrequencyChance(chatSettings.proactiveReply.frequency)) return false;
+
+    await requestRoleplayReply(conversationId, { proactive: true });
     return true;
   }
 
@@ -3320,6 +3380,7 @@ export const useAppStore = defineStore('app', () => {
     createMessageQuoteSnapshot,
     showConfigAlert,
     isReplyingVoomComments,
+    isConversationReplying,
     saveUserProfile,
     saveUsers,
     saveAccountProfile,
@@ -3378,6 +3439,7 @@ export const useAppStore = defineStore('app', () => {
     unmergeConversationMemories,
     requestRoleplayReply,
     regenerateLatestReply,
+    maybeRequestProactiveReply,
     sendMessage,
     sendStickerMessage,
     regenerateChatMessageImage,

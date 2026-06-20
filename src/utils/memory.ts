@@ -53,7 +53,12 @@ export const defaultConversationSettings: Omit<ConversationSettings, 'conversati
   voomFrequency: 'medium',
   stickerVisionEnabled: true,
   characterStickerGroupIds: defaultCharacterStickerGroupIds,
-  timeAwareness: defaultTimeAwarenessSettings
+  timeAwareness: defaultTimeAwarenessSettings,
+  proactiveReply: {
+    enabled: true,
+    frequency: 'medium',
+    lastTriggeredAt: 0
+  }
 };
 
 export function normalizeConversationSettings(settings: Partial<ConversationSettings> | null | undefined, conversationId: string): ConversationSettings {
@@ -75,6 +80,7 @@ export function normalizeConversationSettings(settings: Partial<ConversationSett
     ...(Array.isArray(appearance.backgroundImages) ? appearance.backgroundImages : [])
   ].map((image) => String(image ?? '').trim()).filter(Boolean);
   const voomFrequency = normalizeVoomFrequency(settings?.voomFrequency, defaultConversationSettings.voomFrequency);
+  const proactiveReply = settings?.proactiveReply ?? defaultConversationSettings.proactiveReply;
 
   return {
     conversationId,
@@ -114,7 +120,12 @@ export function normalizeConversationSettings(settings: Partial<ConversationSett
     characterStickerGroupIds: Array.isArray(settings?.characterStickerGroupIds)
       ? [...new Set(settings.characterStickerGroupIds.map((item) => String(item).trim()).filter(Boolean))]
       : [...defaultConversationSettings.characterStickerGroupIds],
-    timeAwareness: normalizeTimeAwarenessSettings(settings?.timeAwareness)
+    timeAwareness: normalizeTimeAwarenessSettings(settings?.timeAwareness),
+    proactiveReply: {
+      enabled: proactiveReply.enabled ?? defaultConversationSettings.proactiveReply.enabled,
+      frequency: normalizeVoomFrequency(proactiveReply.frequency, defaultConversationSettings.proactiveReply.frequency),
+      lastTriggeredAt: Math.max(0, Math.floor(Number(proactiveReply.lastTriggeredAt) || 0))
+    }
   };
 }
 

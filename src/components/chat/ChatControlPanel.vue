@@ -391,6 +391,28 @@
         <section class="settings-block">
           <header class="section-header">
             <div>
+              <span>Initiative</span>
+              <strong>主动消息</strong>
+            </div>
+          </header>
+          <label class="switch-card wide">
+            <input :checked="draft.proactiveReply.enabled" type="checkbox" @change="updateProactiveReplyEnabled" />
+            <span class="switch-track"></span>
+            <div>
+              <strong>允许角色主动发送消息</strong>
+              <span>开启后，该角色会按频率在聊天中主动调用 API 联系你。</span>
+            </div>
+          </label>
+          <label class="field frequency-field">
+            <span>该角色主动消息频率</span>
+            <select :value="draft.proactiveReply.frequency" :disabled="!draft.proactiveReply.enabled" @change="updateProactiveReplyFrequency">
+              <option v-for="option in voomFrequencyOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
+            </select>
+          </label>
+        </section>
+        <section class="settings-block">
+          <header class="section-header">
+            <div>
               <span>Local time</span>
               <strong>时间感知</strong>
             </div>
@@ -547,6 +569,16 @@ function updateAutoGenerateVoom(event: Event) {
 
 function updateVoomFrequency(event: Event) {
   draft.voomFrequency = normalizeVoomFrequency((event.target as HTMLSelectElement).value, draft.voomFrequency);
+  saveDraft();
+}
+
+function updateProactiveReplyEnabled(event: Event) {
+  draft.proactiveReply.enabled = (event.target as HTMLInputElement).checked;
+  saveDraft();
+}
+
+function updateProactiveReplyFrequency(event: Event) {
+  draft.proactiveReply.frequency = normalizeVoomFrequency((event.target as HTMLSelectElement).value, draft.proactiveReply.frequency);
   saveDraft();
 }
 

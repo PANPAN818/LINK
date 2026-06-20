@@ -1,5 +1,5 @@
 <template>
-  <section v-if="conversation && character" class="screen no-tabs chat-room">
+  <section v-if="conversation && character" class="screen no-tabs chat-room" :style="chatSurfaceStyle">
     <ChatHeader
       :character="character"
       mode="online"
@@ -29,7 +29,7 @@
         @regenerate-image="regenerateChatImage"
         @toggle-select="toggleMessageSelection(message)"
       />
-      <div v-if="store.loadingReply" class="typing-indicator">
+      <div v-if="currentConversationReplying" class="typing-indicator">
         <span></span><span></span><span></span>
       </div>
     </main>
@@ -47,8 +47,8 @@
     </section>
 
     <MessageComposer
-      :can-send-reply="hasPendingUserMessages"
-      :disabled="store.loadingReply"
+      :can-send-reply="true"
+      :disabled="currentConversationReplying"
       online
       placeholder="Aa"
       :quote="quoteTarget"
@@ -132,11 +132,11 @@
             <textarea v-model="voiceTranscriptDraft" maxlength="500" rows="4" placeholder="输入这条语音要表达的内容"></textarea>
           </label>
           <div class="voice-actions">
-            <button v-if="!recordingVoice" class="voice-secondary" type="button" :disabled="store.loadingReply" @click="startVoiceRecording">
+            <button v-if="!recordingVoice" class="voice-secondary" type="button" :disabled="currentConversationReplying" @click="startVoiceRecording">
               {{ recordedVoiceDraft ? '重录' : '开始录音' }}
             </button>
             <button v-else class="voice-secondary voice-secondary--stop" type="button" @click="stopVoiceRecording">停止</button>
-            <button class="voice-primary" type="button" :disabled="!recordedVoiceDraft || !voiceTranscriptDraft.trim() || store.loadingReply || recordingVoice" @click="sendRecordedVoice">发送语音</button>
+            <button class="voice-primary" type="button" :disabled="!recordedVoiceDraft || !voiceTranscriptDraft.trim() || currentConversationReplying || recordingVoice" @click="sendRecordedVoice">发送语音</button>
           </div>
         </section>
 
@@ -151,7 +151,7 @@
             <span>语音内容</span>
             <textarea v-model="voiceTextDraft" maxlength="500" rows="5" placeholder="输入要作为语音发送的内容"></textarea>
           </label>
-          <button class="voice-primary" type="button" :disabled="!voiceTextDraft.trim() || store.loadingReply" @click="sendTextVoice">发送语音</button>
+          <button class="voice-primary" type="button" :disabled="!voiceTextDraft.trim() || currentConversationReplying" @click="sendTextVoice">发送语音</button>
         </section>
       </section>
     </AppModal>
@@ -166,11 +166,11 @@
           <UserRound :size="20" />
           <span>我的主页</span>
         </button>
-        <button type="button" @click="openLocationPanel">
+        <button type="button" :disabled="chatActionLocked" @click="openLocationPanel">
           <MapPin :size="20" />
           <span>发送定位</span>
         </button>
-        <button type="button" @click="openTransferPanel">
+        <button type="button" :disabled="chatActionLocked" @click="openTransferPanel">
           <Wallet :size="20" />
           <span>转账</span>
         </button>
@@ -178,7 +178,7 @@
           <SlidersHorizontal :size="20" />
           <span>模型切换</span>
         </button>
-        <button type="button" :class="{ busy: store.loadingReply }" :aria-disabled="store.loadingReply" @click="regenerateReply">
+        <button type="button" :class="{ busy: currentConversationReplying }" :aria-disabled="currentConversationReplying" @click="regenerateReply">
           <RefreshCw :size="20" />
           <span>重新回复</span>
         </button>
@@ -190,11 +190,11 @@
           <Sparkles :size="20" />
           <span>{{ generatingVoom ? '生成中' : '生成 VOOM' }}</span>
         </button>
-        <button class="danger-menu-action" type="button" @click="openDeleteFriendConfirm">
+        <button class="danger-menu-action" type="button" :disabled="chatActionLocked" @click="openDeleteFriendConfirm">
           <UserMinus :size="20" />
           <span>删除好友</span>
         </button>
-        <button class="danger-menu-action" type="button" @click="openClearHistoryConfirm">
+        <button class="danger-menu-action" type="button" :disabled="chatActionLocked" @click="openClearHistoryConfirm">
           <ArchiveX :size="20" />
           <span>清空记忆</span>
         </button>
@@ -234,7 +234,7 @@
 
         <div class="location-actions">
           <button class="secondary-action" type="button" @click="showLocationPanel = false">取消</button>
-          <button class="primary-action" type="button" :disabled="!canSendLocation || store.loadingReply" @click="sendLocationMessage">发送定位</button>
+          <button class="primary-action" type="button" :disabled="!canSendLocation || chatActionLocked" @click="sendLocationMessage">发送定位</button>
         </div>
       </section>
     </AppModal>
@@ -268,7 +268,7 @@
 
         <div class="transfer-actions-sheet">
           <button class="secondary-action" type="button" @click="showTransferPanel = false">取消</button>
-          <button class="primary-action" type="button" :disabled="!canSendTransfer || store.loadingReply" @click="sendTransferMessage">发送转账</button>
+          <button class="primary-action" type="button" :disabled="!canSendTransfer || chatActionLocked" @click="sendTransferMessage">发送转账</button>
         </div>
       </section>
     </AppModal>
@@ -388,7 +388,7 @@
         <p>会同时删除与 {{ characterDisplayName }} 的聊天记录、线下 RP、关联 VOOM，以及角色当前绑定的所有局部世界书，删除后不可恢复。</p>
         <div class="delete-confirm-actions">
           <button class="secondary-action" type="button" :disabled="deletingFriend" @click="showDeleteFriendConfirm = false">取消</button>
-          <button class="danger-action" type="button" :disabled="deletingFriend" @click="confirmDeleteFriend">{{ deletingFriend ? '删除中' : '删除好友' }}</button>
+          <button class="danger-action" type="button" :disabled="deletingFriend || chatActionLocked" @click="confirmDeleteFriend">{{ deletingFriend ? '删除中' : '删除好友' }}</button>
         </div>
       </section>
     </AppModal>
@@ -399,7 +399,7 @@
         <p>会删除该角色的线上聊天、线下 RP、VOOM 关联、记忆手册、主页展示资料和心境状态；好友、聊天设置、角色基础资料和绑定局部世界书都会保留。</p>
         <div class="delete-confirm-actions">
           <button class="secondary-action" type="button" :disabled="clearingHistory" @click="showClearHistoryConfirm = false">取消</button>
-          <button class="danger-action" type="button" :disabled="clearingHistory" @click="confirmClearHistory">{{ clearingHistory ? '清空中' : '确认清空' }}</button>
+          <button class="danger-action" type="button" :disabled="clearingHistory || chatActionLocked" @click="confirmClearHistory">{{ clearingHistory ? '清空中' : '确认清空' }}</button>
         </div>
       </section>
     </AppModal>
@@ -422,7 +422,7 @@
     <AppModal v-model="showProfile" title="角色主页" :show-header="false" variant="profile-ins">
       <CharacterProfileSheet v-if="character" :character="character" :posts="store.sortedVoomPosts" @save="saveCharacterProfile" />
     </AppModal>
-    <StickerLibraryModal v-model="showStickers" :conversation-id="props.id" />
+    <StickerLibraryModal v-model="showStickers" :conversation-id="props.id" :disabled="chatActionLocked" />
     <ChatModelSwitchPanel v-model="showModelSwitch" :conversation-id="props.id" />
   </section>
   <section v-else class="screen no-tabs empty-state">会话不存在</section>
@@ -511,6 +511,7 @@ let voiceRecorder: MediaRecorder | null = null;
 let voiceStream: MediaStream | null = null;
 let voiceChunks: Blob[] = [];
 let voiceTimer: number | undefined;
+let proactiveReplyTimer: number | undefined;
 let discardRecording = false;
 
 const initialMessageLimit = 60;
@@ -542,14 +543,15 @@ function shouldHideAvatar(index: number) {
   return message?.sender === 'char' && previousMessage?.sender === 'char';
 }
 
-const messageListStyle = computed(() => ({
+const chatSurfaceStyle = computed(() => ({
   backgroundColor: chatSettings.value.appearance.backgroundColor,
   backgroundImage: chatSettings.value.appearance.backgroundImage ? `url(${chatSettings.value.appearance.backgroundImage})` : 'none'
 }));
-const hasPendingUserMessages = computed(() => {
-  const lastMessage = allOnlineMessages.value[allOnlineMessages.value.length - 1];
-  return lastMessage?.sender === 'user';
-});
+const messageListStyle = computed(() => ({
+  backgroundColor: 'transparent',
+  backgroundImage: 'none'
+}));
+const currentConversationReplying = computed(() => store.isConversationReplying(props.id));
 const selectedMessageCount = computed(() => selectedMessageIds.value.length);
 const hasUnreadMindState = computed(() => Boolean(character.value?.mindState?.lines.length
   && character.value.mindState.updatedAt > character.value.mindState.readAt));
@@ -571,6 +573,7 @@ const canSendLocation = computed(() => Boolean(locationNameDraft.value.trim() &&
 const normalizedTransferAmount = computed(() => transferAmountDraft.value.replace(/[￥¥,\s]/g, '').trim());
 const transferAmountPreview = computed(() => normalizedTransferAmount.value || '0.00');
 const canSendTransfer = computed(() => /^\d+(?:\.\d{1,2})?$/.test(normalizedTransferAmount.value) && Number(normalizedTransferAmount.value) > 0);
+const chatActionLocked = computed(() => currentConversationReplying.value || generatingVoom.value);
 const normalizedEditTransferAmount = computed(() => editTransferAmountDraft.value.replace(/[￥¥,\s]/g, '').trim());
 const canSaveEditedMessage = computed(() => {
   const message = activeMessage.value;
@@ -622,6 +625,10 @@ onMounted(async () => {
   await syncConversationState(props.id);
   resetMessageWindow();
   await scrollMessagesToBottom();
+  void store.maybeRequestProactiveReply(props.id);
+  proactiveReplyTimer = window.setInterval(() => {
+    void store.maybeRequestProactiveReply(props.id);
+  }, 60_000);
 });
 
 watch(() => props.id, (id) => {
@@ -629,10 +636,11 @@ watch(() => props.id, (id) => {
     resetMessageWindow();
     await syncConversationState(id);
     await scrollMessagesToBottom();
+    void store.maybeRequestProactiveReply(id);
   })();
 });
 
-watch(() => [allOnlineMessages.value.length, store.loadingReply], () => {
+watch(() => [allOnlineMessages.value.length, currentConversationReplying.value], () => {
   void scrollMessagesToBottom();
 }, {
   flush: 'post'
@@ -670,7 +678,7 @@ async function appendImageMessage(image: ChatImageAttachment, content: string) {
 }
 
 async function sendImageFile(file: File, kind: 'photo' | 'local') {
-  if (sendingImage.value || store.loadingReply) return;
+  if (sendingImage.value || currentConversationReplying.value) return;
   sendingImage.value = true;
   try {
     const image = await readChatImageFile(file);
@@ -709,7 +717,7 @@ async function sendLocalImageFromInput(event: Event) {
 
 async function sendDescriptionImage() {
   const description = imageDescriptionDraft.value.trim();
-  if (!description || sendingImage.value || store.loadingReply) return;
+  if (!description || sendingImage.value || currentConversationReplying.value) return;
   sendingImage.value = true;
   try {
     await appendImageMessage({
@@ -739,6 +747,7 @@ function openVoicePanel() {
 }
 
 function openLocationPanel() {
+  if (chatActionLocked.value) return;
   showActionMenu.value = false;
   locationNameDraft.value = '';
   locationAddressDraft.value = '';
@@ -747,6 +756,7 @@ function openLocationPanel() {
 }
 
 function openTransferPanel() {
+  if (chatActionLocked.value) return;
   showActionMenu.value = false;
   transferAmountDraft.value = '';
   transferNoteDraft.value = '';
@@ -754,7 +764,7 @@ function openTransferPanel() {
 }
 
 async function sendTransferMessage() {
-  if (!canSendTransfer.value || store.loadingReply) return;
+  if (!canSendTransfer.value || chatActionLocked.value) return;
   releaseKeyboardScrollGuard();
   const userMessage = await store.appendUserTransferMessage(props.id, {
     amount: normalizedTransferAmount.value,
@@ -787,7 +797,7 @@ async function appendLocationMessage(location: ChatLocationAttachment) {
 async function sendLocationMessage() {
   const name = locationNameDraft.value.trim();
   const distance = locationDistanceDraft.value.trim();
-  if (!name || !distance || store.loadingReply) return;
+  if (!name || !distance || chatActionLocked.value) return;
   await appendLocationMessage({
     name,
     address: locationAddressDraft.value.trim() || undefined,
@@ -869,7 +879,7 @@ async function finalizeVoiceRecording(recorder: MediaRecorder) {
 }
 
 async function startVoiceRecording() {
-  if (recordingVoice.value || store.loadingReply) return;
+  if (recordingVoice.value || currentConversationReplying.value) return;
   if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
     showVoicePanel.value = false;
     store.showConfigAlert('当前浏览器不支持录音。', '无法录音');
@@ -924,7 +934,7 @@ async function appendVoiceMessage(voice: ChatVoiceAttachment) {
 async function sendRecordedVoice() {
   const draft = recordedVoiceDraft.value;
   const transcript = voiceTranscriptDraft.value.trim();
-  if (!draft?.audioUrl || !transcript || recordingVoice.value || store.loadingReply) return;
+  if (!draft?.audioUrl || !transcript || recordingVoice.value || currentConversationReplying.value) return;
   await appendVoiceMessage({
     source: 'recorded',
     transcript,
@@ -937,7 +947,7 @@ async function sendRecordedVoice() {
 
 async function sendTextVoice() {
   const transcript = voiceTextDraft.value.trim();
-  if (!transcript || store.loadingReply) return;
+  if (!transcript || currentConversationReplying.value) return;
   await appendVoiceMessage({
     source: 'text',
     transcript,
@@ -1158,18 +1168,20 @@ function openModelSwitch() {
 }
 
 function openDeleteFriendConfirm() {
+  if (chatActionLocked.value) return;
   showActionMenu.value = false;
   showDeleteFriendConfirm.value = true;
 }
 
 function openClearHistoryConfirm() {
+  if (chatActionLocked.value) return;
   showActionMenu.value = false;
   showClearHistoryConfirm.value = true;
 }
 
 async function confirmDeleteFriend() {
   const currentCharacter = character.value;
-  if (!currentCharacter || deletingFriend.value) return;
+  if (!currentCharacter || deletingFriend.value || chatActionLocked.value) return;
   deletingFriend.value = true;
   try {
     await store.deleteCharacterProfile(currentCharacter.id);
@@ -1183,7 +1195,7 @@ async function confirmDeleteFriend() {
 
 async function confirmClearHistory() {
   const currentCharacter = character.value;
-  if (!currentCharacter || clearingHistory.value) return;
+  if (!currentCharacter || clearingHistory.value || chatActionLocked.value) return;
   clearingHistory.value = true;
   try {
     const cleared = await store.clearCharacterHistory(currentCharacter.id);
@@ -1206,7 +1218,7 @@ function openChatSettings() {
 }
 
 async function regenerateReply() {
-  if (store.loadingReply) {
+  if (currentConversationReplying.value) {
     store.showConfigAlert('正在生成回复，请等待当前生成完成。', '正在生成');
     return;
   }
@@ -1250,7 +1262,10 @@ async function enterOffline() {
   await router.push(`/offline/${props.id}`);
 }
 
-onBeforeUnmount(abortVoiceRecording);
+onBeforeUnmount(() => {
+  abortVoiceRecording();
+  if (proactiveReplyTimer !== undefined) window.clearInterval(proactiveReplyTimer);
+});
 </script>
 
 <style scoped>
@@ -1259,7 +1274,15 @@ onBeforeUnmount(abortVoiceRecording);
   flex-direction: column;
   overflow: hidden;
   padding-bottom: 0;
-  background: #ffffff;
+  background-position: center;
+  background-size: cover;
+}
+
+.chat-room :deep(.chat-header),
+.chat-room :deep(.composer) {
+  background: transparent;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
 }
 
 .message-list {
@@ -1268,8 +1291,6 @@ onBeforeUnmount(abortVoiceRecording);
   overflow-y: auto;
   overscroll-behavior: contain;
   padding: 8px 10px calc(8px + var(--keyboard-inset));
-  background-position: center;
-  background-size: cover;
   -webkit-overflow-scrolling: touch;
   overflow-anchor: none;
   scroll-padding-bottom: calc(8px + var(--keyboard-inset));

@@ -126,6 +126,12 @@ export interface ConversationTimeAwarenessSettings {
   enabled: boolean;
 }
 
+export interface ConversationProactiveReplySettings {
+  enabled: boolean;
+  frequency: VoomFrequency;
+  lastTriggeredAt: number;
+}
+
 export interface ConversationSettings {
   conversationId: string;
   memory: ChatMemorySettings;
@@ -137,6 +143,7 @@ export interface ConversationSettings {
   stickerVisionEnabled: boolean;
   characterStickerGroupIds: string[];
   timeAwareness: ConversationTimeAwarenessSettings;
+  proactiveReply: ConversationProactiveReplySettings;
 }
 
 export interface ConversationMemoryRecord {
@@ -599,6 +606,7 @@ export interface PromptContext {
   narrationModeEnabled?: boolean;
   availableStickers?: ChatStickerAttachment[];
   timeAwareness?: ConversationTimeAwarenessSettings;
+  replyInstruction?: string;
 }
 
 export interface GenerateReplyInput extends PromptContext {

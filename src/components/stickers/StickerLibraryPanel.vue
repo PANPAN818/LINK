@@ -63,6 +63,7 @@
         class="sticker-tile"
         :class="{ selected: selectedStickerId === sticker.id }"
         type="button"
+        :disabled="disabled && Boolean(conversationId)"
         @click.stop="handleStickerClick(sticker)"
       >
         <img :src="sticker.imageUrl" :alt="sticker.description" />
@@ -108,6 +109,7 @@ const props = withDefaults(defineProps<{
   showManageAction?: boolean;
   activeGroupId?: string;
   allowStickerEditing?: boolean;
+  disabled?: boolean;
   presentation?: 'page' | 'modal';
 }>(), {
   conversationId: undefined,
@@ -116,6 +118,7 @@ const props = withDefaults(defineProps<{
   showManageAction: false,
   activeGroupId: undefined,
   allowStickerEditing: true,
+  disabled: false,
   presentation: 'page'
 });
 
@@ -225,6 +228,7 @@ async function handleStickerClick(sticker: Sticker) {
     if (props.allowStickerEditing) selectSticker(sticker);
     return;
   }
+  if (props.disabled) return;
   await store.sendStickerMessage(props.conversationId, sticker);
   emit('close');
 }
@@ -603,6 +607,11 @@ async function deleteSelectedSticker() {
 .sticker-tile.selected {
   border-color: rgba(17, 17, 17, 0.14);
   box-shadow: 0 10px 24px rgba(17, 17, 17, 0.08);
+}
+
+.sticker-tile:disabled {
+  cursor: default;
+  opacity: 0.45;
 }
 
 .sticker-tile img {

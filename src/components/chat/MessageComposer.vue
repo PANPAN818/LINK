@@ -29,7 +29,7 @@
         @focus="handleFocus"
         @blur="handleBlur"
       />
-      <button v-if="!textMode" class="sticker-button" type="button" aria-label="Stickers" @click.stop="$emit('open-stickers')">
+      <button v-if="!textMode" class="sticker-button" type="button" aria-label="Stickers" :disabled="disabled" @click.stop="$emit('open-stickers')">
         <Smile :size="online ? 20 : 21" />
       </button>
     </label>
@@ -256,6 +256,11 @@ onBeforeUnmount(clearBlurTimer);
 
 .sticker-button:active {
   background: rgba(0, 0, 0, 0.06);
+}
+
+.sticker-button:disabled {
+  opacity: 0.45;
+  cursor: default;
 }
 
 .send-button {
