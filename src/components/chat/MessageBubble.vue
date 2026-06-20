@@ -17,7 +17,7 @@
         @pointermove="trackPointerMove"
         @pointerup="cancelLongPress"
       >
-        <div class="bubble" :class="{ narration: message.displayStyle === 'narration', sticker: message.sticker, image: message.image, voice: message.voice, location: message.location }" :style="bubbleStyle">
+        <div class="bubble" :class="{ narration: message.displayStyle === 'narration', sticker: message.sticker, image: message.image, voice: message.voice, location: message.location, transfer: message.transfer }" :style="bubbleStyle">
           <template v-if="message.sticker">
             <img class="sticker-image" :src="message.sticker.imageUrl" :alt="message.sticker.description" />
           </template>
@@ -49,6 +49,18 @@
                 <strong>{{ message.location.name }}</strong>
                 <span v-if="message.location.address">{{ message.location.address }}</span>
                 <small>{{ locationDistanceLabel }}</small>
+              </span>
+            </section>
+          </template>
+          <template v-else-if="message.transfer">
+            <section class="transfer-message" :class="`transfer-message--${message.transfer.status}`" aria-label="转账消息">
+              <span class="transfer-mark">
+                <small>¥</small>
+              </span>
+              <span class="transfer-copy">
+                <span class="transfer-title">{{ transferTitle }}</span>
+                <strong>¥{{ message.transfer.amount }}</strong>
+                <span class="transfer-note" :aria-hidden="!message.transfer.note">{{ message.transfer.note || ' ' }}</span>
               </span>
             </section>
           </template>
@@ -165,6 +177,7 @@ const emit = defineEmits<{
   'regenerate-image': [messageId: string, description: string];
   'apply-image': [messageId: string, candidateId: string];
   'busy-action': [message: string, title: string];
+  'open-card-detail': [message: ChatMessage];
 }>();
 
 const store = useAppStore();
@@ -279,12 +292,14 @@ const quoteText = computed(() => props.message.quote?.sticker
       ? props.message.quote.voice.transcript
       : props.message.quote?.location
         ? props.message.quote.location.name
+        : props.message.quote?.transfer
+          ? `¥${props.message.quote.transfer.amount}`
   : props.message.quote?.content ?? '');
 const quoteThumbnail = computed(() => props.message.quote?.sticker?.imageUrl ?? props.message.quote?.image?.url ?? '');
 const quoteAuthorLabel = computed(() => (props.message.quote?.authorName ? `${props.message.quote.authorName}：` : ''));
 
 const bubbleStyle = computed(() => {
-  if (props.message.sticker || props.message.image || props.message.location) return {};
+  if (props.message.sticker || props.message.image || props.message.location || props.message.transfer) return {};
   if (props.message.sender === 'user') {
     return {
       background: props.appearance.userBubbleColor,
@@ -337,6 +352,7 @@ const imageViewerStyle = computed(() => ({ '--chat-viewer-ratio': imageViewerAsp
 const locationDistanceLabel = computed(() => (props.message.sender === 'user'
   ? `距离对方 ${props.message.location?.distance ?? ''}`
   : `距离你 ${props.message.location?.distance ?? ''}`));
+const transferTitle = computed(() => (props.message.sender === 'user' ? '转账给对方' : '转账给你'));
 const voiceDuration = computed(() => {
   const duration = props.message.voice?.duration ?? 0;
   if (Number.isFinite(duration) && duration > 0) return Math.max(1, Math.round(duration));
@@ -418,6 +434,7 @@ function handleBubbleClick(event: MouseEvent) {
     return;
   }
   if (props.selectionMode) emit('toggle-select');
+  else if (props.message.location || props.message.transfer) emit('open-card-detail', props.message);
 }
 
 function stopVoicePlayback() {
@@ -753,8 +770,21 @@ onBeforeUnmount(stopVoicePlayback);
   box-shadow: 0 8px 20px rgba(17, 20, 24, 0.06);
 }
 
+.bubble.transfer {
+  min-width: min(218px, 68vw);
+  padding: 0;
+  overflow: hidden;
+  border-radius: 16px;
+  background: #ffffff;
+  color: #202329;
+  border: 1px solid #e6e8eb;
+  box-shadow: 0 8px 20px rgba(17, 20, 24, 0.06);
+}
+
 .message-row.user .bubble.location,
-.message-row.char .bubble.location {
+.message-row.char .bubble.location,
+.message-row.user .bubble.transfer,
+.message-row.char .bubble.transfer {
   background: #ffffff;
   color: #202329;
 }
@@ -806,6 +836,74 @@ onBeforeUnmount(stopVoicePlayback);
   color: #30343a;
   font-size: 11px;
   font-weight: 860;
+}
+
+.transfer-message {
+  display: grid;
+  grid-template-columns: 58px minmax(0, 1fr);
+  min-width: 0;
+  min-height: 70px;
+}
+
+.transfer-mark {
+  display: grid;
+  place-items: center;
+  background: linear-gradient(135deg, #f0f1f3, #e2e4e7);
+  color: #30343a;
+}
+
+.transfer-mark small {
+  color: currentColor;
+  font-size: 17px;
+  font-weight: 950;
+  line-height: 1;
+}
+
+.transfer-copy {
+  display: grid;
+  grid-template-rows: auto auto auto;
+  align-content: center;
+  gap: 2px;
+  min-width: 0;
+  min-height: 70px;
+  padding: 8px 10px;
+}
+
+.transfer-title,
+.transfer-copy strong,
+.transfer-note {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.transfer-title {
+  color: #5f6670;
+  font-size: 11px;
+  font-weight: 860;
+}
+
+.transfer-copy strong {
+  color: #202329;
+  font-size: 15px;
+  font-weight: 950;
+  line-height: 1.08;
+}
+
+.transfer-note {
+  color: #69717b;
+  font-size: 11px;
+  font-weight: 760;
+}
+
+.transfer-message--accepted .transfer-mark {
+  background: linear-gradient(135deg, #f4f5f6, #d5d9de);
+  color: #17191c;
+}
+
+.transfer-message--rejected .transfer-mark {
+  background: linear-gradient(135deg, #eeeeef, #cfd3d8);
+  color: #30343a;
 }
 
 .voice-message {

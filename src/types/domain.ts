@@ -244,6 +244,16 @@ export interface ChatLocationAttachment {
   distance: string;
 }
 
+export type ChatTransferStatus = 'pending' | 'accepted' | 'rejected';
+
+export interface ChatTransferAttachment {
+  amount: string;
+  currency: 'CNY';
+  note?: string;
+  status: ChatTransferStatus;
+  respondedAt?: number;
+}
+
 export interface ChatMessageQuote {
   messageId: string;
   sender: 'user' | 'char' | 'system';
@@ -253,6 +263,7 @@ export interface ChatMessageQuote {
   image?: ChatImageAttachment;
   voice?: ChatVoiceAttachment;
   location?: ChatLocationAttachment;
+  transfer?: ChatTransferAttachment;
 }
 
 export interface ChatMessage {
@@ -271,6 +282,7 @@ export interface ChatMessage {
   image?: ChatImageAttachment;
   voice?: ChatVoiceAttachment;
   location?: ChatLocationAttachment;
+  transfer?: ChatTransferAttachment;
   quote?: ChatMessageQuote;
   replyBatchId?: string;
   status?: 'sending' | 'sent' | 'failed';

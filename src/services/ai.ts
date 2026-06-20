@@ -25,6 +25,7 @@ export interface RoleplayQuoteAction {
 export interface RoleplayMessageActions {
   recallMessageIds: string[];
   quotes: RoleplayQuoteAction[];
+  transferDecisions?: Array<{ messageId: string; status: 'accepted' | 'rejected' }>;
 }
 
 export type RoleplayStickerPosition = 'before' | 'after';
@@ -41,7 +42,8 @@ export type RoleplayReplySegment =
   | { type: 'sticker'; stickers: string[] }
   | { type: 'image'; description: string }
   | { type: 'voice'; content: string; duration?: number }
-  | { type: 'location'; name: string; address?: string; distance: string };
+  | { type: 'location'; name: string; address?: string; distance: string }
+  | { type: 'transfer'; amount: string; note?: string };
 
 export interface RoleplayReplyResult {
   reply: string;
@@ -857,6 +859,28 @@ function normalizeLocationSegment(record: Record<string, unknown>): RoleplayRepl
   }];
 }
 
+function normalizeTransferAmount(value: unknown): string {
+  if (typeof value === 'string' || typeof value === 'number') return String(value).replace(/[￥¥,\s]/g, '').trim();
+  return '';
+}
+
+function normalizeTransferSegment(record: Record<string, unknown>): RoleplayReplySegment[] {
+  const amount = normalizeTransferAmount(record.amount)
+    || normalizeTransferAmount(record.money)
+    || normalizeTransferAmount(record.value)
+    || normalizeTransferAmount(record.total);
+  if (!amount || !/^\d+(?:\.\d{1,2})?$/.test(amount)) return [];
+  const note = normalizeLocationText(record.note)
+    || normalizeLocationText(record.remark)
+    || normalizeLocationText(record.message)
+    || normalizeLocationText(record.description);
+  return [{
+    type: 'transfer',
+    amount,
+    ...(note ? { note } : {})
+  }];
+}
+
 function normalizeSegmentType(value: unknown): RoleplayReplySegment['type'] | '' {
   const type = String(value ?? '').trim().toLocaleLowerCase();
   if (['reply', 'message', 'bubble', 'text'].includes(type)) return 'reply';
@@ -865,6 +889,7 @@ function normalizeSegmentType(value: unknown): RoleplayReplySegment['type'] | ''
   if (['image', 'picture', 'photo', 'pic'].includes(type)) return 'image';
   if (['voice', 'audio', 'voice_message', 'voice-message', 'speech'].includes(type)) return 'voice';
   if (['location', 'map', 'position', 'geo', 'geolocation', '定位', '位置'].includes(type)) return 'location';
+  if (['transfer', 'money', 'payment', 'redpacket', 'red_packet', '转账', '付款'].includes(type)) return 'transfer';
   return '';
 }
 
@@ -917,6 +942,8 @@ function normalizeRoleplaySegment(value: unknown, narrationEnabled: boolean): Ro
   }
 
   if (type === 'location') return normalizeLocationSegment(record);
+
+  if (type === 'transfer') return normalizeTransferSegment(record);
 
   return [];
 }

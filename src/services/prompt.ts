@@ -131,7 +131,8 @@ export const profileMutationPrompt = `补充输出规则：
   ],
   "messageActions": {
     "recallMessageIds": [],
-    "quotes": []
+    "quotes": [],
+    "transferDecisions": []
   },
   "profileUpdate": {
     "nickname": "",
@@ -148,12 +149,14 @@ export const profileMutationPrompt = `补充输出规则：
     { "type": "voice", "content": "一条语音里说出的内容", "duration": 4 },
     { "type": "image", "description": "你要发送的一张图片的画面描述" },
     { "type": "location", "name": "地点名称", "address": "详细地址，可留空", "distance": "你与{{user}}的距离，例如：约2.4公里" },
+    { "type": "transfer", "amount": "转账金额，例如 52.00", "note": "转账备注，可留空" },
     { "type": "sticker", "stickers": ["合适的Sticker id"] },
     { "type": "text", "content": "第二条聊天气泡", "translation": "" }
   ],
   "messageActions": {
     "recallMessageIds": [],
-    "quotes": []
+    "quotes": [],
+    "transferDecisions": []
   },
   "profileUpdate": {
     "nickname": "新的网名，可留空表示不改",
@@ -171,14 +174,16 @@ export const profileMutationPrompt = `补充输出规则：
 5. image 项显示成图片：{ "type":"image", "description":"画面描述" }。description 描述图片里有什么和氛围，不要写英文标签、相机参数、画质词或模型术语。
 6. 图片内容由角色性格、当前对话、生活状态和要表达的情绪决定，可以是自拍、随手拍、物品、街景、餐食、房间、作业、工作现场等任何合理画面。
 7. location 项显示成定位卡片：{ "type":"location", "name":"地点名称", "address":"详细地址，可留空", "distance":"你与{{user}}的距离" }。只在线上模式使用；name 是你当前所在或要主动发送的位置，distance 必须写清你与{{user}}的相对距离。
-8. sticker 项显示成 Sticker：{ "type":"sticker", "stickers":["Sticker id或文字描述"] }。
-9. 线上模式每次都要在 profileUpdate.innerMonologue 输出 3-5 句当前内心独白；一句一项，像角色当下不会说出口的心声，不要解释给用户听，不要使用上帝视角，不要重复聊天气泡原文。
-10. 线下模式可以把 profileUpdate 设为 null；线上模式即使不修改资料，也保留 profileUpdate，并让 nickname、signature、narration 为空字符串。
-11. profileUpdate.narration 只描述资料变动本身，不要总结，不要剧透；没有资料变动时 narration 为空字符串。
-12. 最近对话每条消息前的 [msg_xxx] 是 messageId。你可以像真实社交软件一样撤回自己之前发出的某条消息，但只能把你自己发过的角色消息 id 放进 messageActions.recallMessageIds；不要撤回用户或系统消息。
-13. 你可以引用用户之前发过的某条消息进行回复。若第 n 个 text 气泡要引用用户消息，在 messageActions.quotes 里写 {"replyIndex": n, "messageId": "用户消息id"}；replyIndex 从 0 开始，只按 text 气泡计数，不把 voice、image、location、sticker、narration 算进去。
-14. 引用用于自然承接上下文。引用时 text.content 里仍只写你真正要发出的新消息，不要重复被引用内容。
-15. 如果没有撤回或引用动作，messageActions 里的两个数组都保持空数组。`;
+8. transfer 项显示成转账卡片：{ "type":"transfer", "amount":"金额", "note":"备注，可留空" }。只在线上模式使用；amount 必须是数字字符串，最多两位小数，表示你主动给{{user}}转账，发送后等待{{user}}接收或拒绝。
+9. 当最近对话里出现用户发来的待处理转账，你可以按人设选择接收或拒绝：在 messageActions.transferDecisions 里写 {"messageId":"用户转账消息id","status":"accepted"} 或 {"messageId":"用户转账消息id","status":"rejected"}。只能处理 pending 的用户转账，不要处理角色自己发出的转账。
+10. sticker 项显示成 Sticker：{ "type":"sticker", "stickers":["Sticker id或文字描述"] }。
+11. 线上模式每次都要在 profileUpdate.innerMonologue 输出 3-5 句当前内心独白；一句一项，像角色当下不会说出口的心声，不要解释给用户听，不要使用上帝视角，不要重复聊天气泡原文。
+12. 线下模式可以把 profileUpdate 设为 null；线上模式即使不修改资料，也保留 profileUpdate，并让 nickname、signature、narration 为空字符串。
+13. profileUpdate.narration 只描述资料变动本身，不要总结，不要剧透；没有资料变动时 narration 为空字符串。
+14. 最近对话每条消息前的 [msg_xxx] 是 messageId。你可以像真实社交软件一样撤回自己之前发出的某条消息，但只能把你自己发过的角色消息 id 放进 messageActions.recallMessageIds；不要撤回用户或系统消息。
+15. 你可以引用用户之前发过的某条消息进行回复。若第 n 个 text 气泡要引用用户消息，在 messageActions.quotes 里写 {"replyIndex": n, "messageId": "用户消息id"}；replyIndex 从 0 开始，只按 text 气泡计数，不把 voice、image、location、transfer、sticker、narration 算进去。
+16. 引用用于自然承接上下文。引用时 text.content 里仍只写你真正要发出的新消息，不要重复被引用内容。
+17. 如果没有撤回、引用或转账处理动作，messageActions 里的数组都保持空数组。`;
 
 export const narrationModePrompt = `补充旁白模式规则：
 
@@ -232,7 +237,7 @@ const modeInstructions: Record<ChatMode, string> = {
   offline: '当前是线下模式。回复为长文本 RP，像小说章节一样呈现，并把你的私人生活推进、身体状态、社交圈与当下场景自然写进叙事。'
 };
 
-function getMessageText(message: Pick<PromptContext['messages'][number], 'content' | 'sender' | 'sticker' | 'image' | 'voice' | 'location'>) {
+function getMessageText(message: Pick<PromptContext['messages'][number], 'content' | 'sender' | 'sticker' | 'image' | 'voice' | 'location' | 'transfer'>) {
   if (message.sticker) return `[Sticker] ${message.sticker.description}`;
   if (message.image) {
     if (message.image.kind === 'description') return `用户发送了一张图片，图片内容为“${message.image.description}”。`;
@@ -251,6 +256,17 @@ function getMessageText(message: Pick<PromptContext['messages'][number], 'conten
     const senderText = message.sender === 'user' ? '用户' : '角色';
     const peerText = message.sender === 'user' ? '角色' : '用户';
     return `${senderText}发送了一条定位：${senderText}目前在“${message.location.name}”${addressText}，距离${peerText}“${message.location.distance}”。`;
+  }
+  if (message.transfer) {
+    const senderText = message.sender === 'user' ? '用户' : '角色';
+    const receiverText = message.sender === 'user' ? '角色' : '用户';
+    const statusText = {
+      pending: `${receiverText}尚未接收或拒绝`,
+      accepted: `${receiverText}已接收`,
+      rejected: `${receiverText}已拒绝`
+    }[message.transfer.status];
+    const noteText = message.transfer.note ? `，备注为“${message.transfer.note}”` : '';
+    return `${senderText}发起了一笔转账：金额 ¥${message.transfer.amount}${noteText}，当前状态：${statusText}。`;
   }
   return message.content;
 }
@@ -397,7 +413,7 @@ export function buildPrompt(context: PromptContext) {
     `当前对话总结：\n${context.conversationSummary || '暂无总结。'}`,
     `记忆手册：\n${context.memorySummary || '暂无记忆手册。'}`,
     `世界书：\n${renderWorldBooks(selectedWorldBooks, context) || '无启用条目。'}`,
-    'Sticker / 图片 / 语音 / 定位规则：用户发送 Sticker 时，文字描述是用户提供的贴纸含义。用户发送真实图片时，若本次请求附带图片，你可以观察图片内容；用户发送文字描述卡片时，必须理解为“用户发送了一张图片，图片内容为描述文本”，虽然没有真实图片文件，也要按图片内容参与对话。用户或角色发送语音时，必须理解为对方用语音消息说出了对应文字内容，不要把它当成普通打字消息；角色也可以在合适时用 voice 项主动发送语音条。用户发送定位时，必须理解为用户把自己的当前位置发给了你，并告知了用户与角色之间的距离；角色也可以在合适时用 location 项主动发送自己的定位。若未附带真实图片，不要臆造描述之外的图片细节。',
+    'Sticker / 图片 / 语音 / 定位 / 转账规则：用户发送 Sticker 时，文字描述是用户提供的贴纸含义。用户发送真实图片时，若本次请求附带图片，你可以观察图片内容；用户发送文字描述卡片时，必须理解为“用户发送了一张图片，图片内容为描述文本”，虽然没有真实图片文件，也要按图片内容参与对话。用户或角色发送语音时，必须理解为对方用语音消息说出了对应文字内容，不要把它当成普通打字消息；角色也可以在合适时用 voice 项主动发送语音条。用户发送定位时，必须理解为用户把自己的当前位置发给了你，并告知了用户与角色之间的距离；角色也可以在合适时用 location 项主动发送自己的定位。用户发送转账时，必须理解为用户确实向你发起了对应金额的转账；你可以在后续按角色意愿接收或拒绝。角色也可以在合适时用 transfer 项主动向用户转账，等待用户接收或拒绝。若未附带真实图片，不要臆造描述之外的图片细节。',
     `角色可用 Stickers：\n${renderAvailableStickers(context)}`,
     `最近对话：\n${history || '暂无。'}`
   ].filter(Boolean).join('\n\n');

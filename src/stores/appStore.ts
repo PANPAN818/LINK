@@ -2,7 +2,7 @@ import { computed, ref, toRaw } from 'vue';
 import { defineStore } from 'pinia';
 import { deleteEntity, loadSnapshot, putEntity, replaceSnapshot } from '@/data/db';
 import { defaultSettings, defaultStickerGroups } from '@/data/seed';
-import type { AppSettings, AppSnapshot, CharacterProfile, ChatImageAttachment, ChatImageCandidate, ChatLocationAttachment, ChatMessage, ChatMessageQuote, ChatMode, ChatModelScope, ChatVoiceAttachment, Conversation, ConversationMemoryRecord, ConversationSettings, GeneratedImageRecord, ImageModuleId, Sticker, StickerGroup, UserProfile, VisualProfile, VoomComment, VoomImageCandidate, VoomPost, VoomPostVisibility, WorldBookEntry } from '@/types/domain';
+import type { AppSettings, AppSnapshot, CharacterProfile, ChatImageAttachment, ChatImageCandidate, ChatLocationAttachment, ChatMessage, ChatMessageQuote, ChatMode, ChatModelScope, ChatTransferAttachment, ChatTransferStatus, ChatVoiceAttachment, Conversation, ConversationMemoryRecord, ConversationSettings, GeneratedImageRecord, ImageModuleId, Sticker, StickerGroup, UserProfile, VisualProfile, VoomComment, VoomImageCandidate, VoomPost, VoomPostVisibility, WorldBookEntry } from '@/types/domain';
 import { createAccountId, createId } from '@/utils/id';
 import { getCharacterVoomAuthorName, normalizeCharacterMindStateLines, normalizeCharacterProfile } from '@/utils/character';
 import { normalizeUserProfile, normalizeVisualProfile } from '@/utils/profile';
@@ -557,6 +557,26 @@ export const useAppStore = defineStore('app', () => {
     return `[定位] ${[location.name, location.address, location.distance].map((item) => item?.trim()).filter(Boolean).join(' · ')}`;
   }
 
+  function normalizeTransferAttachment(transfer: Pick<ChatTransferAttachment, 'amount' | 'note'>): ChatTransferAttachment | null {
+    const amount = String(transfer.amount ?? '').replace(/[￥¥,\s]/g, '').trim();
+    if (!/^\d+(?:\.\d{1,2})?$/.test(amount) || Number(amount) <= 0) return null;
+    return {
+      amount,
+      currency: 'CNY',
+      note: transfer.note?.trim() || undefined,
+      status: 'pending'
+    };
+  }
+
+  function formatTransferContent(transfer: Pick<ChatTransferAttachment, 'amount' | 'note' | 'status'>) {
+    const statusText = {
+      pending: '待处理',
+      accepted: '已接收',
+      rejected: '已拒绝'
+    }[transfer.status];
+    return `[转账] ¥${transfer.amount}${transfer.note ? ` · ${transfer.note}` : ''} · ${statusText}`;
+  }
+
   async function appendConversationEvent(conversationId: string, content: string, options: Partial<Pick<ChatMessage, 'mode' | 'voomPostId' | 'voomCommentId' | 'voomEventType' | 'replyBatchId' | 'createdAt'>> = {}) {
     const conversation = conversationById(conversationId);
     if (!conversation || !content.trim()) return null;
@@ -606,7 +626,8 @@ export const useAppStore = defineStore('app', () => {
       sticker: quote.sticker ? { ...quote.sticker } : undefined,
       image: quote.image ? { ...quote.image } : undefined,
       voice: quote.voice ? { ...quote.voice } : undefined,
-      location: quote.location ? { ...quote.location } : undefined
+      location: quote.location ? { ...quote.location } : undefined,
+      transfer: quote.transfer ? { ...quote.transfer } : undefined
     };
   }
 
@@ -615,6 +636,7 @@ export const useAppStore = defineStore('app', () => {
     if (message.image) return `[图片] ${message.image.description}`.trim();
     if (message.voice) return `[语音] ${message.voice.transcript}`.trim();
     if (message.location) return formatLocationContent(message.location).trim();
+    if (message.transfer) return formatTransferContent(message.transfer).trim();
     return message.content.trim();
   }
 
@@ -643,7 +665,8 @@ export const useAppStore = defineStore('app', () => {
       sticker: message.sticker ? { ...message.sticker } : undefined,
       image: message.image ? { ...message.image } : undefined,
       voice: message.voice ? { ...message.voice } : undefined,
-      location: message.location ? { ...message.location } : undefined
+      location: message.location ? { ...message.location } : undefined,
+      transfer: message.transfer ? { ...message.transfer } : undefined
     };
   }
 
@@ -713,6 +736,58 @@ export const useAppStore = defineStore('app', () => {
     await putEntity('messages', nextMessage);
     await pruneMemoriesForMessageIds([nextMessage.id]);
     await touchConversationAfterMessageChange(nextMessage.conversationId, nextMessage.editedAt);
+    return nextMessage;
+  }
+
+  async function updateMessageLocation(messageId: string, location: ChatLocationAttachment) {
+    const normalizedLocation = normalizeLocationAttachment(location);
+    if (!normalizedLocation) return null;
+    const messageIndex = messages.value.findIndex((message) => message.id === messageId);
+    if (messageIndex < 0) return null;
+    const existingMessage = messages.value[messageIndex];
+    if (!existingMessage.location) return null;
+    const editedAt = Date.now();
+    const nextMessage: ChatMessage = {
+      ...existingMessage,
+      content: formatLocationContent(normalizedLocation),
+      location: normalizedLocation,
+      editedAt
+    };
+    messages.value[messageIndex] = nextMessage;
+    await putEntity('messages', nextMessage);
+    await pruneMemoriesForMessageIds([nextMessage.id]);
+    await touchConversationAfterMessageChange(nextMessage.conversationId, editedAt);
+    return nextMessage;
+  }
+
+  async function updateMessageTransfer(messageId: string, transfer: Pick<ChatTransferAttachment, 'amount' | 'note' | 'status'>) {
+    const amount = String(transfer.amount ?? '').replace(/[￥¥,\s]/g, '').trim();
+    if (!/^\d+(?:\.\d{1,2})?$/.test(amount) || Number(amount) <= 0) return null;
+    const status: ChatTransferStatus = ['accepted', 'rejected'].includes(transfer.status) ? transfer.status : 'pending';
+    const messageIndex = messages.value.findIndex((message) => message.id === messageId);
+    if (messageIndex < 0) return null;
+    const existingMessage = messages.value[messageIndex];
+    if (!existingMessage.transfer) return null;
+    const editedAt = Date.now();
+    const nextTransfer: ChatTransferAttachment = {
+      amount,
+      currency: 'CNY',
+      note: transfer.note?.trim() || undefined,
+      status,
+      ...(status === 'pending'
+        ? {}
+        : { respondedAt: existingMessage.transfer.respondedAt ?? editedAt })
+    };
+    const nextMessage: ChatMessage = {
+      ...existingMessage,
+      content: formatTransferContent(nextTransfer),
+      transfer: nextTransfer,
+      editedAt
+    };
+    messages.value[messageIndex] = nextMessage;
+    await putEntity('messages', nextMessage);
+    await pruneMemoriesForMessageIds([nextMessage.id]);
+    await touchConversationAfterMessageChange(nextMessage.conversationId, editedAt);
     return nextMessage;
   }
 
@@ -1827,6 +1902,52 @@ export const useAppStore = defineStore('app', () => {
     return userMessage;
   }
 
+  async function appendUserTransferMessage(conversationId: string, transfer: Pick<ChatTransferAttachment, 'amount' | 'note'>, quote?: ChatMessageQuote | null) {
+    const normalizedTransfer = normalizeTransferAttachment(transfer);
+    const conversation = conversationById(conversationId);
+    if (!normalizedTransfer || !conversation) return;
+
+    const userMessage: ChatMessage = {
+      id: createId('msg'),
+      conversationId,
+      sender: 'user',
+      mode: conversation.activeMode,
+      content: formatTransferContent(normalizedTransfer),
+      transfer: normalizedTransfer,
+      quote: cloneMessageQuote(quote),
+      createdAt: Date.now(),
+      status: 'sent'
+    };
+    messages.value.push(userMessage);
+    await putEntity('messages', userMessage);
+    const nextConversation = { ...conversation, updatedAt: userMessage.createdAt, unreadCount: 0 };
+    const conversationIndex = conversations.value.findIndex((item) => item.id === conversationId);
+    if (conversationIndex >= 0) conversations.value[conversationIndex] = nextConversation;
+    await putEntity('conversations', nextConversation);
+    void maybeAutoSummarizeConversation(conversationId);
+    return userMessage;
+  }
+
+  async function updateTransferStatus(messageId: string, status: ChatTransferStatus, actor: 'user' | 'char' = 'user') {
+    if (status === 'pending') return null;
+    const message = messages.value.find((item) => item.id === messageId);
+    if (!message?.transfer || message.transfer.status !== 'pending') return null;
+    if (actor === 'user' && message.sender !== 'char') return null;
+    if (actor === 'char' && message.sender !== 'user') return null;
+    const nextTransfer = { ...message.transfer, status, respondedAt: Date.now() };
+    const nextMessage: ChatMessage = {
+      ...message,
+      content: formatTransferContent(nextTransfer),
+      transfer: nextTransfer,
+      editedAt: Date.now()
+    };
+    const messageIndex = messages.value.findIndex((item) => item.id === messageId);
+    if (messageIndex >= 0) messages.value[messageIndex] = nextMessage;
+    await putEntity('messages', nextMessage);
+    void maybeAutoSummarizeConversation(message.conversationId);
+    return nextMessage;
+  }
+
   async function summarizeConversationWindow(conversationId: string, options: { forceStartFloor?: number; forceEndFloor?: number; hiddenStartFloor?: number; hiddenEndFloor?: number; allowPartial?: boolean; replaceMemoryId?: string } = {}): Promise<ConversationSummaryResult | null> {
     const conversation = conversationById(conversationId);
     if (!conversation) return null;
@@ -2220,6 +2341,10 @@ export const useAppStore = defineStore('app', () => {
               });
               return location ? [{ type: 'location', ...location }] : [];
             }
+            if (segment.type === 'transfer') {
+              const transfer = normalizeTransferAttachment({ amount: segment.amount, note: segment.note });
+              return transfer ? [{ type: 'transfer', amount: transfer.amount, ...(transfer.note ? { note: transfer.note } : {}) }] : [];
+            }
             return [];
           })
           .slice(0, 12)
@@ -2254,15 +2379,22 @@ export const useAppStore = defineStore('app', () => {
       const hasOrderedImage = orderedSegments.some((segment) => segment.type === 'image' && segment.description.trim());
       const hasOrderedVoice = orderedSegments.some((segment) => segment.type === 'voice' && segment.content.trim());
       const hasOrderedLocation = orderedSegments.some((segment) => segment.type === 'location' && segment.name.trim() && segment.distance.trim());
+      const hasOrderedTransfer = orderedSegments.some((segment) => segment.type === 'transfer' && normalizeTransferAttachment({ amount: segment.amount, note: segment.note }));
       const recallMessageIds = parsedReply.messageActions?.recallMessageIds ?? [];
       const validRecallMessageIds = recallMessageIds.filter((messageId) => messages.value.some((message) => message.id === messageId && message.conversationId === conversationId && message.sender === 'char'));
+      const validTransferDecisions = (parsedReply.messageActions?.transferDecisions ?? [])
+        .map((decision) => ({
+          messageId: String(decision.messageId ?? '').trim(),
+          status: decision.status === 'accepted' ? 'accepted' as const : decision.status === 'rejected' ? 'rejected' as const : null
+        }))
+        .filter((decision): decision is { messageId: string; status: 'accepted' | 'rejected' } => Boolean(decision.messageId && decision.status && messages.value.some((message) => message.id === decision.messageId && message.conversationId === conversationId && message.sender === 'user' && message.transfer?.status === 'pending')));
       const quoteByReplyIndex = new Map<number, ChatMessageQuote>();
       for (const quoteAction of parsedReply.messageActions?.quotes ?? []) {
         const targetMessage = messages.value.find((message) => message.id === quoteAction.messageId && message.conversationId === conversationId && message.sender === 'user');
         const quote = targetMessage ? createMessageQuoteSnapshot(targetMessage) : null;
         if (quote) quoteByReplyIndex.set(Math.max(0, Math.floor(quoteAction.replyIndex)), quote);
       }
-      if (!effectiveReplyMessages.length && !replyStickers.length && !replyImages.length && !narrationMessages.length && !hasOrderedSticker && !hasOrderedNarration && !hasOrderedImage && !hasOrderedVoice && !hasOrderedLocation && !validRecallMessageIds.length) {
+      if (!effectiveReplyMessages.length && !replyStickers.length && !replyImages.length && !narrationMessages.length && !hasOrderedSticker && !hasOrderedNarration && !hasOrderedImage && !hasOrderedVoice && !hasOrderedLocation && !hasOrderedTransfer && !validRecallMessageIds.length && !validTransferDecisions.length) {
         showConfigAlert('AI 返回内容中没有可显示的聊天文本，请重试或检查模型输出格式。', '回复异常');
         return;
       }
@@ -2296,6 +2428,9 @@ export const useAppStore = defineStore('app', () => {
       }
       for (const messageId of validRecallMessageIds) {
         await recallMessage(messageId, { actor: 'char', replyBatchId });
+      }
+      for (const decision of validTransferDecisions) {
+        await updateTransferStatus(decision.messageId, decision.status, 'char');
       }
       const createdAt = Date.now();
       const charNarrationMessages = narrationMessages.map((content, index) => ({
@@ -2375,6 +2510,21 @@ export const useAppStore = defineStore('app', () => {
         createdAt: createdAt + charMessageOffset++,
         status: 'sent' as const
       } satisfies ChatMessage);
+      const createTransferMessage = (transfer: Pick<ChatTransferAttachment, 'amount' | 'note'>) => {
+        const normalizedTransfer = normalizeTransferAttachment(transfer);
+        if (!normalizedTransfer) return null;
+        return {
+          id: createId('msg'),
+          conversationId,
+          sender: 'char' as const,
+          mode: conversation.activeMode,
+          content: formatTransferContent(normalizedTransfer),
+          transfer: normalizedTransfer,
+          replyBatchId,
+          createdAt: createdAt + charMessageOffset++,
+          status: 'sent' as const
+        } satisfies ChatMessage;
+      };
       const sentImageDescriptionKeys = new Set<string>();
       const appendImageMessage = async (description: string, targetMessages: ChatMessage[]) => {
         const imageKey = normalizeDuplicateKey(description);
@@ -2425,12 +2575,19 @@ export const useAppStore = defineStore('app', () => {
             case 'image':
               await appendImageMessage(segment.description, orderedCharMessages);
               break;
-            case 'location':
+            case 'location': {
               orderedCharMessages.push(createLocationMessage(segment));
               break;
-            case 'voice':
+            }
+            case 'voice': {
               orderedCharMessages.push(createVoiceMessage(segment.content, segment.duration));
               break;
+            }
+            case 'transfer': {
+              const transferMessage = createTransferMessage(segment);
+              if (transferMessage) orderedCharMessages.push(transferMessage);
+              break;
+            }
           }
         }
       } else if (replyMessages.length) {
@@ -3204,8 +3361,12 @@ export const useAppStore = defineStore('app', () => {
     appendUserImageMessage,
     appendUserVoiceMessage,
     appendUserLocationMessage,
+    appendUserTransferMessage,
+    updateTransferStatus,
     deleteMessages,
     updateMessageContent,
+    updateMessageLocation,
+    updateMessageTransfer,
     generateMessageVoiceAudio,
     recallMessage,
     summarizeConversationWindow,

@@ -24,6 +24,7 @@
         @apply-image="applyChatImageCandidate"
         @busy-action="store.showConfigAlert"
         @long-press="openMessageActions"
+        @open-card-detail="openCardDetail"
         @open-profile="openCharacterProfile"
         @regenerate-image="regenerateChatImage"
         @toggle-select="toggleMessageSelection(message)"
@@ -157,25 +158,21 @@
 
     <AppModal v-model="showActionMenu" title="更多操作" :show-header="false" variant="ins">
       <section class="action-menu">
-        <button type="button" @click="openUserProfile">
-          <UserRound :size="20" />
-          <span>我的主页</span>
-        </button>
         <button type="button" @click="openCharacterProfile">
           <ContactRound :size="20" />
           <span>角色主页</span>
         </button>
-        <button class="danger-menu-action" type="button" @click="openDeleteFriendConfirm">
-          <UserMinus :size="20" />
-          <span>删除好友</span>
-        </button>
-        <button class="danger-menu-action" type="button" @click="openClearHistoryConfirm">
-          <ArchiveX :size="20" />
-          <span>清空记忆</span>
+        <button type="button" @click="openUserProfile">
+          <UserRound :size="20" />
+          <span>我的主页</span>
         </button>
         <button type="button" @click="openLocationPanel">
           <MapPin :size="20" />
           <span>发送定位</span>
+        </button>
+        <button type="button" @click="openTransferPanel">
+          <Wallet :size="20" />
+          <span>转账</span>
         </button>
         <button type="button" @click="openModelSwitch">
           <SlidersHorizontal :size="20" />
@@ -192,6 +189,14 @@
         <button type="button" :class="{ busy: generatingVoom }" :aria-disabled="generatingVoom" @click="generateVoomPost">
           <Sparkles :size="20" />
           <span>{{ generatingVoom ? '生成中' : '生成 VOOM' }}</span>
+        </button>
+        <button class="danger-menu-action" type="button" @click="openDeleteFriendConfirm">
+          <UserMinus :size="20" />
+          <span>删除好友</span>
+        </button>
+        <button class="danger-menu-action" type="button" @click="openClearHistoryConfirm">
+          <ArchiveX :size="20" />
+          <span>清空记忆</span>
         </button>
       </section>
     </AppModal>
@@ -234,6 +239,40 @@
       </section>
     </AppModal>
 
+    <AppModal v-model="showTransferPanel" title="转账" :show-header="false" variant="ins">
+      <section class="transfer-send-panel">
+        <div class="transfer-panel-head">
+          <div>
+            <p>Transfer</p>
+            <h3>转账给 {{ characterDisplayName }}</h3>
+          </div>
+        </div>
+
+        <div class="transfer-preview-card">
+          <span aria-hidden="true">¥</span>
+          <div>
+            <small>转账金额</small>
+            <strong>¥{{ transferAmountPreview }}</strong>
+            <em>{{ transferNoteDraft.trim() || '等待对方接收或拒绝' }}</em>
+          </div>
+        </div>
+
+        <label class="transfer-field">
+          <span>金额</span>
+          <input v-model="transferAmountDraft" inputmode="decimal" maxlength="12" placeholder="例如 52.00" />
+        </label>
+        <label class="transfer-field">
+          <span>备注（可选）</span>
+          <input v-model="transferNoteDraft" maxlength="60" placeholder="例如：奶茶钱 / 路费 / 今天辛苦了" />
+        </label>
+
+        <div class="transfer-actions-sheet">
+          <button class="secondary-action" type="button" @click="showTransferPanel = false">取消</button>
+          <button class="primary-action" type="button" :disabled="!canSendTransfer || store.loadingReply" @click="sendTransferMessage">发送转账</button>
+        </div>
+      </section>
+    </AppModal>
+
     <AppModal v-model="showMessageMenu" title="消息操作" :show-header="false" variant="ins">
       <section class="message-action-menu">
         <button type="button" @click="copyActiveMessage">
@@ -263,12 +302,71 @@
       </section>
     </AppModal>
 
-    <AppModal v-model="showEditModal" title="编辑消息" variant="ins">
+    <AppModal v-model="showEditModal" title="编辑消息" :show-header="false" variant="ins">
       <section class="edit-message-sheet">
-        <textarea v-model="editDraft" rows="5" placeholder="编辑消息内容"></textarea>
+        <template v-if="activeMessage?.location">
+          <label class="location-field">
+            <span>地点名称</span>
+            <input v-model="editLocationNameDraft" maxlength="80" placeholder="地点名称" />
+          </label>
+          <label class="location-field">
+            <span>详细地址</span>
+            <input v-model="editLocationAddressDraft" maxlength="140" placeholder="详细地址可留空" />
+          </label>
+          <label class="location-field">
+            <span>距离</span>
+            <input v-model="editLocationDistanceDraft" maxlength="60" placeholder="距离对方多远" />
+          </label>
+        </template>
+        <template v-else-if="activeMessage?.transfer">
+          <label class="transfer-field">
+            <span>金额</span>
+            <input v-model="editTransferAmountDraft" inputmode="decimal" maxlength="12" placeholder="例如 52.00" />
+          </label>
+          <label class="transfer-field">
+            <span>备注</span>
+            <input v-model="editTransferNoteDraft" maxlength="60" placeholder="备注可留空" />
+          </label>
+          <label class="transfer-field">
+            <span>处理状态</span>
+            <select v-model="editTransferStatusDraft">
+              <option value="pending">待处理</option>
+              <option value="accepted">已接收</option>
+              <option value="rejected">已拒绝</option>
+            </select>
+          </label>
+        </template>
+        <textarea v-else v-model="editDraft" rows="5" placeholder="编辑消息内容"></textarea>
         <div class="edit-actions">
           <button class="secondary-action" type="button" @click="showEditModal = false">取消</button>
-          <button class="primary-action" type="button" :disabled="!editDraft.trim()" @click="saveEditedMessage">保存</button>
+          <button class="primary-action" type="button" :disabled="!canSaveEditedMessage" @click="saveEditedMessage">保存</button>
+        </div>
+      </section>
+    </AppModal>
+
+    <AppModal v-model="showCardDetailModal" title="卡片详情" :show-header="false" variant="ins">
+      <section v-if="activeCardDetailMessage?.location" class="card-detail-sheet card-detail-sheet-location">
+        <div class="card-detail-icon location-detail-icon" aria-hidden="true">
+          <MapPin :size="24" />
+        </div>
+        <div class="card-detail-content">
+          <span>定位</span>
+          <strong>{{ activeCardDetailMessage.location.name }}</strong>
+          <p v-if="activeCardDetailMessage.location.address">{{ activeCardDetailMessage.location.address }}</p>
+          <em>{{ detailLocationDistanceLabel(activeCardDetailMessage) }}</em>
+        </div>
+      </section>
+      <section v-else-if="activeCardDetailMessage?.transfer" class="card-detail-sheet card-detail-sheet-transfer">
+        <div class="card-detail-icon transfer-detail-icon" aria-hidden="true">¥</div>
+        <div class="card-detail-content">
+          <span>{{ detailTransferTitle(activeCardDetailMessage) }}</span>
+          <strong>¥{{ activeCardDetailMessage.transfer.amount }}</strong>
+          <p>{{ activeCardDetailMessage.transfer.note || '无备注' }}</p>
+          <em>{{ detailTransferStatusLabel(activeCardDetailMessage) }}</em>
+        </div>
+        <div v-if="canRespondDetailTransfer" class="card-detail-actions">
+          <button class="secondary-action" type="button" @click="respondToTransferFromDetail('rejected')">拒绝</button>
+          <button class="primary-action" type="button" @click="respondToTransferFromDetail('accepted')">接收</button>
         </div>
       </section>
     </AppModal>
@@ -333,7 +431,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
-import { ArchiveX, CheckSquare, ContactRound, Copy, Grid3X3, MapPin, Pencil, Quote, RefreshCw, RotateCcw, SlidersHorizontal, Sparkles, Trash2, UserMinus, UserRound, X } from 'lucide-vue-next';
+import { ArchiveX, CheckSquare, ContactRound, Copy, Grid3X3, MapPin, Pencil, Quote, RefreshCw, RotateCcw, SlidersHorizontal, Sparkles, Trash2, UserMinus, UserRound, Wallet, X } from 'lucide-vue-next';
 import AppModal from '@/components/common/AppModal.vue';
 import ChatHeader from '@/components/chat/ChatHeader.vue';
 import ChatModelSwitchPanel from '@/components/chat/ChatModelSwitchPanel.vue';
@@ -343,7 +441,7 @@ import MessageComposer from '@/components/chat/MessageComposer.vue';
 import UserProfileSheet from '@/components/chat/UserProfileSheet.vue';
 import StickerLibraryModal from '@/components/stickers/StickerLibraryModal.vue';
 import { useAppStore } from '@/stores/appStore';
-import type { CharacterProfile, ChatImageAttachment, ChatLocationAttachment, ChatMessage, ChatMessageQuote, ChatVoiceAttachment, UserProfile } from '@/types/domain';
+import type { CharacterProfile, ChatImageAttachment, ChatLocationAttachment, ChatMessage, ChatMessageQuote, ChatTransferStatus, ChatVoiceAttachment, UserProfile } from '@/types/domain';
 import { readChatImageFile } from '@/utils/imageFile';
 import { useKeyboardScrollGuard } from '@/utils/keyboardScrollGuard';
 import { getSelectedImageModelOption } from '@/utils/settings';
@@ -364,8 +462,10 @@ const showStickers = ref(false);
 const showImagePanel = ref(false);
 const showVoicePanel = ref(false);
 const showLocationPanel = ref(false);
+const showTransferPanel = ref(false);
 const showMessageMenu = ref(false);
 const showEditModal = ref(false);
+const showCardDetailModal = ref(false);
 const showDeleteConfirm = ref(false);
 const showDeleteFriendConfirm = ref(false);
 const showClearHistoryConfirm = ref(false);
@@ -376,10 +476,17 @@ const regeneratingChatImageMessageIds = ref<string[]>([]);
 const messageListRef = ref<HTMLElement | null>(null);
 const localImageInputRef = ref<HTMLInputElement | null>(null);
 const activeMessage = ref<ChatMessage | null>(null);
+const activeCardDetailMessageId = ref('');
 const selectionMode = ref(false);
 const selectedMessageIds = ref<string[]>([]);
 const quoteTarget = ref<ChatMessageQuote | null>(null);
 const editDraft = ref('');
+const editLocationNameDraft = ref('');
+const editLocationAddressDraft = ref('');
+const editLocationDistanceDraft = ref('');
+const editTransferAmountDraft = ref('');
+const editTransferNoteDraft = ref('');
+const editTransferStatusDraft = ref<ChatTransferStatus>('pending');
 const pendingDeleteIds = ref<string[]>([]);
 const pendingDeleteFromSelection = ref(false);
 const visibleMessageLimit = ref(60);
@@ -394,6 +501,8 @@ const voiceTextDraft = ref('');
 const locationNameDraft = ref('');
 const locationAddressDraft = ref('');
 const locationDistanceDraft = ref('');
+const transferAmountDraft = ref('');
+const transferNoteDraft = ref('');
 const recordedVoiceDraft = ref<Pick<ChatVoiceAttachment, 'audioUrl' | 'duration' | 'mimeType'> | null>(null);
 const recordingVoice = ref(false);
 const recordingStartedAt = ref(0);
@@ -422,6 +531,9 @@ const allOnlineMessages = computed(() => {
 });
 const onlineMessages = computed(() => allOnlineMessages.value.slice(Math.max(0, allOnlineMessages.value.length - visibleMessageLimit.value)));
 const hasEarlierMessages = computed(() => visibleMessageLimit.value < allOnlineMessages.value.length);
+const activeCardDetailMessage = computed(() => allOnlineMessages.value.find((message) => message.id === activeCardDetailMessageId.value));
+const canRespondDetailTransfer = computed(() => Boolean(activeCardDetailMessage.value?.sender === 'char'
+  && activeCardDetailMessage.value.transfer?.status === 'pending'));
 
 function shouldHideAvatar(index: number) {
   if (!chatSettings.value.appearance.showOnlyFirstAvatarInReply) return false;
@@ -456,6 +568,17 @@ const voiceRecordStatus = computed(() => {
   return '等待录音';
 });
 const canSendLocation = computed(() => Boolean(locationNameDraft.value.trim() && locationDistanceDraft.value.trim()));
+const normalizedTransferAmount = computed(() => transferAmountDraft.value.replace(/[￥¥,\s]/g, '').trim());
+const transferAmountPreview = computed(() => normalizedTransferAmount.value || '0.00');
+const canSendTransfer = computed(() => /^\d+(?:\.\d{1,2})?$/.test(normalizedTransferAmount.value) && Number(normalizedTransferAmount.value) > 0);
+const normalizedEditTransferAmount = computed(() => editTransferAmountDraft.value.replace(/[￥¥,\s]/g, '').trim());
+const canSaveEditedMessage = computed(() => {
+  const message = activeMessage.value;
+  if (!message) return false;
+  if (message.location) return Boolean(editLocationNameDraft.value.trim() && editLocationDistanceDraft.value.trim());
+  if (message.transfer) return /^\d+(?:\.\d{1,2})?$/.test(normalizedEditTransferAmount.value) && Number(normalizedEditTransferAmount.value) > 0;
+  return Boolean(editDraft.value.trim());
+});
 const { captureKeyboardScrollAnchor, releaseKeyboardScrollGuard, startKeyboardScrollGuard, stopKeyboardScrollGuard } = useKeyboardScrollGuard(messageListRef);
 
 async function syncConversationState(id: string) {
@@ -621,6 +744,36 @@ function openLocationPanel() {
   locationAddressDraft.value = '';
   locationDistanceDraft.value = '';
   showLocationPanel.value = true;
+}
+
+function openTransferPanel() {
+  showActionMenu.value = false;
+  transferAmountDraft.value = '';
+  transferNoteDraft.value = '';
+  showTransferPanel.value = true;
+}
+
+async function sendTransferMessage() {
+  if (!canSendTransfer.value || store.loadingReply) return;
+  releaseKeyboardScrollGuard();
+  const userMessage = await store.appendUserTransferMessage(props.id, {
+    amount: normalizedTransferAmount.value,
+    note: transferNoteDraft.value.trim() || undefined
+  }, quoteTarget.value);
+  if (!userMessage) return;
+  quoteTarget.value = null;
+  showTransferPanel.value = false;
+  await scrollMessagesToBottom();
+}
+
+async function respondToTransfer(messageId: string, status: Exclude<ChatTransferStatus, 'pending'>) {
+  await store.updateTransferStatus(messageId, status, 'user');
+}
+
+async function respondToTransferFromDetail(status: Exclude<ChatTransferStatus, 'pending'>) {
+  const message = activeCardDetailMessage.value;
+  if (!message?.transfer) return;
+  await respondToTransfer(message.id, status);
 }
 
 async function appendLocationMessage(location: ChatLocationAttachment) {
@@ -819,12 +972,36 @@ function messageActionText(message: ChatMessage) {
   if (message.image) return `[图片] ${message.image.description}`;
   if (message.voice) return `[语音] ${message.voice.transcript}`;
   if (message.location) return `[定位] ${[message.location.name, message.location.address, message.location.distance].filter(Boolean).join(' · ')}`;
+  if (message.transfer) return `[转账] ¥${message.transfer.amount} · ${message.transfer.status === 'pending' ? '待处理' : message.transfer.status === 'accepted' ? '已接收' : '已拒绝'}`;
   return message.content;
+}
+
+function detailLocationDistanceLabel(message: ChatMessage) {
+  return message.sender === 'user'
+    ? `距离对方 ${message.location?.distance ?? ''}`
+    : `距离你 ${message.location?.distance ?? ''}`;
+}
+
+function detailTransferTitle(message: ChatMessage) {
+  return message.sender === 'user' ? '转账给对方' : '转账给你';
+}
+
+function detailTransferStatusLabel(message: ChatMessage) {
+  if (message.transfer?.status === 'accepted') return message.sender === 'user' ? '对方已接收' : '你已接收';
+  if (message.transfer?.status === 'rejected') return message.sender === 'user' ? '对方已拒绝' : '你已拒绝';
+  return message.sender === 'user' ? '等待对方处理' : '等待你处理';
+}
+
+function openCardDetail(message: ChatMessage) {
+  if (!message.location && !message.transfer) return;
+  activeCardDetailMessageId.value = message.id;
+  showCardDetailModal.value = true;
 }
 
 function editableMessageText(message: ChatMessage) {
   if (message.voice) return message.voice.transcript;
   if (message.location) return message.location.name;
+  if (message.transfer) return message.transfer.amount;
   return message.sticker?.description ?? message.image?.description ?? message.content;
 }
 
@@ -933,14 +1110,34 @@ function openEditActiveMessage() {
   const message = activeMessage.value;
   if (!message || !canEditActiveMessage.value) return;
   editDraft.value = editableMessageText(message);
+  editLocationNameDraft.value = message.location?.name ?? '';
+  editLocationAddressDraft.value = message.location?.address ?? '';
+  editLocationDistanceDraft.value = message.location?.distance ?? '';
+  editTransferAmountDraft.value = message.transfer?.amount ?? '';
+  editTransferNoteDraft.value = message.transfer?.note ?? '';
+  editTransferStatusDraft.value = message.transfer?.status ?? 'pending';
   showMessageMenu.value = false;
   showEditModal.value = true;
 }
 
 async function saveEditedMessage() {
   const message = activeMessage.value;
-  if (!message || !editDraft.value.trim()) return;
-  await store.updateMessageContent(message.id, editDraft.value);
+  if (!message || !canSaveEditedMessage.value) return;
+  if (message.location) {
+    await store.updateMessageLocation(message.id, {
+      name: editLocationNameDraft.value,
+      address: editLocationAddressDraft.value || undefined,
+      distance: editLocationDistanceDraft.value
+    });
+  } else if (message.transfer) {
+    await store.updateMessageTransfer(message.id, {
+      amount: normalizedEditTransferAmount.value,
+      note: editTransferNoteDraft.value || undefined,
+      status: editTransferStatusDraft.value
+    });
+  } else {
+    await store.updateMessageContent(message.id, editDraft.value);
+  }
   showEditModal.value = false;
 }
 
@@ -1291,6 +1488,144 @@ onBeforeUnmount(abortVoiceRecording);
   min-width: 0;
 }
 
+.transfer-send-panel {
+  display: grid;
+  gap: 12px;
+  width: 100%;
+  min-width: 0;
+}
+
+.transfer-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.transfer-panel-head > div {
+  min-width: 0;
+}
+
+.transfer-panel-head p {
+  margin: 0 0 3px;
+  color: #60646b;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.transfer-panel-head h3 {
+  margin: 0;
+  color: #211f24;
+  font-size: 16px;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+.transfer-preview-card {
+  display: grid;
+  grid-template-columns: 58px minmax(0, 1fr);
+  min-width: 0;
+  overflow: hidden;
+  border-radius: 14px;
+  background: #ffffff;
+  color: #202329;
+  box-shadow: 0 8px 26px rgba(37, 31, 37, 0.08);
+}
+
+.transfer-preview-card > span {
+  display: grid;
+  place-items: center;
+  min-height: 84px;
+  background: linear-gradient(135deg, #f3f4f6, #d9dde2);
+  color: #202329;
+  font-size: 25px;
+  font-weight: 950;
+}
+
+.transfer-preview-card div {
+  display: grid;
+  align-content: center;
+  gap: 4px;
+  min-width: 0;
+  padding: 11px 12px;
+}
+
+.transfer-preview-card small,
+.transfer-preview-card strong,
+.transfer-preview-card em {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.transfer-preview-card small {
+  color: #60646b;
+  font-size: 12px;
+  font-weight: 860;
+}
+
+.transfer-preview-card strong {
+  color: #202329;
+  font-size: 22px;
+  font-weight: 950;
+  line-height: 1.1;
+}
+
+.transfer-preview-card em {
+  color: #68717a;
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 760;
+}
+
+.transfer-field {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.transfer-field span {
+  color: #686b70;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.transfer-field input,
+.transfer-field select {
+  width: 100%;
+  min-width: 0;
+  min-height: 40px;
+  border: 1px solid #edf0f2;
+  border-radius: 10px;
+  padding: 0 10px;
+  background: #ffffff;
+  color: #171717;
+  font: inherit;
+}
+
+.transfer-actions-sheet {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.transfer-actions-sheet button {
+  min-height: 40px;
+}
+
+.transfer-actions-sheet .primary-action {
+  background: #d8dce0;
+  color: #202329;
+}
+
+.transfer-actions-sheet .primary-action:disabled {
+  background: #eceef1;
+  color: #9ba1a8;
+}
+
 .location-panel-head {
   display: flex;
   align-items: center;
@@ -1386,7 +1721,8 @@ onBeforeUnmount(abortVoiceRecording);
   font-weight: 900;
 }
 
-.location-field input {
+.location-field input,
+.location-field select {
   width: 100%;
   min-width: 0;
   min-height: 40px;
@@ -1747,6 +2083,7 @@ onBeforeUnmount(abortVoiceRecording);
 
 .action-menu {
   display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
 }
 
@@ -1819,6 +2156,90 @@ onBeforeUnmount(abortVoiceRecording);
   color: #9a9fa6;
 }
 
+.card-detail-sheet {
+  display: grid;
+  grid-template-columns: 58px minmax(0, 1fr);
+  gap: 0;
+  overflow: hidden;
+  border: 1px solid #e6e8eb;
+  border-radius: 16px;
+  background: #ffffff;
+  color: #202329;
+  box-shadow: 0 8px 20px rgba(17, 20, 24, 0.06);
+}
+
+.card-detail-icon {
+  display: grid;
+  place-items: center;
+  min-height: 96px;
+  background: linear-gradient(135deg, #f0f1f3, #e2e4e7);
+  color: #30343a;
+  font-size: 18px;
+  font-weight: 950;
+}
+
+.card-detail-content {
+  display: grid;
+  align-content: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 12px;
+}
+
+.card-detail-content span {
+  color: #5f6670;
+  font-size: 11px;
+  font-weight: 860;
+}
+
+.card-detail-content strong {
+  color: #202329;
+  font-size: 17px;
+  font-weight: 950;
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+}
+
+.card-detail-content p {
+  margin: 0;
+  color: #69717b;
+  font-size: 12px;
+  font-weight: 760;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.card-detail-content em {
+  justify-self: start;
+  max-width: 100%;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: #eef0f2;
+  color: #5f6670;
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 860;
+}
+
+.card-detail-actions {
+  grid-column: 2;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 0 12px 12px 0;
+}
+
+.card-detail-actions button {
+  min-width: 62px;
+  min-height: 38px;
+}
+
+.card-detail-actions .primary-action {
+  background: #d7dbe0;
+  color: #22262c;
+}
+
 .delete-confirm-sheet {
   display: grid;
   gap: 10px;
@@ -1849,17 +2270,26 @@ onBeforeUnmount(abortVoiceRecording);
 }
 
 .action-menu button {
-  display: flex;
+  display: grid;
+  grid-template-columns: auto auto;
   align-items: center;
-  gap: 12px;
-  min-height: 48px;
-  padding: 0 12px;
+  justify-content: center;
+  justify-items: center;
+  gap: 9px;
+  min-height: 58px;
+  padding: 8px 10px;
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.72);
   color: #202329;
-  font-size: 15px;
+  font-size: 13px;
   font-weight: 800;
-  text-align: left;
+  text-align: center;
+  line-height: 1.2;
+}
+
+.action-menu button span {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .action-menu button:active {

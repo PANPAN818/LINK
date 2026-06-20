@@ -82,6 +82,7 @@ const quoteContent = computed(() => {
   if (props.quote?.image) return `[图片] ${props.quote.image.description}`;
   if (props.quote?.voice) return `[语音] ${props.quote.voice.transcript}`;
   if (props.quote?.location) return `[定位] ${props.quote.location.name}`;
+  if (props.quote?.transfer) return `[转账] ¥${props.quote.transfer.amount}`;
   return props.quote?.content ?? '';
 });
 
