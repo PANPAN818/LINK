@@ -399,6 +399,15 @@ a {
     font-size: var(--ios-control-font-size) !important;
   }
 
+  @supports (-webkit-touch-callout: none) {
+    @media (hover: none) and (pointer: coarse) {
+      #app .mobile-shell .screen :is(input:not([type='button']):not([type='checkbox']):not([type='color']):not([type='file']):not([type='hidden']):not([type='image']):not([type='radio']):not([type='range']):not([type='reset']):not([type='submit']), textarea, select),
+      #app .modal-panel .modal-body :is(input:not([type='button']):not([type='checkbox']):not([type='color']):not([type='file']):not([type='hidden']):not([type='image']):not([type='radio']):not([type='range']):not([type='reset']):not([type='submit']), textarea, select) {
+        font-size: var(--ios-control-font-size) !important;
+      }
+    }
+  }
+
   #app .mobile-shell :is(.top-bar, .chat-header) .icon-button svg {
     width: var(--top-icon-size);
     height: var(--top-icon-size);
