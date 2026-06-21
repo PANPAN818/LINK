@@ -345,6 +345,26 @@ async function createApiErrorMessage(response: Response, title: string) {
   ].filter(Boolean).join('\n\n');
 }
 
+async function readJsonPayload(response: Response, title: string) {
+  const responseClone = response.clone();
+  try {
+    return await response.json();
+  } catch (error) {
+    let details = '';
+    try {
+      details = formatApiErrorPayload(await responseClone.text());
+    } catch {
+      details = error instanceof Error ? error.message : String(error);
+    }
+
+    const status = formatHttpStatus(response);
+    throw new Error([
+      `${title}：${status || '返回内容不是 JSON'}`,
+      details ? `后台日志：\n${details}` : '请确认当前服务端实际挂载了同源代理，而不是把代理路径回退到了前端页面。'
+    ].filter(Boolean).join('\n\n'));
+  }
+}
+
 function createNetworkErrorMessage(error: unknown, title: string, endpoint: string, hint = '浏览器直连 OpenAI 兼容图片网关可能会被 CORS 或网络策略拦截。本地开发会通过同源代理请求；如果仍失败，请确认网关可访问、支持图片生成路径，并且 API Key 与模型可用。') {
   const message = error instanceof Error ? error.message : String(error);
   return [
@@ -354,12 +374,44 @@ function createNetworkErrorMessage(error: unknown, title: string, endpoint: stri
   ].join('\n\n');
 }
 
+function isLocalProxyHostname(hostname: string) {
+  const normalized = hostname.trim().toLowerCase();
+  return normalized === 'localhost'
+    || normalized.endsWith('.localhost')
+    || normalized === '127.0.0.1'
+    || normalized === '0.0.0.0'
+    || normalized === '::1'
+    || normalized === '[::1]'
+    || /^10\./.test(normalized)
+    || /^192\.168\./.test(normalized)
+    || /^172\.(1[6-9]|2\d|3[01])\./.test(normalized)
+    || /^169\.254\./.test(normalized);
+}
+
+function canUseLocalTextProxy() {
+  if (import.meta.env.DEV) return true;
+  if (typeof window === 'undefined') return false;
+  if (!['http:', 'https:'].includes(window.location.protocol)) return false;
+  return isLocalProxyHostname(window.location.hostname);
+}
+
 function createTextRequestEndpoint(endpoint: string) {
   const trimmed = endpoint.trim();
-  if (import.meta.env.DEV && /^https?:\/\//i.test(trimmed)) {
+  if (canUseLocalTextProxy() && /^https?:\/\//i.test(trimmed)) {
     return `/__text-proxy?url=${encodeURIComponent(trimmed)}`;
   }
   return trimmed;
+}
+
+function createTextNetworkErrorMessage(error: unknown, endpoint: string, requestEndpoint: string) {
+  return createNetworkErrorMessage(
+    error,
+    '文本模型网络请求失败',
+    endpoint,
+    requestEndpoint.startsWith('/__text-proxy')
+      ? '本地同源文本代理没有响应。请确认正在通过 npm run dev 或 npm run preview 访问应用；如果仍失败，请检查本机网络、代理节点、网关地址、API Key 与模型是否可用。'
+      : '当前运行环境没有可用的同源文本代理，浏览器直连 OpenAI 兼容聊天网关可能会被 CORS 或网络策略拦截。请使用 npm run dev / npm run preview，或换用支持浏览器跨域的网关。'
+  );
 }
 
 function createNovelAiRequestEndpoint(endpoint: string) {
@@ -1330,12 +1382,7 @@ async function callTextApi(settings: AppSettings | undefined, prompt: string, mo
       })
     });
   } catch (error) {
-    throw new Error(createNetworkErrorMessage(
-      error,
-      '文本模型网络请求失败',
-      resolved.endpoint,
-      '浏览器直连 OpenAI 兼容聊天网关可能会被 CORS 或网络策略拦截。本地开发会通过同源代理请求；如果仍失败，请确认网关可访问、支持聊天补全路径，并且 API Key 与模型可用。'
-    ));
+    throw new Error(createTextNetworkErrorMessage(error, resolved.endpoint, requestEndpoint));
   }
 
   if (!response.ok) {
@@ -1345,26 +1392,42 @@ async function callTextApi(settings: AppSettings | undefined, prompt: string, mo
     throw new Error(await createApiErrorMessage(response, '文本模型 API 请求失败'));
   }
 
-  const data = await response.json();
+  const data = await readJsonPayload(response, '文本模型 API 返回异常');
   return String(data.choices?.[0]?.message?.content ?? data.choices?.[0]?.text ?? data.content ?? '').trim();
 }
 
 export async function fetchVendorModels(vendor: Pick<ApiVendor, 'apiUrl' | 'apiKey'>): Promise<string[]> {
   const modelsEndpoint = `${vendor.apiUrl.trim().replace(/\/+$/, '')}/models`;
   if (!vendor.apiUrl.trim()) return [];
+  const requestEndpoint = createTextRequestEndpoint(modelsEndpoint);
 
-  const response = await fetch(modelsEndpoint, {
-    headers: {
-      'Content-Type': 'application/json',
-      ...(vendor.apiKey ? { Authorization: `Bearer ${vendor.apiKey}` } : {})
-    }
-  });
+  let response: Response;
+  try {
+    response = await fetch(requestEndpoint, {
+      headers: {
+        Accept: 'application/json',
+        ...(vendor.apiKey ? { Authorization: `Bearer ${vendor.apiKey}` } : {})
+      }
+    });
+  } catch (error) {
+    throw new Error(createNetworkErrorMessage(
+      error,
+      '模型列表网络请求失败',
+      modelsEndpoint,
+      requestEndpoint.startsWith('/__text-proxy')
+        ? '本地同源文本代理没有响应。请确认正在通过 npm run dev 或 npm run preview 访问应用，并检查网关 /models 路径是否可达。'
+        : '当前运行环境没有可用的同源文本代理，浏览器直连模型列表接口可能会被 CORS 或网络策略拦截。'
+    ));
+  }
 
   if (!response.ok) {
+    if (requestEndpoint.startsWith('/__text-proxy') && response.status === 502) {
+      throw new Error(await createApiErrorMessage(response, '本地文本模型代理请求失败'));
+    }
     throw new Error(await createApiErrorMessage(response, '模型列表 API 请求失败'));
   }
 
-  const data = await response.json();
+  const data = await readJsonPayload(response, '模型列表 API 返回异常');
   const list: Array<Record<string, unknown>> = Array.isArray(data.data)
     ? data.data
     : Array.isArray(data.models)
@@ -1977,8 +2040,9 @@ export async function generateEmbeddingVector(input: {
   if (!resolved.endpoint.trim() || !resolved.model.trim() || !input.text.trim()) return [];
 
   const embeddingsEndpoint = resolved.endpoint.replace(/\/chat\/completions\/?$/i, '/embeddings');
+  const requestEndpoint = createTextRequestEndpoint(embeddingsEndpoint);
   try {
-    const response = await fetch(embeddingsEndpoint, {
+    const response = await fetch(requestEndpoint, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

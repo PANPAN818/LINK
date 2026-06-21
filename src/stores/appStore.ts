@@ -2301,7 +2301,9 @@ export const useAppStore = defineStore('app', () => {
     const chatSettings = settingsForConversation(conversationId);
     const modelOverride = getConversationTextModelOverride(chatSettings, conversation.activeMode);
     if (!hasConfiguredTextModel(modelOverride)) {
-      showConfigAlert('请先在设置或聊天菜单里配置可用的线上/线下聊天 API 模型，再让角色回复。', '需要配置 API 模型');
+      if (!options?.proactive) {
+        showConfigAlert('请先在设置或聊天菜单里配置可用的线上/线下聊天 API 模型，再让角色回复。', '需要配置 API 模型');
+      }
       return;
     }
 
@@ -2679,7 +2681,11 @@ export const useAppStore = defineStore('app', () => {
         await createMomentFromConversation(conversationId);
       }
     } catch (error) {
-      showConfigAlert(error instanceof Error ? error.message : 'AI 回复失败，请检查 API 模型配置。', '回复异常');
+      if (options?.proactive) {
+        console.error(error);
+      } else {
+        showConfigAlert(error instanceof Error ? error.message : 'AI 回复失败，请检查 API 模型配置。', '回复异常');
+      }
     } finally {
       finishConversationReply(conversationId);
     }

@@ -48,6 +48,71 @@ function createProxyErrorPayload(message: string, code = 'proxy_request_failed')
   };
 }
 
+type LinkProxyHandler = (request: IncomingMessage, response: ServerResponse) => void | Promise<void>;
+
+interface LinkProxyMiddlewares {
+  use(path: string, handler: LinkProxyHandler): void;
+}
+
+function registerTextProxyMiddleware(middlewares: LinkProxyMiddlewares) {
+  middlewares.use(textProxyPath, async (request, response) => {
+    if (request.method === 'OPTIONS') {
+      response.statusCode = 204;
+      response.end();
+      return;
+    }
+
+    const method = (request.method ?? 'GET').toUpperCase();
+    if (!['GET', 'POST'].includes(method)) {
+      sendProxyError(response, 405, 'Text proxy only supports GET and POST requests.');
+      return;
+    }
+
+    const requestUrl = new URL(request.url ?? '', 'http://localhost');
+    const target = requestUrl.searchParams.get('url')?.trim() ?? '';
+
+    let targetUrl: URL;
+    try {
+      targetUrl = new URL(target);
+    } catch {
+      sendProxyError(response, 400, 'Text proxy target URL is invalid.');
+      return;
+    }
+
+    if (!['http:', 'https:'].includes(targetUrl.protocol)) {
+      sendProxyError(response, 400, 'Text proxy target URL must use http or https.');
+      return;
+    }
+
+    try {
+      const headers = new Headers();
+      const contentType = getForwardHeader(request, 'content-type');
+      const authorization = getForwardHeader(request, 'authorization');
+      const accept = getForwardHeader(request, 'accept');
+      if (contentType && method !== 'GET') headers.set('Content-Type', contentType);
+      if (authorization) headers.set('Authorization', authorization);
+      if (accept) headers.set('Accept', accept);
+
+      const upstreamResponse = await fetch(targetUrl, {
+        method,
+        headers,
+        ...(method === 'POST' ? { body: await readRequestBody(request) } : {})
+      });
+
+      response.statusCode = upstreamResponse.status;
+      response.statusMessage = upstreamResponse.statusText;
+      response.setHeader('X-Link-Proxy-Target-Host', targetUrl.host);
+      const upstreamContentType = upstreamResponse.headers.get('content-type');
+      if (upstreamContentType) response.setHeader('Content-Type', upstreamContentType);
+      response.end(Buffer.from(await upstreamResponse.arrayBuffer()));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      response.setHeader('X-Link-Proxy-Error', 'upstream_unreachable');
+      sendProxyError(response, 502, `OpenAI-compatible text proxy request failed: ${message}`);
+    }
+  });
+}
+
 export default defineConfig({
   base,
   server: {
@@ -65,60 +130,11 @@ export default defineConfig({
   plugins: [
     {
       name: 'link-openai-compatible-dev-proxy',
+      configurePreviewServer(server) {
+        registerTextProxyMiddleware(server.middlewares);
+      },
       configureServer(server) {
-        server.middlewares.use(textProxyPath, async (request, response) => {
-          if (request.method === 'OPTIONS') {
-            response.statusCode = 204;
-            response.end();
-            return;
-          }
-
-          if (request.method !== 'POST') {
-            sendProxyError(response, 405, 'Text proxy only supports POST requests.');
-            return;
-          }
-
-          const requestUrl = new URL(request.url ?? '', 'http://localhost');
-          const target = requestUrl.searchParams.get('url')?.trim() ?? '';
-
-          let targetUrl: URL;
-          try {
-            targetUrl = new URL(target);
-          } catch {
-            sendProxyError(response, 400, 'Text proxy target URL is invalid.');
-            return;
-          }
-
-          if (!['http:', 'https:'].includes(targetUrl.protocol)) {
-            sendProxyError(response, 400, 'Text proxy target URL must use http or https.');
-            return;
-          }
-
-          try {
-            const headers = new Headers();
-            const contentType = getForwardHeader(request, 'content-type');
-            const authorization = getForwardHeader(request, 'authorization');
-            const accept = getForwardHeader(request, 'accept');
-            if (contentType) headers.set('Content-Type', contentType);
-            if (authorization) headers.set('Authorization', authorization);
-            if (accept) headers.set('Accept', accept);
-
-            const upstreamResponse = await fetch(targetUrl, {
-              method: 'POST',
-              headers,
-              body: await readRequestBody(request)
-            });
-
-            response.statusCode = upstreamResponse.status;
-            response.statusMessage = upstreamResponse.statusText;
-            const upstreamContentType = upstreamResponse.headers.get('content-type');
-            if (upstreamContentType) response.setHeader('Content-Type', upstreamContentType);
-            response.end(Buffer.from(await upstreamResponse.arrayBuffer()));
-          } catch (error) {
-            const message = error instanceof Error ? error.message : String(error);
-            sendProxyError(response, 502, `OpenAI-compatible text proxy request failed: ${message}`);
-          }
-        });
+        registerTextProxyMiddleware(server.middlewares);
 
         server.middlewares.use(imageProxyPath, async (request, response) => {
           if (request.method === 'OPTIONS') {
