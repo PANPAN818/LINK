@@ -22,7 +22,7 @@
         </button>
       </nav>
 
-      <div class="target-row" :class="{ 'has-file': activeTab !== 'url' }">
+      <div class="target-row" :class="{ 'has-file': activeTab === 'file' }">
         <label class="field">
           <span>导入到分组</span>
           <select :value="selectedGroupId" @change="emit('update:selectedGroupId', ($event.target as HTMLSelectElement).value)">
@@ -30,14 +30,28 @@
           </select>
         </label>
 
-        <section v-if="activeTab !== 'url'" class="file-card">
-          <span class="field-label">{{ fileLabelMap[activeTab] }}</span>
+        <section v-if="activeTab === 'file'" class="file-card">
+          <span class="field-label">上传文件</span>
           <label class="file-button">
             选择文件
-            <input :accept="acceptMap[activeTab]" multiple type="file" @change="emitFiles" />
+            <input :accept="fileAccept" multiple type="file" @change="emitFiles" />
           </label>
         </section>
       </div>
+
+      <section class="create-group-card">
+        <span class="field-label">添加分组</span>
+        <div class="create-group-row">
+          <input
+            :value="newGroupName"
+            aria-label="新分组名称"
+            placeholder="新分组名称"
+            @input="emit('update:newGroupName', ($event.target as HTMLInputElement).value)"
+            @keydown.enter.prevent="newGroupName.trim() && emit('create-group')"
+          />
+          <button class="mini-button" type="button" :disabled="!newGroupName.trim()" @click="emit('create-group')">添加</button>
+        </div>
+      </section>
 
       <label v-if="activeTab === 'url'" class="field grow">
         <span>URL 内容</span>
@@ -68,7 +82,7 @@
 import AppModal from '@/components/common/AppModal.vue';
 import type { StickerGroup } from '@/types/domain';
 
-export type StickerImportTab = 'url' | 'txt' | 'doc' | 'json' | 'local';
+export type StickerImportTab = 'url' | 'file';
 
 const props = defineProps<{
   modelValue: boolean;
@@ -77,6 +91,7 @@ const props = defineProps<{
   selectedGroupId: string;
   textValue: string;
   selectedFiles: File[];
+  newGroupName: string;
   feedback: string;
   disabled: boolean;
 }>();
@@ -87,46 +102,27 @@ const emit = defineEmits<{
   'update:selectedGroupId': [groupId: string];
   'update:textValue': [value: string];
   'update:selectedFiles': [files: File[]];
+  'update:newGroupName': [value: string];
+  'create-group': [];
   submit: [];
 }>();
 
 const tabs: Array<{ id: StickerImportTab; label: string }> = [
   { id: 'url', label: 'URL 导入' },
-  { id: 'txt', label: 'TXT 导入' },
-  { id: 'doc', label: 'DOC 导入' },
-  { id: 'json', label: 'JSON 导入' },
-  { id: 'local', label: '本地导入' }
+  { id: 'file', label: '文件导入' }
 ];
 
 const modeLabelMap: Record<StickerImportTab, string> = {
   url: '链接文本',
-  txt: '文本文档',
-  doc: 'Word 文档',
-  json: 'JSON 文件',
-  local: '本地图片'
+  file: '文件文本'
 };
 
 const helperMap: Record<StickerImportTab, string> = {
   url: '支持逐行或连续粘贴，描述和图片链接之间可用中文/英文分号、空格或多空格分隔。',
-  txt: 'TXT 中可写连续多条“描述 + 图片链接”，支持分号、空格、多空格和 JSON 列表。',
-  doc: '支持 .doc / .docx，文档中含图片链接、连续多条文本或 JSON 结构即可识别。',
-  json: '支持 JSON 数组、对象映射，字段可用 description/name/text 与 imageUrl/url/src/image。',
-  local: '本地图片会用文件名作为默认文字描述，导入后仍可继续修改。'
+  file: '支持 TXT、DOC、DOCX、JSON 与本地图片；文本类文件可包含连续多条“描述 + 图片链接”或 JSON。'
 };
 
-const fileLabelMap: Record<Exclude<StickerImportTab, 'url'>, string> = {
-  txt: '上传 TXT 文件',
-  doc: '上传 DOC / DOCX 文件',
-  json: '上传 JSON 文件',
-  local: '上传图片文件'
-};
-
-const acceptMap: Record<Exclude<StickerImportTab, 'url'>, string> = {
-  txt: '.txt,text/plain',
-  doc: '.doc,.docx,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  json: '.json,application/json',
-  local: 'image/*'
-};
+const fileAccept = 'image/*,.txt,.json,.doc,.docx,text/plain,application/json,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 
 function emitFiles(event: Event) {
   const input = event.target as HTMLInputElement;
@@ -177,13 +173,13 @@ function emitFiles(event: Event) {
 }
 
 .tab-row {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 6px;
 }
 
 .tab-pill {
-  flex: 0 0 auto;
+  width: 100%;
   min-height: 32px;
   padding: 0 12px;
   border-radius: 999px;
@@ -214,6 +210,7 @@ function emitFiles(event: Event) {
 
 .field,
 .file-card,
+.create-group-card,
 .file-list {
   display: grid;
   gap: 6px;
@@ -230,11 +227,22 @@ function emitFiles(event: Event) {
 }
 
 .field select,
-.field textarea {
+.field textarea,
+.create-group-row input {
   border-radius: 12px;
   background: rgba(242, 243, 246, 0.96);
   color: #251f26;
   padding: 10px 12px;
+}
+
+.create-group-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 72px;
+  gap: 8px;
+}
+
+.create-group-row > * {
+  min-width: 0;
 }
 
 .field textarea {
@@ -261,6 +269,7 @@ function emitFiles(event: Event) {
 }
 
 .file-button,
+.mini-button,
 .secondary-ghost,
 .save-button {
   display: inline-flex;
@@ -278,6 +287,15 @@ function emitFiles(event: Event) {
   width: 100%;
   background: rgba(17, 17, 17, 0.08);
   color: #171319;
+}
+
+.mini-button {
+  background: #111111;
+  color: #ffffff;
+}
+
+.mini-button:disabled {
+  opacity: 0.4;
 }
 
 .file-button input {

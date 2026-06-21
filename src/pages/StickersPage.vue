@@ -9,7 +9,7 @@
         <button class="stickers-action-button" type="button" aria-label="导入 Stickers" @click="openImportModal">
           <Plus :size="20" stroke-width="2.4" />
         </button>
-        <button class="stickers-action-button" type="button" aria-label="管理 Stickers" @click="openManagePage">
+        <button class="stickers-action-button" :class="{ active: manageMode }" type="button" :aria-label="manageMode ? '退出管理 Stickers' : '管理 Stickers'" @click="toggleManageMode">
           <PencilLine :size="19" stroke-width="2.3" />
         </button>
       </div>
@@ -17,7 +17,13 @@
 
     <main class="stickers-main">
       <section v-if="store.ready" class="stickers-panel">
-        <StickerLibraryPanel v-model:activeGroupId="activeGroupId" :show-close="false" :show-toolbar-actions="false" :allow-sticker-editing="false" />
+        <StickerLibraryPanel
+          v-model:activeGroupId="activeGroupId"
+          :show-close="false"
+          :show-toolbar-actions="false"
+          :allow-sticker-editing="manageMode"
+          :management-mode="manageMode"
+        />
       </section>
       <section v-else class="loading-card">
         <p>正在整理贴纸抽屉...</p>
@@ -31,12 +37,15 @@
       :selected-group-id="importTargetGroupId"
       :text-value="importText"
       :selected-files="selectedFiles"
+      :new-group-name="importNewGroupName"
       :feedback="importFeedback"
       :disabled="importDisabled"
       @update:active-tab="handleImportTabChange"
       @update:selected-group-id="importTargetGroupId = $event"
       @update:text-value="importText = $event"
       @update:selected-files="selectedFiles = $event"
+      @update:new-group-name="importNewGroupName = $event"
+      @create-group="createImportGroup"
       @submit="submitImport"
     />
   </section>
@@ -50,16 +59,18 @@ import StickerImportModal, { type StickerImportTab } from '@/components/stickers
 import StickerLibraryPanel from '@/components/stickers/StickerLibraryPanel.vue';
 import { useAppStore } from '@/stores/appStore';
 import type { StickerSourceType } from '@/types/domain';
-import { parseStickerImportText, readImageFileAsSticker, readStickerImportFile, type StickerImportDraft } from '@/utils/stickers';
+import { RECENT_STICKER_GROUP_ID, parseStickerImportText, readImageFileAsSticker, readStickerImportFile, type StickerImportDraft } from '@/utils/stickers';
 
 const router = useRouter();
 const store = useAppStore();
-const activeGroupId = ref('');
+const activeGroupId = ref(RECENT_STICKER_GROUP_ID);
+const manageMode = ref(false);
 const showImportModal = ref(false);
 const importTab = ref<StickerImportTab>('url');
 const importTargetGroupId = ref('');
 const importText = ref('');
 const selectedFiles = ref<File[]>([]);
+const importNewGroupName = ref('');
 const importFeedback = ref('');
 const importing = ref(false);
 
@@ -76,7 +87,7 @@ onMounted(() => {
 watch(
   groups,
   (nextGroups) => {
-    if (!nextGroups.some((group) => group.id === activeGroupId.value)) activeGroupId.value = nextGroups[0]?.id ?? '';
+    if (activeGroupId.value !== RECENT_STICKER_GROUP_ID && !nextGroups.some((group) => group.id === activeGroupId.value)) activeGroupId.value = RECENT_STICKER_GROUP_ID;
     const defaultGroupId = pickDefaultGroupId(nextGroups);
     if (!nextGroups.some((group) => group.id === importTargetGroupId.value)) importTargetGroupId.value = defaultGroupId;
   },
@@ -84,13 +95,14 @@ watch(
 );
 
 function pickDefaultGroupId(sourceGroups = groups.value) {
-  if (sourceGroups.some((group) => group.id === activeGroupId.value)) return activeGroupId.value;
+  if (activeGroupId.value !== RECENT_STICKER_GROUP_ID && sourceGroups.some((group) => group.id === activeGroupId.value)) return activeGroupId.value;
   return sourceGroups[0]?.id ?? '';
 }
 
 function resetImportState() {
   importText.value = '';
   selectedFiles.value = [];
+  importNewGroupName.value = '';
   importFeedback.value = '';
   importTargetGroupId.value = pickDefaultGroupId();
 }
@@ -101,10 +113,9 @@ function openImportModal() {
   showImportModal.value = true;
 }
 
-function openManagePage() {
+function toggleManageMode() {
   showImportModal.value = false;
-  const query = activeGroupId.value ? { group: activeGroupId.value } : undefined;
-  void router.push({ name: 'stickers-manage', query });
+  manageMode.value = !manageMode.value;
 }
 
 function goBack() {
@@ -122,11 +133,11 @@ function handleImportTabChange(tab: StickerImportTab) {
   selectedFiles.value = [];
 }
 
-function importSourceTypeForTab(tab: StickerImportTab): StickerSourceType {
-  if (tab === 'txt') return 'text-file';
-  if (tab === 'doc') return 'doc-file';
-  if (tab === 'json') return 'json-file';
-  if (tab === 'local') return 'local-image';
+function importSourceTypeForFile(file: File): StickerSourceType {
+  if (/\.json$/i.test(file.name)) return 'json-file';
+  if (/\.docx?$/i.test(file.name)) return 'doc-file';
+  if (file.type.startsWith('image/')) return 'local-image';
+  if (/\.txt$/i.test(file.name) || file.type === 'text/plain') return 'text-file';
   return 'url';
 }
 
@@ -135,12 +146,12 @@ async function buildImportDrafts() {
 
   const drafts: StickerImportDraft[] = [];
   for (const file of selectedFiles.value) {
-    if (importTab.value === 'local' || file.type.startsWith('image/')) {
+    if (file.type.startsWith('image/')) {
       drafts.push(await readImageFileAsSticker(file));
       continue;
     }
     const text = await readStickerImportFile(file);
-    drafts.push(...parseStickerImportText(text, importSourceTypeForTab(importTab.value)));
+    drafts.push(...parseStickerImportText(text, importSourceTypeForFile(file)));
   }
   return drafts;
 }
@@ -168,6 +179,17 @@ async function submitImport() {
   } finally {
     importing.value = false;
   }
+}
+
+async function createImportGroup() {
+  const name = importNewGroupName.value.trim();
+  if (!name) return;
+  const group = await store.addStickerGroup(name);
+  if (!group) return;
+  importTargetGroupId.value = group.id;
+  activeGroupId.value = group.id;
+  importNewGroupName.value = '';
+  importFeedback.value = `已添加分组“${group.name}”。`;
 }
 
 </script>
@@ -206,6 +228,12 @@ async function submitImport() {
   height: 24px;
   padding: 0;
   color: #111111;
+}
+
+.stickers-action-button.active {
+  border-radius: 8px;
+  background: #111111;
+  color: #ffffff;
 }
 
 .stickers-title-button {

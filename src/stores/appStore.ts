@@ -1,14 +1,14 @@
 import { computed, ref, toRaw } from 'vue';
 import { defineStore } from 'pinia';
 import { deleteEntity, loadSnapshot, putEntity, replaceSnapshot } from '@/data/db';
-import { defaultSettings, defaultStickerGroups } from '@/data/seed';
+import { defaultSettings } from '@/data/seed';
 import type { AppSettings, AppSnapshot, CharacterProfile, ChatImageAttachment, ChatImageCandidate, ChatLocationAttachment, ChatMessage, ChatMessageQuote, ChatMode, ChatModelScope, ChatTransferAttachment, ChatTransferStatus, ChatVoiceAttachment, Conversation, ConversationMemoryRecord, ConversationSettings, GeneratedImageRecord, ImageModuleId, Sticker, StickerGroup, UserProfile, VisualProfile, VoomComment, VoomFrequency, VoomImageCandidate, VoomPost, VoomPostVisibility, WorldBookEntry } from '@/types/domain';
 import { createAccountId, createId } from '@/utils/id';
 import { getCharacterVoomAuthorName, normalizeCharacterMindStateLines, normalizeCharacterProfile } from '@/utils/character';
 import { normalizeUserProfile, normalizeVisualProfile } from '@/utils/profile';
 import { getImageGenerationSize, getImagePromptPresetForProvider, getSelectedImageModelOption, mergeVendorModels, normalizeAppSettings } from '@/utils/settings';
 import { normalizeWorldBookEntry, normalizeWorldBooks } from '@/utils/worldBook';
-import { createStickerFromDraft, createStickerGroup, localizeStickerImageUrl, localizeStickerImportDrafts, normalizeSticker, normalizeStickerGroup, shouldLocalizeStickerImageUrl, type StickerImportDraft } from '@/utils/stickers';
+import { RECENT_STICKER_GROUP_NAME, createStickerFromDraft, createStickerGroup, isLegacyGanadiSticker, isLegacyGanadiStickerGroup, isRecentStickerGroupId, localizeStickerImageUrl, localizeStickerImportDrafts, normalizeSticker, normalizeStickerGroup, shouldLocalizeStickerImageUrl, sortRecentStickers, type StickerImportDraft } from '@/utils/stickers';
 import { ageMemoryKind, createMemoryRecord, getConversationFloorCount, getHiddenMessageIds, getMemoryContext, getMessageFloorMap, getMessagesInFloorRange, getNextSummaryRange, getVisibleMessages, normalizeConversationSettings, renderCharacterMemoryPrompt, shouldCompressMemory } from '@/utils/memory';
 import { formatContentWithChineseTranslation, normalizeTranslationText } from '@/utils/translation';
 import { estimateRoleplayReplyInputTokens, fetchVendorModels, generateConversationSummary, generateEmbeddingVector, generateImageByProvider, generateRoleplayReply, generateUserVoomComments, generateVoomCommentReplies, generateVoomPost, hasTextGenerationConfig, shouldAutoGenerateMoment, type RoleplayReplyResult, type RoleplayReplySegment } from '@/services/ai';
@@ -101,8 +101,15 @@ export const useAppStore = defineStore('app', () => {
   });
   const sortedConversations = computed(() => [...conversationsForActiveUser.value].sort((a, b) => b.updatedAt - a.updatedAt));
   const sortedVoomPosts = computed(() => [...voomPosts.value].sort((a, b) => b.createdAt - a.createdAt));
-  const sortedStickerGroups = computed(() => [...stickerGroups.value].sort((a, b) => a.createdAt - b.createdAt));
+  const sortedStickerGroups = computed(() => [...stickerGroups.value].sort((a, b) => {
+    const orderDiff = (a.sortOrder ?? a.createdAt) - (b.sortOrder ?? b.createdAt);
+    if (orderDiff) return orderDiff;
+    const createdDiff = a.createdAt - b.createdAt;
+    if (createdDiff) return createdDiff;
+    return a.id.localeCompare(b.id);
+  }));
   const sortedStickers = computed(() => [...stickers.value].sort((a, b) => b.updatedAt - a.updatedAt));
+  const recentStickers = computed(() => sortRecentStickers(stickers.value));
   const unreadConversationCount = computed(() => conversationsForActiveUser.value.reduce((total, conversation) => total + conversation.unreadCount, 0));
   const accounts = computed(() => users.value);
 
@@ -130,22 +137,46 @@ export const useAppStore = defineStore('app', () => {
     return { dedupedGroups, dedupedStickers, removedGroupIds: [...removedIdToKeptId.keys()] };
   }
 
+  function normalizeStickerLibrary(rawGroups: StickerGroup[], rawStickers: Sticker[]) {
+    const removedGroupIds = new Set<string>();
+    const removedStickerIds = new Set<string>();
+    const normalizedGroups = rawGroups
+      .map((entry) => normalizeStickerGroup(entry))
+      .filter((entry): entry is StickerGroup => Boolean(entry))
+      .filter((entry) => {
+        if (isRecentStickerGroupId(entry.id) || isLegacyGanadiStickerGroup(entry)) {
+          removedGroupIds.add(entry.id);
+          return false;
+        }
+        return true;
+      });
+    const fallbackGroupId = normalizedGroups[0]?.id ?? '';
+    const normalizedStickers = rawStickers
+      .map((entry) => normalizeSticker(entry, fallbackGroupId))
+      .filter((entry): entry is Sticker => Boolean(entry))
+      .filter((entry) => {
+        if (isLegacyGanadiSticker(entry) || entry.groupIds.some((id) => removedGroupIds.has(id) || isRecentStickerGroupId(id))) {
+          removedStickerIds.add(entry.id);
+          return false;
+        }
+        return true;
+      });
+    const { dedupedGroups, dedupedStickers, removedGroupIds: duplicateGroupIds } = dedupeStickerGroups(normalizedGroups, normalizedStickers);
+    duplicateGroupIds.forEach((id) => removedGroupIds.add(id));
+    return {
+      groups: dedupedGroups,
+      stickers: dedupedStickers,
+      removedGroupIds: [...removedGroupIds],
+      removedStickerIds: [...removedStickerIds]
+    };
+  }
+
   function normalizeSnapshotForRestore(snapshot: AppSnapshot): AppSnapshot {
     const normalizedUsers = snapshot.users.map((entry) => normalizeUserProfile(entry));
     if (!normalizedUsers.length) throw new Error('备份文件里没有用户资料。');
 
     const fallbackUserId = snapshot.settings.activeUserId || normalizedUsers[0].id;
-    const normalizedGroups = snapshot.stickerGroups
-      .map((entry) => normalizeStickerGroup(entry))
-      .filter((entry): entry is StickerGroup => Boolean(entry));
-    if (!normalizedGroups.length) {
-      normalizedGroups.push({ ...defaultStickerGroups[0], createdAt: Date.now(), updatedAt: Date.now() });
-    }
-    const fallbackGroupId = normalizedGroups[0]?.id ?? defaultStickerGroups[0].id;
-    const normalizedStickers = snapshot.stickers
-      .map((entry) => normalizeSticker(entry, fallbackGroupId))
-      .filter((entry): entry is Sticker => Boolean(entry));
-    const { dedupedGroups, dedupedStickers } = dedupeStickerGroups(normalizedGroups, normalizedStickers);
+    const stickerLibrary = normalizeStickerLibrary(snapshot.stickerGroups, snapshot.stickers);
 
     return {
       users: normalizedUsers,
@@ -154,9 +185,12 @@ export const useAppStore = defineStore('app', () => {
       messages: snapshot.messages,
       voomPosts: snapshot.voomPosts,
       worldBooks: normalizeWorldBooks(snapshot.worldBooks),
-      stickerGroups: dedupedGroups,
-      stickers: dedupedStickers,
-      conversationSettings: snapshot.conversationSettings.map((entry) => normalizeConversationSettings(entry, entry.conversationId)),
+      stickerGroups: stickerLibrary.groups,
+      stickers: stickerLibrary.stickers,
+      conversationSettings: snapshot.conversationSettings.map((entry) => normalizeConversationSettings({
+        ...entry,
+        characterStickerGroupIds: entry.characterStickerGroupIds.filter((id) => !isRecentStickerGroupId(id) && !stickerLibrary.removedGroupIds.includes(id))
+      }, entry.conversationId)),
       conversationMemories: dedupeConversationMemories(snapshot.conversationMemories.map((memory) => ({
         ...memory,
         kind: ageMemoryKind(memory.createdAt),
@@ -259,34 +293,20 @@ export const useAppStore = defineStore('app', () => {
     messages.value = snapshot.messages;
     voomPosts.value = snapshot.voomPosts;
     worldBooks.value = snapshot.worldBooks;
-    const normalizedGroups = snapshot.stickerGroups
-      .map((entry) => normalizeStickerGroup(entry))
-      .filter((entry): entry is StickerGroup => Boolean(entry));
-    if (!normalizedGroups.length) {
-      const fallbackGroup = { ...defaultStickerGroups[0], createdAt: Date.now(), updatedAt: Date.now() };
-      normalizedGroups.push(fallbackGroup);
-      await putEntity('stickerGroups', fallbackGroup);
-    }
-    const defaultGroup = normalizedGroups.find((group) => group.id === defaultStickerGroups[0].id);
-    if (defaultGroup && defaultGroup.name !== defaultStickerGroups[0].name) {
-      defaultGroup.name = defaultStickerGroups[0].name;
-      defaultGroup.updatedAt = Date.now();
-      await putEntity('stickerGroups', defaultGroup);
-    }
-    const fallbackGroupId = normalizedGroups[0]?.id ?? '';
-    const normalizedStickers = snapshot.stickers
-      .map((entry) => normalizeSticker(entry, fallbackGroupId))
-      .filter((entry): entry is Sticker => Boolean(entry));
-    const { dedupedGroups, dedupedStickers, removedGroupIds } = dedupeStickerGroups(normalizedGroups, normalizedStickers);
-    stickerGroups.value = dedupedGroups;
-    stickers.value = dedupedStickers;
-    if (removedGroupIds.length) {
+    const stickerLibrary = normalizeStickerLibrary(snapshot.stickerGroups, snapshot.stickers);
+    stickerGroups.value = stickerLibrary.groups;
+    stickers.value = stickerLibrary.stickers;
+    if (stickerLibrary.removedGroupIds.length || stickerLibrary.removedStickerIds.length) {
       await Promise.all([
-        ...removedGroupIds.map((groupId) => deleteEntity('stickerGroups', groupId)),
-        ...dedupedStickers.map((sticker) => putEntity('stickers', sticker))
+        ...stickerLibrary.removedGroupIds.map((groupId) => deleteEntity('stickerGroups', groupId)),
+        ...stickerLibrary.removedStickerIds.map((stickerId) => deleteEntity('stickers', stickerId)),
+        ...stickerLibrary.stickers.map((sticker) => putEntity('stickers', sticker))
       ]);
     }
-    conversationSettings.value = snapshot.conversationSettings.map((entry) => normalizeConversationSettings(entry, entry.conversationId));
+    conversationSettings.value = snapshot.conversationSettings.map((entry) => normalizeConversationSettings({
+      ...entry,
+      characterStickerGroupIds: entry.characterStickerGroupIds.filter((id) => !isRecentStickerGroupId(id) && !stickerLibrary.removedGroupIds.includes(id))
+    }, entry.conversationId));
     conversationMemories.value = await removeDuplicateConversationMemories(snapshot.conversationMemories.map((memory) => ({
       ...memory,
       kind: ageMemoryKind(memory.createdAt),
@@ -367,12 +387,13 @@ export const useAppStore = defineStore('app', () => {
   }
 
   function stickersForGroup(groupId: string) {
+    if (isRecentStickerGroupId(groupId)) return recentStickers.value;
     if (!groupId || groupId === 'all') return sortedStickers.value;
     return sortedStickers.value.filter((sticker) => sticker.groupIds[0] === groupId);
   }
 
   function stickersForGroups(groupIds: string[]) {
-    const groupIdSet = new Set(groupIds.map((id) => id.trim()).filter(Boolean));
+    const groupIdSet = new Set(groupIds.map((id) => id.trim()).filter((id) => Boolean(id) && !isRecentStickerGroupId(id)));
     if (!groupIdSet.size) return [];
     return sortedStickers.value.filter((sticker) => groupIdSet.has(sticker.groupIds[0] ?? ''));
   }
@@ -1079,8 +1100,16 @@ export const useAppStore = defineStore('app', () => {
   }
 
   async function saveStickerGroup(nextGroup: StickerGroup) {
+    if (isRecentStickerGroupId(nextGroup.id)) {
+      showConfigAlert('“最近”是固定分组，不能更改。', '无法保存分组');
+      return;
+    }
     const normalizedGroup = normalizeStickerGroup({ ...nextGroup, updatedAt: Date.now() });
     if (!normalizedGroup) return;
+    if (normalizedGroup.name.trim() === RECENT_STICKER_GROUP_NAME) {
+      showConfigAlert('“最近”是固定分组名，请换一个名称。', '无法保存分组');
+      return;
+    }
     const index = stickerGroups.value.findIndex((group) => group.id === normalizedGroup.id);
     if (index >= 0) stickerGroups.value[index] = normalizedGroup;
     else stickerGroups.value.push(normalizedGroup);
@@ -1088,6 +1117,10 @@ export const useAppStore = defineStore('app', () => {
   }
 
   async function addStickerGroup(name: string) {
+    if (name.trim() === RECENT_STICKER_GROUP_NAME) {
+      showConfigAlert('“最近”是固定分组名，请换一个名称。', '无法创建分组');
+      return;
+    }
     const group = createStickerGroup(name);
     stickerGroups.value.push(group);
     await putEntity('stickerGroups', group);
@@ -1095,8 +1128,8 @@ export const useAppStore = defineStore('app', () => {
   }
 
   async function deleteStickerGroup(groupId: string) {
-    if (stickerGroups.value.length <= 1) {
-      showConfigAlert('至少需要保留一个 Stickers 分组。', '无法删除分组');
+    if (isRecentStickerGroupId(groupId)) {
+      showConfigAlert('“最近”是固定分组，不能删除。', '无法删除分组');
       return false;
     }
     const deletingGroup = stickerGroups.value.find((group) => group.id === groupId);
@@ -1122,12 +1155,33 @@ export const useAppStore = defineStore('app', () => {
     return true;
   }
 
+  async function moveStickerGroup(groupId: string, direction: 'up' | 'down') {
+    const orderedGroups = [...sortedStickerGroups.value];
+    const currentIndex = orderedGroups.findIndex((group) => group.id === groupId);
+    const targetIndex = direction === 'up' ? currentIndex - 1 : currentIndex + 1;
+    if (currentIndex < 0 || targetIndex < 0 || targetIndex >= orderedGroups.length) return false;
+
+    const reorderedGroups = [...orderedGroups];
+    [reorderedGroups[currentIndex], reorderedGroups[targetIndex]] = [reorderedGroups[targetIndex], reorderedGroups[currentIndex]];
+    const now = Date.now();
+    const updates = reorderedGroups.map((group, index) => ({
+      ...group,
+      sortOrder: (index + 1) * 1000,
+      updatedAt: group.id === groupId || group.id === orderedGroups[targetIndex].id ? now : group.updatedAt
+    } satisfies StickerGroup));
+    const updateMap = new Map(updates.map((group) => [group.id, group]));
+    stickerGroups.value = stickerGroups.value.map((group) => updateMap.get(group.id) ?? group);
+    await Promise.all(updates.map((group) => putEntity('stickerGroups', group)));
+    return true;
+  }
+
   async function saveSticker(nextSticker: Sticker) {
     const fallbackGroupId = stickerGroups.value[0]?.id ?? '';
+    const groupIds = nextSticker.groupIds.filter((id) => !isRecentStickerGroupId(id));
     const imageUrl = shouldLocalizeStickerImageUrl(nextSticker.imageUrl)
       ? await localizeStickerImageUrl(nextSticker.imageUrl)
       : nextSticker.imageUrl;
-    const normalizedSticker = normalizeSticker({ ...nextSticker, imageUrl, updatedAt: Date.now() }, fallbackGroupId);
+    const normalizedSticker = normalizeSticker({ ...nextSticker, imageUrl, groupIds, updatedAt: Date.now() }, fallbackGroupId);
     if (!normalizedSticker) return;
     const index = stickers.value.findIndex((sticker) => sticker.id === normalizedSticker.id);
     if (index >= 0) stickers.value[index] = normalizedSticker;
@@ -1137,7 +1191,9 @@ export const useAppStore = defineStore('app', () => {
 
   async function importStickers(drafts: StickerImportDraft[], groupIds: string[]) {
     const fallbackGroupId = stickerGroups.value[0]?.id ?? '';
-    const targetGroupIds = [...new Set((groupIds.length ? groupIds : [fallbackGroupId]).filter(Boolean))];
+    const existingGroupIds = new Set(stickerGroups.value.map((group) => group.id));
+    const targetGroupIds = [...new Set((groupIds.length ? groupIds : [fallbackGroupId]).filter((id) => Boolean(id) && !isRecentStickerGroupId(id) && existingGroupIds.has(id)))];
+    if (!targetGroupIds.length) return [];
     const localizedDrafts = await localizeStickerImportDrafts(drafts);
     const existingKeys = new Set(stickers.value.map((sticker) => `${sticker.description.toLocaleLowerCase()}::${sticker.imageUrl}`));
     const createdStickers = localizedDrafts
@@ -1173,7 +1229,7 @@ export const useAppStore = defineStore('app', () => {
 
   async function moveStickersToGroup(stickerIds: string[], groupId: string) {
     const normalizedGroupId = groupId.trim();
-    if (!normalizedGroupId) return 0;
+    if (!normalizedGroupId || isRecentStickerGroupId(normalizedGroupId)) return 0;
     const targetGroup = stickerGroups.value.find((group) => group.id === normalizedGroupId);
     if (!targetGroup) return 0;
     const idSet = new Set(stickerIds.map((item) => item.trim()).filter(Boolean));
@@ -1825,16 +1881,20 @@ export const useAppStore = defineStore('app', () => {
   async function appendStickerMessage(conversationId: string, sticker: Sticker, quote?: ChatMessageQuote | null) {
     const conversation = conversationById(conversationId);
     if (!conversation) return;
+    const sentAt = Date.now();
     const imageUrl = shouldLocalizeStickerImageUrl(sticker.imageUrl)
       ? await localizeStickerImageUrl(sticker.imageUrl)
       : sticker.imageUrl;
-    const resolvedSticker = imageUrl === sticker.imageUrl ? sticker : { ...sticker, imageUrl, updatedAt: Date.now() };
+    const resolvedSticker = {
+      ...sticker,
+      imageUrl,
+      lastUsedAt: sentAt,
+      updatedAt: imageUrl === sticker.imageUrl ? sticker.updatedAt : sentAt
+    };
 
-    if (resolvedSticker !== sticker) {
-      const stickerIndex = stickers.value.findIndex((item) => item.id === resolvedSticker.id);
-      if (stickerIndex >= 0) stickers.value[stickerIndex] = resolvedSticker;
-      await putEntity('stickers', resolvedSticker);
-    }
+    const stickerIndex = stickers.value.findIndex((item) => item.id === resolvedSticker.id);
+    if (stickerIndex >= 0) stickers.value[stickerIndex] = resolvedSticker;
+    await putEntity('stickers', resolvedSticker);
 
     const userMessage: ChatMessage = {
       id: createId('msg'),
@@ -1848,7 +1908,7 @@ export const useAppStore = defineStore('app', () => {
         imageUrl: resolvedSticker.imageUrl
       },
       quote: cloneMessageQuote(quote),
-      createdAt: Date.now(),
+      createdAt: sentAt,
       status: 'sent'
     };
     messages.value.push(userMessage);
@@ -3458,6 +3518,7 @@ export const useAppStore = defineStore('app', () => {
     stickers,
     sortedStickerGroups,
     sortedStickers,
+    recentStickers,
     conversationSettings,
     conversationMemories,
     generatedImages,
@@ -3497,6 +3558,7 @@ export const useAppStore = defineStore('app', () => {
     saveStickerGroup,
     addStickerGroup,
     deleteStickerGroup,
+    moveStickerGroup,
     saveSticker,
     importStickers,
     deleteSticker,

@@ -3,6 +3,7 @@ import { toRaw } from 'vue';
 import type { AppSettings, AppSnapshot, CharacterProfile, ChatMessage, Conversation, ConversationMemoryRecord, ConversationSettings, GeneratedImageRecord, Sticker, StickerGroup, UserProfile, VoomPost, WorldBookEntry } from '@/types/domain';
 import { normalizeUserProfile } from '@/utils/profile';
 import { normalizeAppSettings } from '@/utils/settings';
+import { isLegacyGanadiSticker, isLegacyGanadiStickerGroup, isRecentStickerGroupId } from '@/utils/stickers';
 import { normalizeWorldBooks } from '@/utils/worldBook';
 import { defaultCharacters, defaultConversations, defaultMessages, defaultSettings, defaultStickerGroups, defaultStickers, defaultUsers, defaultVoomPosts, defaultWorldBooks } from './seed';
 
@@ -107,13 +108,25 @@ async function pruneLegacyDefaultData() {
   const voomStore = tx.objectStore('voomPosts');
   const memoryStore = tx.objectStore('conversationMemories');
   const settingsStore = tx.objectStore('settings');
-  const [users, messages, voomPosts, conversationMemories, settings] = await Promise.all([
+  const stickerGroupStore = tx.objectStore('stickerGroups');
+  const stickerStore = tx.objectStore('stickers');
+  const conversationSettingsStore = tx.objectStore('conversationSettings');
+  const [users, messages, voomPosts, conversationMemories, settings, stickerGroups, stickers, conversationSettings] = await Promise.all([
     userStore.getAll(),
     messageStore.getAll(),
     voomStore.getAll(),
     memoryStore.getAll(),
-    settingsStore.get('main')
+    settingsStore.get('main'),
+    stickerGroupStore.getAll(),
+    stickerStore.getAll(),
+    conversationSettingsStore.getAll()
   ]);
+
+  const removedStickerGroupIds = new Set(
+    stickerGroups
+      .filter((group) => isLegacyGanadiStickerGroup(group) || isRecentStickerGroupId(group.id))
+      .map((group) => group.id)
+  );
 
   users.forEach((user) => {
     if (legacyDefaultUserIds.has(user.id)) {
@@ -142,6 +155,17 @@ async function pruneLegacyDefaultData() {
   conversationMemories
     .filter((memory) => legacyDefaultConversationIds.has(memory.conversationId))
     .forEach((memory) => void memoryStore.delete(memory.id));
+
+  removedStickerGroupIds.forEach((id) => void stickerGroupStore.delete(id));
+  stickers
+    .filter((sticker) => isLegacyGanadiSticker(sticker) || sticker.groupIds.some((id) => removedStickerGroupIds.has(id) || isRecentStickerGroupId(id)))
+    .forEach((sticker) => void stickerStore.delete(sticker.id));
+  conversationSettings.forEach((entry) => {
+    const characterStickerGroupIds = entry.characterStickerGroupIds.filter((id) => !removedStickerGroupIds.has(id) && !isRecentStickerGroupId(id));
+    if (characterStickerGroupIds.length !== entry.characterStickerGroupIds.length) {
+      void conversationSettingsStore.put({ ...entry, characterStickerGroupIds });
+    }
+  });
 
   if (settings && legacyDefaultUserIds.has(settings.activeUserId)) {
     void settingsStore.put({ ...settings, activeUserId: defaultSettings.activeUserId }, 'main');

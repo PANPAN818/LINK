@@ -183,6 +183,7 @@ export type StickerSourceType = 'url' | 'local-image' | 'text-file' | 'doc-file'
 export interface StickerGroup {
   id: string;
   name: string;
+  sortOrder?: number;
   createdAt: number;
   updatedAt: number;
 }
@@ -193,6 +194,7 @@ export interface Sticker {
   imageUrl: string;
   groupIds: string[];
   sourceType: StickerSourceType;
+  lastUsedAt?: number;
   createdAt: number;
   updatedAt: number;
 }

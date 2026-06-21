@@ -8,10 +8,53 @@ export interface StickerImportDraft {
   sourceType: StickerSourceType;
 }
 
+export const RECENT_STICKER_GROUP_ID = 'sticker_group_recent';
+export const RECENT_STICKER_GROUP_NAME = '最近';
+export const RECENT_STICKER_LIMIT = 12;
+export const LEGACY_GANADI_STICKER_GROUP_ID = 'sticker_group_default';
+export const LEGACY_GANADI_STICKER_GROUP_NAME = 'ganadi';
+export const LEGACY_GANADI_STICKER_IDS = new Set([
+  'sticker_ganadi_stare',
+  'sticker_ganadi_speechless',
+  'sticker_ganadi_like',
+  'sticker_ganadi_love',
+  'sticker_ganadi_wronged',
+  'sticker_ganadi_cry',
+  'sticker_ganadi_negotiate',
+  'sticker_ganadi_escape',
+  'sticker_ganadi_court',
+  'sticker_ganadi_losing_water'
+]);
+
 const imageDownloadPath = '/__image-download';
 const maxStickerImageBytes = 12 * 1024 * 1024;
 const urlPattern = /(data:image\/[a-zA-Z0-9.+-]+;base64,[A-Za-z0-9+/=]+|https?:\/\/[^\s<>"'，。；;、)\]}]*?\.(?:png|jpe?g|gif|webp|avif|bmp|svg)(?:[?#][^\s<>"'，。；;、)\]}]*)?|https?:\/\/[^\s<>"'，。；;、)\]}]+)/gi;
 const imageExtensionPattern = /\.(?:png|jpe?g|gif|webp|avif|bmp|svg)(?:[?#].*)?$/i;
+
+export function isRecentStickerGroupId(groupId: string) {
+  return groupId === RECENT_STICKER_GROUP_ID;
+}
+
+export function isLegacyGanadiStickerGroup(group: Pick<StickerGroup, 'id' | 'name'>) {
+  return group.id === LEGACY_GANADI_STICKER_GROUP_ID || group.name.trim().toLocaleLowerCase() === LEGACY_GANADI_STICKER_GROUP_NAME;
+}
+
+export function isLegacyGanadiSticker(sticker: Pick<Sticker, 'id' | 'groupIds'>) {
+  return LEGACY_GANADI_STICKER_IDS.has(sticker.id) || sticker.groupIds.includes(LEGACY_GANADI_STICKER_GROUP_ID);
+}
+
+export function sortRecentStickers(stickers: Sticker[]) {
+  return [...stickers]
+    .filter((sticker) => Number(sticker.lastUsedAt) > 0)
+    .sort((left, right) => {
+      const usedDiff = (right.lastUsedAt ?? 0) - (left.lastUsedAt ?? 0);
+      if (usedDiff) return usedDiff;
+      const updatedDiff = right.updatedAt - left.updatedAt;
+      if (updatedDiff) return updatedDiff;
+      return right.id.localeCompare(left.id);
+    })
+    .slice(0, RECENT_STICKER_LIMIT);
+}
 
 function isDataImageUrl(value: string) {
   return /^data:image\//i.test(value.trim());
@@ -289,6 +332,7 @@ export function createStickerGroup(name = '新分组'): StickerGroup {
   return {
     id: createId('sticker_group'),
     name: name.trim() || '新分组',
+    sortOrder: now,
     createdAt: now,
     updatedAt: now
   };
@@ -315,6 +359,7 @@ export function normalizeStickerGroup(group: Partial<StickerGroup> | null | unde
   return {
     id,
     name,
+    ...(Number(group?.sortOrder) > 0 ? { sortOrder: Number(group?.sortOrder) } : {}),
     createdAt,
     updatedAt: Number(group?.updatedAt) || createdAt
   };
@@ -340,6 +385,7 @@ export function normalizeSticker(sticker: Partial<Sticker> | null | undefined, f
     imageUrl,
     groupIds: normalizedGroupIds.length ? normalizedGroupIds : [fallbackGroupId].filter(Boolean),
     sourceType,
+    ...(Number(sticker?.lastUsedAt) > 0 ? { lastUsedAt: Number(sticker?.lastUsedAt) } : {}),
     createdAt,
     updatedAt: Number(sticker?.updatedAt) || createdAt
   };

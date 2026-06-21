@@ -21,7 +21,7 @@ export function renderCharacterMemoryPrompt(prompt: string, characterName: strin
     .replace(/以角色的第三人称视角/g, `以${resolvedCharacterName}的第三人称视角`);
 }
 
-export const defaultCharacterStickerGroupIds = ['sticker_group_default'];
+export const defaultCharacterStickerGroupIds: string[] = [];
 const legacyDefaultBackgroundColor = '#8fa2af';
 const defaultBackgroundColor = '#ffffff';
 const legacyDefaultUserBubbleColor = '#5ce46f';
