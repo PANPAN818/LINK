@@ -461,6 +461,52 @@ import { getSelectedImageModelOption } from '@/utils/settings';
 import { recommendStickers } from '@/utils/stickerRecommendations';
 import { isVoomNarrationMessage, mergeVoomLikeMessages } from '@/utils/voomMessages';
 
+type BrowserSpeechRecognitionAlternative = {
+  transcript: string;
+};
+
+type BrowserSpeechRecognitionResult = {
+  isFinal: boolean;
+  length: number;
+  [index: number]: BrowserSpeechRecognitionAlternative | undefined;
+};
+
+type BrowserSpeechRecognitionResultList = {
+  length: number;
+  [index: number]: BrowserSpeechRecognitionResult | undefined;
+};
+
+type BrowserSpeechRecognitionEvent = Event & {
+  resultIndex: number;
+  results: BrowserSpeechRecognitionResultList;
+};
+
+type BrowserSpeechRecognitionErrorEvent = Event & {
+  error?: string;
+};
+
+type BrowserSpeechRecognition = EventTarget & {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  maxAlternatives: number;
+  start: () => void;
+  stop: () => void;
+  abort: () => void;
+  onresult: ((event: BrowserSpeechRecognitionEvent) => void) | null;
+  onerror: ((event: BrowserSpeechRecognitionErrorEvent) => void) | null;
+  onend: (() => void) | null;
+};
+
+type BrowserSpeechRecognitionConstructor = new () => BrowserSpeechRecognition;
+
+type SpeechRecognitionWindow = Window & {
+  SpeechRecognition?: BrowserSpeechRecognitionConstructor;
+  webkitSpeechRecognition?: BrowserSpeechRecognitionConstructor;
+};
+
+const voiceTranscriptLimit = 500;
+
 const props = defineProps<{
   id: string;
 }>();
@@ -524,12 +570,19 @@ const recordedVoiceDraft = ref<Pick<ChatVoiceAttachment, 'audioUrl' | 'duration'
 const recordingVoice = ref(false);
 const recordingStartedAt = ref(0);
 const recordingElapsed = ref(0);
+const recognizingVoice = ref(false);
+const voiceRecognitionNotice = ref('');
 let voiceRecorder: MediaRecorder | null = null;
 let voiceStream: MediaStream | null = null;
 let voiceChunks: Blob[] = [];
+let voiceRecognition: BrowserSpeechRecognition | null = null;
 let voiceTimer: number | undefined;
 let proactiveReplyTimer: number | undefined;
 let discardRecording = false;
+let voiceRecognitionStartText = '';
+let voiceRecognitionFinalText = '';
+let voiceRecognitionStopping = false;
+let voiceRecognitionRunId = 0;
 
 const initialMessageLimit = 60;
 const messageLoadStep = 30;
@@ -588,7 +641,11 @@ const recordedVoiceSeconds = computed(() => recordingVoice.value
   : recordedVoiceDraft.value?.duration ?? 0);
 const textVoiceDuration = computed(() => estimateVoiceDuration(voiceTextDraft.value));
 const voiceRecordStatus = computed(() => {
-  if (recordingVoice.value) return '正在录音';
+  if (recordingVoice.value) {
+    if (recognizingVoice.value) return '正在录音 · 转文字中';
+    if (voiceRecognitionNotice.value) return `正在录音 · ${voiceRecognitionNotice.value}`;
+    return '正在录音';
+  }
   if (recordedVoiceDraft.value) return '录音已就绪';
   return '等待录音';
 });
@@ -897,6 +954,134 @@ function getPreferredAudioMimeType() {
     .find((mimeType) => MediaRecorder.isTypeSupported(mimeType)) ?? '';
 }
 
+function getVoiceRecognitionConstructor() {
+  if (typeof window === 'undefined') return undefined;
+  const speechWindow = window as SpeechRecognitionWindow;
+  return speechWindow.SpeechRecognition ?? speechWindow.webkitSpeechRecognition;
+}
+
+function getVoiceRecognitionLanguage() {
+  if (typeof navigator === 'undefined') return 'zh-CN';
+  const language = navigator.language || 'zh-CN';
+  return language.toLowerCase().startsWith('zh') ? language : 'zh-CN';
+}
+
+function getVoiceRecognitionErrorText(error?: string) {
+  if (error === 'not-allowed' || error === 'service-not-allowed') return '未允许转文字';
+  if (error === 'audio-capture') return '无法转文字';
+  if (error === 'network') return '转文字网络异常';
+  if (error === 'language-not-supported') return '语言不支持';
+  if (error === 'no-speech') return '等待说话';
+  return '转文字暂停';
+}
+
+function isFatalVoiceRecognitionError(error?: string) {
+  return ['not-allowed', 'service-not-allowed', 'audio-capture', 'language-not-supported'].includes(error ?? '');
+}
+
+function joinVoiceRecognitionParts(parts: string[]) {
+  return parts.map((part) => part.trim()).filter(Boolean).join(' ');
+}
+
+function syncVoiceRecognitionDraft(interimText = '') {
+  const recognizedText = joinVoiceRecognitionParts([voiceRecognitionFinalText, interimText]);
+  if (!recognizedText) return;
+  const nextText = voiceRecognitionStartText
+    ? `${voiceRecognitionStartText}\n${recognizedText}`
+    : recognizedText;
+  voiceTranscriptDraft.value = nextText.slice(0, voiceTranscriptLimit);
+}
+
+function stopVoiceTranscription(abort = false) {
+  if (abort) voiceRecognitionRunId += 1;
+  voiceRecognitionStopping = true;
+  recognizingVoice.value = false;
+  const recognition = voiceRecognition;
+  voiceRecognition = null;
+  if (!recognition) return;
+  try {
+    if (abort) recognition.abort();
+    else recognition.stop();
+  } catch {}
+}
+
+function startVoiceTranscription() {
+  stopVoiceTranscription(true);
+  voiceRecognitionRunId += 1;
+  const runId = voiceRecognitionRunId;
+  voiceRecognitionStopping = false;
+  recognizingVoice.value = false;
+  voiceRecognitionNotice.value = '';
+  voiceRecognitionFinalText = '';
+
+  const SpeechRecognition = getVoiceRecognitionConstructor();
+  if (!SpeechRecognition) {
+    voiceRecognitionNotice.value = '转文字不可用';
+    return;
+  }
+
+  const recognition = new SpeechRecognition();
+  recognition.continuous = true;
+  recognition.interimResults = true;
+  recognition.lang = getVoiceRecognitionLanguage();
+  recognition.maxAlternatives = 1;
+  recognition.onresult = (event) => {
+    if (runId !== voiceRecognitionRunId) return;
+    let interimText = '';
+    for (let resultIndex = event.resultIndex; resultIndex < event.results.length; resultIndex += 1) {
+      const result = event.results[resultIndex];
+      const transcript = result?.[0]?.transcript.trim() ?? '';
+      if (!transcript) continue;
+      if (result?.isFinal) {
+        voiceRecognitionFinalText = joinVoiceRecognitionParts([voiceRecognitionFinalText, transcript]);
+      } else {
+        interimText = joinVoiceRecognitionParts([interimText, transcript]);
+      }
+    }
+    syncVoiceRecognitionDraft(interimText);
+  };
+  recognition.onerror = (event) => {
+    if (runId !== voiceRecognitionRunId || voiceRecognitionStopping) return;
+    voiceRecognitionNotice.value = getVoiceRecognitionErrorText(event.error);
+    if (isFatalVoiceRecognitionError(event.error)) voiceRecognitionStopping = true;
+  };
+  recognition.onend = () => {
+    if (runId !== voiceRecognitionRunId) return;
+    recognizingVoice.value = false;
+    if (!voiceRecognitionStopping && recordingVoice.value && voiceRecognition === recognition) {
+      window.setTimeout(() => {
+        if (runId !== voiceRecognitionRunId || voiceRecognitionStopping || !recordingVoice.value || voiceRecognition !== recognition) return;
+        try {
+          recognition.start();
+          recognizingVoice.value = true;
+          voiceRecognitionNotice.value = '';
+        } catch {
+          voiceRecognitionNotice.value = '转文字暂停';
+        }
+      }, 160);
+      return;
+    }
+    if (voiceRecognition === recognition) voiceRecognition = null;
+  };
+  voiceRecognition = recognition;
+
+  try {
+    recognition.start();
+    recognizingVoice.value = true;
+  } catch {
+    voiceRecognition = null;
+    voiceRecognitionNotice.value = '转文字启动失败';
+  }
+}
+
+function resetVoiceTranscription() {
+  stopVoiceTranscription(true);
+  voiceRecognitionNotice.value = '';
+  voiceRecognitionStartText = '';
+  voiceRecognitionFinalText = '';
+  voiceRecognitionStopping = false;
+}
+
 function cleanupVoiceRecorder() {
   if (voiceTimer !== undefined) {
     window.clearInterval(voiceTimer);
@@ -913,6 +1098,7 @@ function cleanupVoiceRecorder() {
 
 function abortVoiceRecording() {
   discardRecording = true;
+  stopVoiceTranscription(true);
   if (voiceRecorder) {
     if (voiceRecorder.state !== 'inactive') voiceRecorder.stop();
     return;
@@ -923,6 +1109,7 @@ function abortVoiceRecording() {
 
 function resetVoicePanel() {
   abortVoiceRecording();
+  resetVoiceTranscription();
   voiceSendTab.value = 'record';
   voiceTranscriptDraft.value = '';
   voiceTextDraft.value = '';
@@ -941,6 +1128,7 @@ function blobToDataUrl(blob: Blob) {
 async function finalizeVoiceRecording(recorder: MediaRecorder) {
   const shouldDiscard = discardRecording;
   discardRecording = false;
+  stopVoiceTranscription(shouldDiscard);
   const chunks = [...voiceChunks];
   const duration = Math.max(1, Math.round((Date.now() - recordingStartedAt.value) / 1000) || Math.round(recordingElapsed.value));
   const mimeType = recorder.mimeType || chunks[0]?.type || 'audio/webm';
@@ -972,8 +1160,13 @@ async function startVoiceRecording() {
   }
 
   try {
+    const replacingRecordedDraft = Boolean(recordedVoiceDraft.value);
     recordedVoiceDraft.value = null;
+    if (replacingRecordedDraft) voiceTranscriptDraft.value = '';
     recordingElapsed.value = 0;
+    voiceRecognitionStartText = voiceTranscriptDraft.value.trim();
+    voiceRecognitionFinalText = '';
+    voiceRecognitionNotice.value = '';
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     const preferredMimeType = getPreferredAudioMimeType();
     const recorder = preferredMimeType
@@ -995,7 +1188,9 @@ async function startVoiceRecording() {
       recordingElapsed.value = (Date.now() - recordingStartedAt.value) / 1000;
     }, 200);
     recorder.start();
+    startVoiceTranscription();
   } catch (error) {
+    stopVoiceTranscription(true);
     cleanupVoiceRecorder();
     showVoicePanel.value = false;
     store.showConfigAlert(error instanceof Error ? error.message : '请允许浏览器访问麦克风。', '无法录音');
@@ -1004,6 +1199,7 @@ async function startVoiceRecording() {
 
 function stopVoiceRecording() {
   if (!voiceRecorder || voiceRecorder.state === 'inactive') return;
+  stopVoiceTranscription();
   recordingElapsed.value = (Date.now() - recordingStartedAt.value) / 1000;
   voiceRecorder.stop();
 }
