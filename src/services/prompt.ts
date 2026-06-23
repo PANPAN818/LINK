@@ -146,7 +146,7 @@ export const profileMutationPrompt = `补充输出规则：
 {
   "messages": [
     { "type": "text", "content": "第一条聊天气泡", "translation": "" },
-    { "type": "voice", "content": "一条语音里说出的内容", "duration": 4 },
+    { "type": "voice", "content": "一条语音里说出的内容", "translation": "", "duration": 4 },
     { "type": "image", "description": "你要发送的一张图片的画面描述" },
     { "type": "location", "name": "地点名称", "address": "详细地址，可留空", "distance": "你与{{user}}的距离，例如：约2.4公里" },
     { "type": "transfer", "amount": "转账金额，例如 52.00", "note": "转账备注，可留空" },
@@ -170,7 +170,7 @@ export const profileMutationPrompt = `补充输出规则：
 1. messages 按数组顺序发送。
 2. text 项显示成聊天气泡：{ "type":"text", "content":"...", "translation":"..." }。根据角色习惯、情绪、当前节奏自然决定条数。
 3. translation 只在 content 是非中文外语或粤语时填写自然简体中文译文；中文内容一律填空字符串。
-4. voice 项显示成语音条：{ "type":"voice", "content":"语音里说出的文字内容", "duration": 3 }。只在线上模式使用；content 是角色真的用语音说出的内容，duration 写 1-60 秒。
+4. voice 项显示成语音条：{ "type":"voice", "content":"语音里说出的文字内容", "translation":"...", "duration": 3 }。只在线上模式使用；content 是角色真的用语音说出的内容，translation 规则同 text，duration 写 1-60 秒。
 5. image 项显示成图片：{ "type":"image", "description":"画面描述" }。description 描述图片里有什么和氛围，不要写英文标签、相机参数、画质词或模型术语。
 6. 图片内容由角色性格、当前对话、生活状态和要表达的情绪决定，可以是自拍、随手拍、物品、街景、餐食、房间、作业、工作现场等任何合理画面。
 7. location 项显示成定位卡片：{ "type":"location", "name":"地点名称", "address":"详细地址，可留空", "distance":"你与{{user}}的距离" }。只在线上模式使用；name 是你当前所在或要主动发送的位置，distance 必须写清你与{{user}}的相对距离。

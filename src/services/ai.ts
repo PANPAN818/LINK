@@ -43,7 +43,7 @@ export type RoleplayReplySegment =
   | { type: 'narration'; content: string }
   | { type: 'sticker'; stickers: string[] }
   | { type: 'image'; description: string }
-  | { type: 'voice'; content: string; duration?: number }
+  | { type: 'voice'; content: string; translation?: string; duration?: number }
   | { type: 'location'; name: string; address?: string; distance: string }
   | { type: 'transfer'; amount: string; note?: string };
 
@@ -1075,10 +1075,12 @@ function normalizeRoleplaySegment(value: unknown, narrationEnabled: boolean): Ro
 
   if (type === 'voice') {
     const duration = Number(record.duration ?? record.seconds ?? record.length);
+    const translations = normalizeTranslationList(record.translation ?? record.contentTranslation ?? record.translationZh ?? record.chineseTranslation);
     return normalizeTextFragments(record.content ?? record.transcript ?? record.text ?? record.message ?? record.reply)
-      .map((content) => ({
+      .map((content, index) => ({
         type: 'voice' as const,
         content,
+        ...(translations[index] ? { translation: translations[index] } : {}),
         ...(Number.isFinite(duration) && duration > 0 ? { duration: Math.round(duration) } : {})
       }));
   }

@@ -2585,8 +2585,9 @@ export const useAppStore = defineStore('app', () => {
             }
             if (segment.type === 'voice') {
               const content = String(segment.content ?? '').trim();
+              const translation = conversation.activeMode === 'online' ? normalizeTranslationText(segment.translation) : '';
               const duration = Number(segment.duration);
-              return content ? [{ type: 'voice', content, ...(Number.isFinite(duration) && duration > 0 ? { duration } : {}) }] : [];
+              return content ? [{ type: 'voice', content, ...(translation ? { translation } : {}), ...(Number.isFinite(duration) && duration > 0 ? { duration } : {}) }] : [];
             }
             if (segment.type === 'location') {
               const location = normalizeLocationAttachment({
@@ -2739,12 +2740,13 @@ export const useAppStore = defineStore('app', () => {
           status: 'sent' as const
         } satisfies ChatMessage;
       };
-      const createVoiceMessage = (content: string, duration?: number) => ({
+      const createVoiceMessage = (content: string, duration?: number, translation?: string) => ({
         id: createId('msg'),
         conversationId,
         sender: 'char' as const,
         mode: conversation.activeMode,
         content: `[语音] ${content}`,
+        translation: translation || undefined,
         voice: {
           source: 'text' as const,
           transcript: content,
@@ -2835,7 +2837,7 @@ export const useAppStore = defineStore('app', () => {
               break;
             }
             case 'voice': {
-              orderedCharMessages.push(createVoiceMessage(segment.content, segment.duration));
+              orderedCharMessages.push(createVoiceMessage(segment.content, segment.duration, segment.translation));
               break;
             }
             case 'transfer': {

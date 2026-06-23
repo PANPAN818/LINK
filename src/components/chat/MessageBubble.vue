@@ -72,7 +72,13 @@
             </template>
           </template>
         </div>
-        <p v-if="message.voice && showVoiceTranscript" class="voice-transcript">{{ message.voice.transcript }}</p>
+        <p v-if="message.voice && showVoiceTranscript" class="voice-transcript">
+          <span>{{ message.voice.transcript }}</span>
+          <template v-if="showVoiceTranslation">
+            <span class="translation-divider" aria-hidden="true"></span>
+            <span class="translation-copy">{{ displayTranslation }}</span>
+          </template>
+        </p>
         <div v-if="message.quote" class="quote-card">
           <p>
             <strong>{{ quoteAuthorLabel }}</strong>
@@ -282,6 +288,10 @@ const showInlineTranslation = computed(() => props.message.sender === 'char'
   && !props.message.voice
   && !props.message.location
   && shouldShowChineseTranslation(displayContent.value, displayTranslation.value));
+const showVoiceTranslation = computed(() => props.message.sender === 'char'
+  && props.message.mode === 'online'
+  && Boolean(props.message.voice)
+  && shouldShowChineseTranslation(props.message.voice?.transcript ?? '', displayTranslation.value));
 
 const characterDisplayName = computed(() => getCharacterDisplayName(props.character));
 const showProfileAlert = computed(() => props.profileAlert && props.message.sender === 'char');
