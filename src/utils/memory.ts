@@ -41,6 +41,7 @@ export const defaultConversationSettings: Omit<ConversationSettings, 'conversati
     characterTextColor: '#111111',
     showMessageTime: true,
     showReadStatus: true,
+    showUserAvatar: false,
     showOnlyFirstAvatarInReply: true,
     hideVoomNarration: false
   },
@@ -110,6 +111,7 @@ export function normalizeConversationSettings(settings: Partial<ConversationSett
       characterTextColor: String(appearance.characterTextColor ?? defaultConversationSettings.appearance.characterTextColor).trim() || defaultConversationSettings.appearance.characterTextColor,
       showMessageTime: appearance.showMessageTime ?? defaultConversationSettings.appearance.showMessageTime,
       showReadStatus: appearance.showReadStatus ?? defaultConversationSettings.appearance.showReadStatus,
+      showUserAvatar: appearance.showUserAvatar ?? defaultConversationSettings.appearance.showUserAvatar,
       showOnlyFirstAvatarInReply: appearance.showOnlyFirstAvatarInReply ?? defaultConversationSettings.appearance.showOnlyFirstAvatarInReply,
       hideVoomNarration: appearance.hideVoomNarration ?? defaultConversationSettings.appearance.hideVoomNarration
     },

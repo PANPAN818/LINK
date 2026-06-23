@@ -243,10 +243,17 @@
             </div>
           </label>
           <label class="switch-card wide">
+            <input v-model="draft.appearance.showUserAvatar" type="checkbox" @change="saveDraft" />
+            <span class="switch-track"></span>
+            <div>
+              <strong>显示用户头像</strong>
+            </div>
+          </label>
+          <label class="switch-card wide">
             <input v-model="draft.appearance.showOnlyFirstAvatarInReply" type="checkbox" @change="saveDraft" />
             <span class="switch-track"></span>
             <div>
-              <strong>连续角色消息仅首条头像</strong>
+              <strong>角色与用户的消息仅首条头像</strong>
             </div>
           </label>
           <label class="switch-card wide">

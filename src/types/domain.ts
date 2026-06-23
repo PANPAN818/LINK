@@ -108,6 +108,7 @@ export interface ChatAppearanceSettings {
   characterTextColor: string;
   showMessageTime: boolean;
   showReadStatus: boolean;
+  showUserAvatar: boolean;
   showOnlyFirstAvatarInReply: boolean;
   hideVoomNarration: boolean;
 }

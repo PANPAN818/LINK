@@ -3,8 +3,8 @@
     <button v-if="selectionMode" class="selection-dot" type="button" :aria-pressed="selected" @click.stop="emit('toggle-select')">
       <span></span>
     </button>
-    <button v-if="message.sender === 'char'" class="avatar-button" type="button" :aria-hidden="hideAvatar" :tabindex="hideAvatar ? -1 : 0" @click.stop="handleAvatarClick">
-      <img class="avatar mini" :src="character.avatar" :alt="characterDisplayName" />
+    <button v-if="showAvatarButton" class="avatar-button" type="button" :aria-hidden="hideAvatar" :tabindex="hideAvatar ? -1 : 0" @click.stop="handleAvatarClick">
+      <img class="avatar mini" :src="avatarSource" :alt="avatarAlt" />
     </button>
     <div class="bubble-wrap">
       <div
@@ -149,16 +149,18 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { LoaderCircle, MapPin, Pause, Play } from 'lucide-vue-next';
 import AppModal from '@/components/common/AppModal.vue';
-import type { CharacterProfile, ChatAppearanceSettings, ChatImageCandidate, ChatMessage } from '@/types/domain';
+import type { CharacterProfile, ChatAppearanceSettings, ChatImageCandidate, ChatMessage, UserProfile } from '@/types/domain';
 import { useAppStore } from '@/stores/appStore';
 import { getCharacterDisplayName } from '@/utils/character';
 import { formatChatTime } from '@/utils/time';
 import { defaultConversationSettings } from '@/utils/memory';
+import { defaultProfileAvatar } from '@/utils/profile';
 import { normalizeTranslationText, shouldShowChineseTranslation } from '@/utils/translation';
 
 const props = withDefaults(defineProps<{
   message: ChatMessage;
   character: CharacterProfile;
+  user?: UserProfile;
   appearance?: ChatAppearanceSettings;
   hideAvatar?: boolean;
   profileAlert?: boolean;
@@ -178,6 +180,7 @@ const props = withDefaults(defineProps<{
 
 const emit = defineEmits<{
   'open-profile': [];
+  'open-user-profile': [];
   'long-press': [message: ChatMessage];
   'toggle-select': [];
   'regenerate-image': [messageId: string, description: string];
@@ -294,6 +297,14 @@ const showVoiceTranslation = computed(() => props.message.sender === 'char'
   && shouldShowChineseTranslation(props.message.voice?.transcript ?? '', displayTranslation.value));
 
 const characterDisplayName = computed(() => getCharacterDisplayName(props.character));
+const userDisplayName = computed(() => {
+  const user = props.user ?? store.user;
+  return user?.nickname || user?.name || '我';
+});
+const userAvatar = computed(() => (props.user ?? store.user)?.avatar || defaultProfileAvatar);
+const showAvatarButton = computed(() => props.message.sender === 'char' || (props.message.sender === 'user' && props.appearance.showUserAvatar));
+const avatarSource = computed(() => (props.message.sender === 'user' ? userAvatar.value : props.character.avatar));
+const avatarAlt = computed(() => (props.message.sender === 'user' ? userDisplayName.value : characterDisplayName.value));
 const showProfileAlert = computed(() => props.profileAlert && props.message.sender === 'char');
 const quoteText = computed(() => props.message.quote?.sticker
   ? props.message.quote.sticker.description
@@ -428,6 +439,7 @@ function cancelLongPress() {
 function handleAvatarClick() {
   if (props.hideAvatar) return;
   if (props.selectionMode) emit('toggle-select');
+  else if (props.message.sender === 'user') emit('open-user-profile');
   else emit('open-profile');
 }
 
@@ -596,6 +608,10 @@ onBeforeUnmount(stopVoicePlayback);
   justify-content: flex-end;
 }
 
+.message-row.user .avatar-button {
+  order: 2;
+}
+
 .message-row.system {
   justify-content: center;
 }
@@ -694,6 +710,7 @@ onBeforeUnmount(stopVoicePlayback);
 }
 
 .message-row.user .bubble-wrap {
+  order: 1;
   flex-direction: row-reverse;
 }
 

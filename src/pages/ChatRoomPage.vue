@@ -14,6 +14,7 @@
         :key="message.id"
         :message="message"
         :character="character"
+        :user="boundUser ?? undefined"
         :appearance="chatSettings.appearance"
         :hide-avatar="shouldHideAvatar(index)"
         :profile-alert="hasUnreadMindState"
@@ -26,6 +27,7 @@
         @long-press="openMessageActions"
         @open-card-detail="openCardDetail"
         @open-profile="openCharacterProfile"
+        @open-user-profile="openUserProfile"
         @regenerate-image="regenerateChatImage"
         @toggle-select="toggleMessageSelection(message)"
       />
@@ -593,7 +595,10 @@ const bottomRestoreDelays = [40, 120, 260, 520];
 const conversation = computed(() => store.conversationById(props.id));
 const character = computed(() => (conversation.value ? store.characterById(conversation.value.charId) : undefined));
 const characterDisplayName = computed(() => character.value?.nickname || character.value?.name || '该好友');
-const boundUser = computed(() => (character.value ? store.userById(character.value.boundUserId) : null));
+const boundUser = computed(() => {
+  const userId = conversation.value?.userId || character.value?.boundUserId || '';
+  return userId ? store.userById(userId) ?? null : null;
+});
 const chatSettings = computed(() => store.settingsForConversation(props.id));
 const allOnlineMessages = computed(() => {
   const messages = store.messagesForConversation(props.id).filter((message) => message.mode === 'online');
@@ -612,7 +617,7 @@ function shouldHideAvatar(index: number) {
   if (!chatSettings.value.appearance.showOnlyFirstAvatarInReply) return false;
   const message = onlineMessages.value[index];
   const previousMessage = onlineMessages.value[index - 1];
-  return message?.sender === 'char' && previousMessage?.sender === 'char';
+  return Boolean(message && previousMessage && message.sender !== 'system' && message.sender === previousMessage.sender);
 }
 
 const chatSurfaceStyle = computed(() => ({
