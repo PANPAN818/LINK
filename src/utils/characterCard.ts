@@ -82,7 +82,7 @@ function getCharacterBook(source: Record<string, unknown>) {
   return (nested.character_book ?? extensions.character_book ?? source.character_book ?? null) as CharacterBookSource | null;
 }
 
-function mapWorldBooks(book: CharacterBookSource | null, characterName: string): WorldBookEntry[] {
+function mapWorldBooks(book: CharacterBookSource | null, characterName: string, coverImage: string): WorldBookEntry[] {
   const entries = Array.isArray(book?.entries) ? book.entries : [];
   const mappedEntries = entries.map((entry, index) => {
     const keys = Array.isArray(entry.keys)
@@ -113,7 +113,7 @@ function mapWorldBooks(book: CharacterBookSource | null, characterName: string):
     entries: loreEntries,
     scope: 'local' as const,
     enabled: true,
-    coverImage: '',
+    coverImage,
     coverPrompt: '',
     coverNegativePrompt: '',
     coverProvider: ''
@@ -127,14 +127,15 @@ function parseCardPayload(payload: string, avatar: string) {
     : parsed;
 
   const nickname = String(source.name ?? parsed.name ?? 'NewFriend').trim() || 'NewFriend';
+  const resolvedAvatar = avatar || toDicebearAvatar(nickname);
 
   return {
-    avatar: avatar || toDicebearAvatar(nickname),
+    avatar: resolvedAvatar,
     nickname,
     name: nickname,
     signature: defaultSignature,
     description: collectDescriptionSections(source) || '导入角色卡后尚未提供更多资料。',
-    worldBooks: mapWorldBooks(getCharacterBook(parsed), nickname)
+    worldBooks: mapWorldBooks(getCharacterBook(parsed), nickname, resolvedAvatar)
   } satisfies ImportedCharacterCard;
 }
 

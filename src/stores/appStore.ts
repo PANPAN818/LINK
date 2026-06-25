@@ -445,7 +445,7 @@ export const useAppStore = defineStore('app', () => {
     if (!boundUser) return 0;
     const chatSettings = settingsForConversation(id);
     const availableCharacterStickers = stickersForGroups(chatSettings.characterStickerGroupIds);
-    const conversationMessages = messagesForConversation(id);
+    const conversationMessages = messagesForConversation(id).filter((message) => message.replyVariantState !== 'inactive');
     const lastUserMessages = [...conversationMessages].reverse().filter((message, index, reversedMessages) => {
       const previousMessages = reversedMessages.slice(0, index);
       return message.sender === 'user' && !previousMessages.some((previous) => previous.sender === 'char');
@@ -463,6 +463,7 @@ export const useAppStore = defineStore('app', () => {
       stickerVisionEnabled: chatSettings.stickerVisionEnabled,
       narrationModeEnabled: chatSettings.narrationModeEnabled,
       timeAwareness: chatSettings.timeAwareness,
+      offlineSettings: chatSettings.offline,
       availableStickers: availableCharacterStickers.map((sticker) => ({
         stickerId: sticker.id,
         description: sticker.description,
@@ -857,6 +858,15 @@ export const useAppStore = defineStore('app', () => {
     await pruneMemoriesForMessageIds(messagesToRemove.map((message) => message.id));
     await Promise.all(affectedConversationIds.map((conversationId) => touchConversationAfterMessageChange(conversationId)));
     return messagesToRemove.length;
+  }
+
+  async function saveMessages(nextMessages: ChatMessage[]) {
+    if (!nextMessages.length) return;
+    const nextById = new Map(nextMessages.map((message) => [message.id, message]));
+    messages.value = messages.value.map((message) => nextById.get(message.id) ?? message);
+    await Promise.all(nextMessages.map((message) => putEntity('messages', message)));
+    const affectedConversationIds = [...new Set(nextMessages.map((message) => message.conversationId))];
+    await Promise.all(affectedConversationIds.map((conversationId) => touchConversationAfterMessageChange(conversationId)));
   }
 
   async function updateMessageContent(messageId: string, content: string) {
@@ -2200,7 +2210,7 @@ export const useAppStore = defineStore('app', () => {
     const conversation = conversationById(conversationId);
     if (!conversation) return null;
     const chatSettings = settingsForConversation(conversationId);
-    const conversationMessages = messagesForConversation(conversationId);
+    const conversationMessages = messagesForConversation(conversationId).filter((message) => message.replyVariantState !== 'inactive');
     const conversationFloorCount = getConversationFloorCount(conversationMessages);
     const memories = memoriesForConversation(conversationId);
     const nextRange = getNextSummaryRange(conversationMessages, memories, chatSettings, conversation.activeMode);
@@ -2505,7 +2515,7 @@ export const useAppStore = defineStore('app', () => {
     }));
   }
 
-  async function requestRoleplayReply(conversationId: string, options?: { generateMoment?: boolean; proactive?: boolean }) {
+  async function requestRoleplayReply(conversationId: string, options?: { generateMoment?: boolean; proactive?: boolean; replyVariantGroupId?: string; replyVariantIndex?: number }) {
     const conversation = conversationById(conversationId);
     if (!conversation || isConversationReplying(conversationId)) return;
     const character = characterById(conversation.charId);
@@ -2513,7 +2523,7 @@ export const useAppStore = defineStore('app', () => {
     const boundUser = userById(character.boundUserId) ?? user.value;
     if (!boundUser) return;
 
-    const conversationMessages = messagesForConversation(conversationId);
+    const conversationMessages = messagesForConversation(conversationId).filter((message) => message.replyVariantState !== 'inactive');
     const lastUserMessages = [...conversationMessages].reverse().filter((message, index, reversedMessages) => {
       const previousMessages = reversedMessages.slice(0, index);
       return message.sender === 'user' && !previousMessages.some((previous) => previous.sender === 'char');
@@ -2547,6 +2557,7 @@ export const useAppStore = defineStore('app', () => {
         stickerVisionEnabled: chatSettings.stickerVisionEnabled,
         narrationModeEnabled: chatSettings.narrationModeEnabled,
         timeAwareness: chatSettings.timeAwareness,
+        offlineSettings: chatSettings.offline,
         replyInstruction: options?.proactive
           ? `这不是用户刚发来的新消息，而是${character.nickname || character.name}在自己的生活节奏里主动联系${boundUser.nickname || boundUser.name}。请基于最近对话、关系状态、时间流逝和角色当前生活，生成一组自然的主动消息；不要假装用户刚说了什么，也不要替用户发言。`
           : undefined,
@@ -2561,6 +2572,13 @@ export const useAppStore = defineStore('app', () => {
       });
       const parsedReply = JSON.parse(replyPayload) as RoleplayReplyResult;
       const replyBatchId = createId('reply');
+      const replyVariantFields = options?.replyVariantGroupId
+        ? {
+          replyVariantGroupId: options.replyVariantGroupId,
+          replyVariantIndex: Math.max(0, Math.floor(Number(options.replyVariantIndex) || 0)),
+          replyVariantState: 'active' as const
+        }
+        : {};
       const replyTexts = Array.isArray(parsedReply.replies) ? parsedReply.replies : [parsedReply.reply];
       const replyTranslations = Array.isArray(parsedReply.replyTranslations) ? parsedReply.replyTranslations : [];
       const replyMessages = replyTexts
@@ -2569,6 +2587,9 @@ export const useAppStore = defineStore('app', () => {
           translation: conversation.activeMode === 'online' ? normalizeTranslationText(replyTranslations[index]) : ''
         }))
         .filter((reply) => Boolean(reply.content));
+      const plotChoices = conversation.activeMode === 'offline'
+        ? [...new Set((parsedReply.plotChoices ?? []).map((choice) => String(choice ?? '').trim()).filter(Boolean))].slice(0, 6)
+        : [];
       const orderedSegments = Array.isArray(parsedReply.segments)
         ? parsedReply.segments
           .flatMap((segment): RoleplayReplySegment[] => {
@@ -2681,6 +2702,7 @@ export const useAppStore = defineStore('app', () => {
             createdAt: Date.now(),
             displayStyle: 'narration',
             replyBatchId,
+            ...replyVariantFields,
             status: 'sent'
           };
           messages.value.push(narrationMessage);
@@ -2706,6 +2728,7 @@ export const useAppStore = defineStore('app', () => {
         createdAt: createdAt + index,
         displayStyle: 'narration' as const,
         replyBatchId,
+        ...replyVariantFields,
         status: 'sent' as const
       } satisfies ChatMessage));
       const charMessagesAfterNarration: ChatMessage[] = [];
@@ -2724,6 +2747,7 @@ export const useAppStore = defineStore('app', () => {
           imageUrl: sticker.imageUrl
         },
         replyBatchId,
+        ...replyVariantFields,
         createdAt: createdAt + charMessageOffset++,
         status: 'sent' as const
       } satisfies ChatMessage));
@@ -2744,6 +2768,7 @@ export const useAppStore = defineStore('app', () => {
           content: `[图片] ${image.description}`,
           image,
           replyBatchId,
+          ...replyVariantFields,
           createdAt: createdAt + charMessageOffset++,
           status: 'sent' as const
         } satisfies ChatMessage;
@@ -2761,6 +2786,7 @@ export const useAppStore = defineStore('app', () => {
           duration: estimateVoiceDuration(content, duration)
         },
         replyBatchId,
+        ...replyVariantFields,
         createdAt: createdAt + charMessageOffset++,
         status: 'sent' as const
       } satisfies ChatMessage);
@@ -2772,6 +2798,7 @@ export const useAppStore = defineStore('app', () => {
         content: formatLocationContent(location),
         location,
         replyBatchId,
+        ...replyVariantFields,
         createdAt: createdAt + charMessageOffset++,
         status: 'sent' as const
       } satisfies ChatMessage);
@@ -2786,6 +2813,7 @@ export const useAppStore = defineStore('app', () => {
           content: formatTransferContent(normalizedTransfer),
           transfer: normalizedTransfer,
           replyBatchId,
+          ...replyVariantFields,
           createdAt: createdAt + charMessageOffset++,
           status: 'sent' as const
         } satisfies ChatMessage;
@@ -2816,6 +2844,7 @@ export const useAppStore = defineStore('app', () => {
                 createdAt: createdAt + charMessageOffset++,
                 displayStyle: 'narration' as const,
                 replyBatchId,
+                ...replyVariantFields,
                 status: 'sent' as const
               } satisfies ChatMessage);
               break;
@@ -2829,6 +2858,7 @@ export const useAppStore = defineStore('app', () => {
                 translation: segment.translation || undefined,
                 quote: quoteByReplyIndex.get(orderedReplyIndex),
                 replyBatchId,
+                ...replyVariantFields,
                 createdAt: createdAt + charMessageOffset++,
                 status: 'sent' as const
               } satisfies ChatMessage);
@@ -2867,6 +2897,7 @@ export const useAppStore = defineStore('app', () => {
             translation: reply.translation || undefined,
             quote: quoteByReplyIndex.get(index),
             replyBatchId,
+            ...replyVariantFields,
             createdAt: createdAt + charMessageOffset++,
             status: 'sent' as const
           } satisfies ChatMessage);
@@ -2879,7 +2910,11 @@ export const useAppStore = defineStore('app', () => {
         await appendImageMessage(imageDescription, charMessagesAfterNarration);
       }
       appendStickerMessages(replyStickers);
-      const charMessages = orderedSegments.length ? orderedCharMessages : [...charNarrationMessages, ...charMessagesAfterNarration];
+      const charMessages: ChatMessage[] = orderedSegments.length ? orderedCharMessages : [...charNarrationMessages, ...charMessagesAfterNarration];
+      if (plotChoices.length) {
+        const plotChoiceMessage = charMessages.find((message) => message.sender === 'char' && !message.sticker && !message.image && !message.voice && !message.location && !message.transfer);
+        if (plotChoiceMessage) plotChoiceMessage.plotChoices = plotChoices;
+      }
       if (charMessages.length) {
         messages.value.push(...charMessages);
         await Promise.all(charMessages.map((message) => putEntity('messages', message)));
@@ -2929,7 +2964,7 @@ export const useAppStore = defineStore('app', () => {
     const conversation = conversationById(conversationId);
     if (!conversation || isConversationReplying(conversationId)) return false;
 
-    const conversationMessages = messagesForConversation(conversationId).filter((message) => message.mode === conversation.activeMode);
+    const conversationMessages = messagesForConversation(conversationId).filter((message) => message.mode === conversation.activeMode && message.replyVariantState !== 'inactive');
     let latestCharIndex = -1;
     for (let messageIndex = conversationMessages.length - 1; messageIndex >= 0; messageIndex -= 1) {
       if (conversationMessages[messageIndex].sender === 'char') {
@@ -2961,9 +2996,40 @@ export const useAppStore = defineStore('app', () => {
       }
     }
 
+    if (conversation.activeMode === 'offline') {
+      const replyBatchId = latestCharMessage.replyBatchId || createId('reply');
+      const replyVariantGroupId = latestCharMessage.replyVariantGroupId || createId('variant');
+      const existingVariantIndexes = messagesForConversation(conversationId)
+        .filter((message) => message.mode === conversation.activeMode && message.replyVariantGroupId === replyVariantGroupId)
+        .map((message) => Math.max(0, Math.floor(Number(message.replyVariantIndex) || 0)));
+      const nextVariantIndex = Math.max(0, ...existingVariantIndexes) + 1;
+      await saveMessages(messagesToRemove.map((message) => ({
+        ...message,
+        replyBatchId: message.replyBatchId || replyBatchId,
+        replyVariantGroupId,
+        replyVariantIndex: message.replyVariantIndex ?? 0,
+        replyVariantState: 'inactive' as const
+      })));
+      await requestRoleplayReply(conversationId, { replyVariantGroupId, replyVariantIndex: nextVariantIndex });
+      return true;
+    }
+
     await deleteMessages(messagesToRemove.map((message) => message.id));
 
     await requestRoleplayReply(conversationId);
+    return true;
+  }
+
+  async function applyReplyVariant(conversationId: string, replyVariantGroupId: string, replyBatchId: string) {
+    const normalizedGroupId = replyVariantGroupId.trim();
+    const normalizedBatchId = replyBatchId.trim();
+    if (!normalizedGroupId || !normalizedBatchId) return false;
+    const groupMessages = messagesForConversation(conversationId).filter((message) => message.replyVariantGroupId === normalizedGroupId);
+    if (!groupMessages.some((message) => message.replyBatchId === normalizedBatchId)) return false;
+    await saveMessages(groupMessages.map((message) => ({
+      ...message,
+      replyVariantState: message.replyBatchId === normalizedBatchId ? 'active' as const : 'inactive' as const
+    })));
     return true;
   }
 
@@ -3717,6 +3783,7 @@ export const useAppStore = defineStore('app', () => {
     unmergeConversationMemories,
     requestRoleplayReply,
     regenerateLatestReply,
+    applyReplyVariant,
     maybeRequestProactiveReply,
     sendMessage,
     sendStickerMessage,

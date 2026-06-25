@@ -3,6 +3,7 @@ import HomePage from '@/pages/HomePage.vue';
 import ChatsPage from '@/pages/ChatsPage.vue';
 import ChatSettingsPage from '@/pages/ChatSettingsPage.vue';
 import ChatRoomPage from '@/pages/ChatRoomPage.vue';
+import OfflineSettingsPage from '@/pages/OfflineSettingsPage.vue';
 import OfflineRoomPage from '@/pages/OfflineRoomPage.vue';
 import VoomPage from '@/pages/VoomPage.vue';
 import MusicPage from '@/pages/MusicPage.vue';
@@ -39,7 +40,7 @@ export const router = createRouter({
     { path: '/chats', name: 'chats', component: ChatsPage },
     { path: '/chats/:id/settings', name: 'chat-settings', component: ChatSettingsPage, props: true },
     { path: '/chats/:id', name: 'chat-room', component: ChatRoomPage, props: true },
-    { path: '/offline/:id/settings', name: 'offline-chat-settings', component: ChatSettingsPage, props: true },
+    { path: '/offline/:id/settings', name: 'offline-chat-settings', component: OfflineSettingsPage, props: true },
     { path: '/offline/:id', name: 'offline-room', component: OfflineRoomPage, props: true },
     { path: '/voom', name: 'voom', component: VoomPage },
     { path: '/music', name: 'music', component: MusicPage },

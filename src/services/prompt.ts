@@ -1,5 +1,6 @@
-import type { ChatMode, PromptContext, WorldBookEntry, WorldBookLoreEntry } from '@/types/domain';
+import type { ChatMode, ConversationOfflineSettings, OfflinePromptPreset, PromptContext, WorldBookEntry, WorldBookLoreEntry } from '@/types/domain';
 import { normalizeTimeAwarenessSettings, renderTimeAwarenessPrompt } from '@/utils/timeAwareness';
+import { activeOfflineTonePreset, activeOfflineWritingStylePreset, defaultOfflineSettings, normalizeOfflineSettings } from '@/utils/memory';
 
 export const baseRoleplayPrompt = `你是{{char}}。
 
@@ -185,6 +186,39 @@ export const profileMutationPrompt = `补充输出规则：
 16. 引用用于自然承接上下文。引用时 text.content 里仍只写你真正要发出的新消息，不要重复被引用内容。
 17. 如果没有撤回、引用或转账处理动作，messageActions 里的数组都保持空数组。`;
 
+export const offlineReplyOutputPrompt = `补充线下输出规则：
+
+最终必须输出 JSON，不要输出 JSON 以外的任何文字，不要使用 Markdown 代码块。
+
+格式：
+{
+  "messages": [
+    { "type": "text", "content": "长文本 RP 正文", "translation": "" }
+  ],
+  "plotChoices": [
+    "用户第三人称剧情走向 1，约 50 字",
+    "用户第三人称剧情走向 2，约 50 字",
+    "用户第三人称剧情走向 3，约 50 字",
+    "用户第三人称剧情走向 4，约 50 字",
+    "用户第三人称剧情走向 5，约 50 字",
+    "用户第三人称剧情走向 6，约 50 字"
+  ],
+  "messageActions": {
+    "recallMessageIds": [],
+    "quotes": []
+  },
+  "profileUpdate": null
+}
+
+要求：
+1. messages 通常只保留一条 text；content 写线下模式的长文本 RP 正文。
+2. plotChoices 必须输出 6 条不同的后续剧情选择走向，每条约 50 字，只能用用户第三人称描述用户可能采取的行动或态度。
+3. plotChoices 不能写进 content 正文，不能出现在消息文本里，只能放在 plotChoices 数组里。
+4. translation 固定为空字符串。
+5. 不要输出 voice、image、location、transfer、sticker 或 narration 项。
+6. 不要修改资料，profileUpdate 固定为 null。
+7. messageActions.recallMessageIds 和 messageActions.quotes 保持空数组。`;
+
 export const narrationModePrompt = `补充旁白模式规则：
 
 旁白模式已开启，只在线上聊天生效。本次仍然只使用同一次角色回复 API；不要另起一段非 JSON 文本。
@@ -236,6 +270,141 @@ const modeInstructions: Record<ChatMode, string> = {
   online: '当前是线上聊天模式。回复要模拟当前在使用社交软件，并把你的独立日程、空档经历、精力状态和可能的生活打断自然体现在消息节奏里。',
   offline: '当前是线下模式。回复为长文本 RP，像小说章节一样呈现，并把你的私人生活推进、身体状态、社交圈与当下场景自然写进叙事。'
 };
+
+const offlineParagraphInstruction: Record<ConversationOfflineSettings['paragraphMode'], string> = {
+  long: '段落模式：长段落。使用更完整的场景、动作和情绪推进，每段承载较多信息。',
+  short: '段落模式：短段落。使用更利落的段落切分，节奏清楚，留白更多。',
+  mixed: '段落模式：长短段落交错。关键场景用长段落铺开，转折、对白和停顿用短段落切开。'
+};
+
+const offlinePerspectiveInstruction: Record<ConversationOfflineSettings['perspective'], string> = {
+  'omniscient-third': '叙事视角：上帝视角第三人称。可以观察场景、角色和用户可见行为，但不要替用户做关键决策。',
+  'character-third': '叙事视角：角色第三人称。以角色为叙事中心，使用第三人称描写角色的行动、感受和判断。',
+  'character-second': '叙事视角：角色第二人称。以“你”指代角色，叙述角色正在经历的行动和感受。',
+  'user-first': '叙事视角：用户第一人称。以“我”承接用户已给出的行动和感受，不要替用户新增关键决策。',
+  'user-second': '叙事视角：用户第二人称。以“你”指代用户，复述和细化用户已给出的行动、对话和可见状态。'
+};
+
+function renderOfflineWritingStyleInstruction(preset: OfflinePromptPreset) {
+  const writingStyle = preset.content.trim() || preset.name.trim() || defaultOfflineSettings.writingStyle;
+  if (/^(白描|小薯片)$/i.test(writingStyle)) {
+    return `写作文风：
+采用白描式叙事。不要声称模仿任何具体作者；只执行可描述的写作技法。
+1. 不写宏大背景，只照亮此刻正在发生的人、物、动作和对话。环境、时代和解释性背景都退后，读者的注意力集中在眼前这一幕。
+2. 不追求面面俱到，只求传神。用精准的一两个名词、动词或动作，让人物和物件立起来。
+3. 不使用华丽辞藻、抒情判断、夸张比喻或情绪宣告。语言要透明、朴素、干净。
+4. 情绪不要直接说破，让它藏在杯子、钥匙、衣角、停顿、账单、冷掉的食物、没响的手机这类具体物件和动作后面。
+5. 尽量戒掉形容词和副词。不要写“很难过”“飞快地”“美丽的”，改写为可观察的动作和物体状态。
+6. 重要对白之后，用一两个动作或空间距离承接潜台词，不要用解释性旁白替读者下结论。`;
+  }
+  return `写作文风预设：${preset.name}
+${writingStyle}
+执行该文风时，不要声称模仿任何具体作者；只抽取可描述的技法、语气、节奏和描写密度。`;
+}
+
+function renderOfflineToneInstruction(preset: OfflinePromptPreset) {
+  return `基调预设：${preset.name}
+${preset.content.trim() || preset.name}`;
+}
+
+function renderOfflinePerspectiveInstruction(perspective: ConversationOfflineSettings['perspective'], characterName: string, userName: string) {
+  return {
+    'omniscient-third': `视角设定：以第三方上帝视角叙述。像观察力敏锐、笔触细腻的第三方作家，忠实记录外部对话与互动，可以深入刻画${characterName}的内心世界，但不能替${userName}新增未输入的关键行为、台词或决定。`,
+    'character-third': `视角设定：以${characterName}为叙事中心的第三人称。重点写${characterName}能看见、听见、误解和感受到的内容；不要越过${characterName}的信息边界。`,
+    'character-second': `视角设定：以“你”指代${characterName}。叙述${characterName}正在经历的行动、感受和判断；不要把“你”误写成${userName}。`,
+    'user-first': `视角设定：以“我”承接${userName}已经输入的行动和状态。只能细化${userName}输入过的内容，不能替${userName}新增关键台词、心理和决定。`,
+    'user-second': `视角设定：以“你”指代${userName}。只能复述和细化${userName}已经输入的动作、对话和可见状态，不能替${userName}做决定。`
+  }[perspective];
+}
+
+function renderOfflinePsychologyInstruction(enabled: boolean, characterName: string, userName: string) {
+  if (!enabled) {
+    return `心理描写：关闭独立心理段。不要输出星号包裹的心理段；${characterName}的心理尽量通过动作、对白、停顿和物件体现。`;
+  }
+  return `心理描写：
+正文中必须插入 2 至 4 段独立的${characterName}心理描写，每段约 50 字。
+格式固定为：*心理描写具体内容*
+心理活动必须符合${characterName}当下的性格逻辑、认知水平与情感状态。
+每段心理都必须是对${userName}某个具体行为、某句话、某个停顿或某个可见神态的即时反应；可以是解读、困惑、否认、心动、戒备，也可以是${characterName}自己都辨不明的混沌情绪。
+拒绝套路化内心独白。心理描写要短、准、有局限，不能全知全能，不能看透${userName}的全部想法，不能预知未来。
+心理段应穿插在情节关键节点，尤其在${userName}说完某句话或做完某个动作之后。`;
+}
+
+function renderOfflineInterruptionInstruction(mode: ConversationOfflineSettings['interruptionMode'], characterName: string, userName: string) {
+  if (mode === 'advance') {
+    return `抢话模式：开启。
+章节前部先复述并细化${userName}最新输入的内容，后部可以基于当下因果进行合理剧情拓展。
+拓展只能推动${characterName}、环境、外部事件或可自然发生的后续反应；不得替${userName}做关键性决策，不得新增${userName}未输入的台词、情绪结论或行动选择。`;
+  }
+  return `防抢话：
+禁止代替${userName}做出任何决定。
+${userName}的所有言行必须严格来源于用户输入。
+如果用户输入“${userName}没有回答”，可以写沉默持续、环境声音、${characterName}的动作和反应；不能写${userName}心里很难过，也不能写${userName}终于开口说话。
+整章只对${userName}输出内容进行相对应的复述与详细描写，绝对不要超出用户输出内容的场景、对话或决策。`;
+}
+
+function renderOfflineProhibitedInstruction(characterName: string, userName: string) {
+  return `禁止条例：
+${characterName}可以有欲望、软肋、狼狈和失控，但必须真实、有铺垫。
+禁止邪魅一笑、霸道总裁式壁咚、油腻情话、刻板霸总/娇妻反应、毫无理由的掌控感。
+拒绝全知全能：${characterName}不知道事情全貌，会犯错，会误解，只能基于当下信息反应。
+拒绝围着${userName}转：${characterName}有自己的生活、精神世界、工作、爱好、过往和日常压力。两人的关系是两个独立世界的交汇，不是一方对另一方的依附。`;
+}
+
+function renderOfflineRhythmInstruction(settings: ConversationOfflineSettings) {
+  return `叙事节奏：
+正文字数：${settings.wordCount || defaultOfflineSettings.wordCount}。${settings.expandLength ? '篇幅增强已开启，可以扩展互动、环境和动作过渡，但不要灌水。' : '按设定字数完成，不要为了凑字拖慢节奏。'}
+基调按当前“基调预设”执行，不要只理解成一个情绪标签。
+确保角色对白占据重要篇幅，用对话推动关系、揭示性格、展现冲突或温情。
+从用户最新消息开始，细致描绘当下的场景、氛围、人物动作与细微停顿。
+除非用户明确要求时间跳跃，例如“第二天”“多年后”“转场到”，否则严禁直接跳到未来时间点。让故事在此刻自然流动。`;
+}
+
+const offlineSelfReviewPrompt = `输出前内部自我检测：
+请在内部沿 12 个维度检查并打磨正文，但不要输出检查过程、亮点、问题列表或分析文字。
+1. 叙事逻辑与因果链：每个转折和情绪变化都有前因，不靠作者全知硬推。
+2. 人物立体性与独立性：角色不是单一恋爱模板，有自己的生活、缺点和外部压力。
+3. 对话质感与潜文本：对白符合身份与情绪，有沉默、停顿、话里有话。
+4. 心理描写克制精准：心理段服务人物和情感，不把人物写得过于清醒全知。
+5. 环境描写功能性：环境与情绪呼应，用具体声音、温度、气味或物件支撑氛围。
+6. 情感节奏：关系升温或拉扯要匹配事件积累，避免提前深情。
+7. 关系健康度：保持边界、平等与相互性，避免单方面拯救或控制。
+8. 生活实感：加入自然的日常细节、时间压力或现实琐事，避免悬浮。
+9. 对话与动作协调：重要对白配合具体动作、空间距离和潜意识反应。
+10. 人物关系网：角色世界里可以有工作、朋友、家人或外部事件介入。
+11. 语言风格统一：贯彻白描或用户自定义文风，不突然切换语体和视角。
+12. 阅读体验：保留想象空间和余韵，在恰当处收住。
+完成内部检查后，对正文进行最后一次精修，只输出符合 JSON 格式的最终版本。`;
+
+function renderOfflineSettingsPrompt(settings: ConversationOfflineSettings | null | undefined, context: PromptContext) {
+  const offlineSettings = normalizeOfflineSettings(settings ?? defaultOfflineSettings);
+  const characterName = context.character.name;
+  const userName = context.boundUser.name || context.user.name;
+  const writingStylePreset = activeOfflineWritingStylePreset(offlineSettings);
+  const tonePreset = activeOfflineTonePreset(offlineSettings);
+
+  return [
+    '线下章节写作设置：',
+    renderOfflineWritingStyleInstruction(writingStylePreset),
+    renderOfflineToneInstruction(tonePreset),
+    renderOfflinePerspectiveInstruction(offlineSettings.perspective, characterName, userName),
+    renderOfflinePsychologyInstruction(offlineSettings.characterPsychology, characterName, userName),
+    renderOfflineInterruptionInstruction(offlineSettings.interruptionMode, characterName, userName),
+    renderOfflineProhibitedInstruction(characterName, userName),
+    renderOfflineRhythmInstruction(offlineSettings),
+    offlineSettings.enhanceAppearance
+      ? '增强外貌描写：开启。自然补足与当前动作、距离、光线相关的外貌细节。'
+      : '增强外貌描写：关闭。外貌只在剧情必要时简洁出现。',
+    offlineSettings.enhanceOutfit
+      ? '增强服饰描写：开启。自然写入与场景、姿态和角色习惯相关的服饰细节。'
+      : '增强服饰描写：关闭。服饰不主动扩写。',
+    offlineSettings.expandLength
+      ? '增加对话篇幅：开启。在不灌水的前提下扩展互动、环境和动作过渡。'
+      : '增加对话篇幅：关闭。按默认篇幅完成本章。',
+    offlineParagraphInstruction[offlineSettings.paragraphMode],
+    offlineSelfReviewPrompt
+  ].join('\n');
+}
 
 const promptMessageTimeFormatter = new Intl.DateTimeFormat('zh-CN', {
   year: 'numeric',
@@ -383,6 +552,7 @@ export function selectWorldBooks(context: PromptContext) {
 
 export function buildPrompt(context: PromptContext) {
   const selectedWorldBooks = selectWorldBooks(context);
+  const outputPrompt = context.mode === 'online' ? profileMutationPrompt : offlineReplyOutputPrompt;
   const includeMessageTime = normalizeTimeAwarenessSettings(context.timeAwareness).enabled;
   const timeAwarenessPrompt = renderTimeAwarenessPrompt(context.timeAwareness, {
     userName: context.boundUser.name || context.user.name
@@ -408,7 +578,7 @@ export function buildPrompt(context: PromptContext) {
     .join('\n');
 
   return [
-    replaceTokens(`${baseRoleplayPrompt}\n\n${strictRoleplayRules}\n\n${profileMutationPrompt}`, {
+    replaceTokens(`${baseRoleplayPrompt}\n\n${strictRoleplayRules}\n\n${outputPrompt}`, {
       '{{char}}': context.character.name,
       '{{char_nickname}}': context.character.nickname,
       '{{char_signature}}': context.character.signature,
@@ -419,6 +589,7 @@ export function buildPrompt(context: PromptContext) {
       '{{bound_user_signature}}': context.boundUser.signature
     }),
     modeInstructions[context.mode],
+    context.mode === 'offline' ? renderOfflineSettingsPrompt(context.offlineSettings, context) : '',
     context.mode === 'online' ? onlineStickerSemanticsPrompt : '',
     context.mode === 'online' && context.narrationModeEnabled
       ? replaceTokens(narrationModePrompt, {
@@ -430,9 +601,11 @@ export function buildPrompt(context: PromptContext) {
     `当前对话总结：\n${context.conversationSummary || '暂无总结。'}`,
     `记忆手册：\n${context.memorySummary || '暂无记忆手册。'}`,
     `世界书：\n${renderWorldBooks(selectedWorldBooks, context) || '无启用条目。'}`,
-    'Sticker / 图片 / 语音 / 定位 / 转账规则：用户发送 Sticker 时，文字描述是用户提供的贴纸含义。用户发送真实图片时，若本次请求附带图片，你可以观察图片内容；用户发送文字描述卡片时，必须理解为“用户发送了一张图片，图片内容为描述文本”，虽然没有真实图片文件，也要按图片内容参与对话。用户或角色发送语音时，必须理解为对方用语音消息说出了对应文字内容，不要把它当成普通打字消息；角色也可以在合适时用 voice 项主动发送语音条。用户发送定位时，必须理解为用户把自己的当前位置发给了你，并告知了用户与角色之间的距离；角色也可以在合适时用 location 项主动发送自己的定位。用户发送转账时，必须理解为用户确实向你发起了对应金额的转账；你可以在后续按角色意愿接收或拒绝。角色也可以在合适时用 transfer 项主动向用户转账，等待用户接收或拒绝。若未附带真实图片，不要臆造描述之外的图片细节。',
-    `角色可用 Stickers：\n${renderAvailableStickers(context)}`,
-    context.replyInstruction ? `本次生成任务：\n${context.replyInstruction}` : '',
+    context.mode === 'online'
+      ? 'Sticker / 图片 / 语音 / 定位 / 转账规则：用户发送 Sticker 时，文字描述是用户提供的贴纸含义。用户发送真实图片时，若本次请求附带图片，你可以观察图片内容；用户发送文字描述卡片时，必须理解为“用户发送了一张图片，图片内容为描述文本”，虽然没有真实图片文件，也要按图片内容参与对话。用户或角色发送语音时，必须理解为对方用语音消息说出了对应文字内容，不要把它当成普通打字消息；角色也可以在合适时用 voice 项主动发送语音条。用户发送定位时，必须理解为用户把自己的当前位置发给了你，并告知了用户与角色之间的距离；角色也可以在合适时用 location 项主动发送自己的定位。用户发送转账时，必须理解为用户确实向你发起了对应金额的转账；你可以在后续按角色意愿接收或拒绝。角色也可以在合适时用 transfer 项主动向用户转账，等待用户接收或拒绝。若未附带真实图片，不要臆造描述之外的图片细节。'
+      : '',
+    context.mode === 'online' ? `角色可用 Stickers：\n${renderAvailableStickers(context)}` : '',
+    context.mode === 'online' && context.replyInstruction ? `本次生成任务：\n${context.replyInstruction}` : '',
     `最近对话：\n${history || '暂无。'}`
   ].filter(Boolean).join('\n\n');
 }

@@ -50,6 +50,7 @@ export type RoleplayReplySegment =
 export interface RoleplayReplyResult {
   reply: string;
   replies?: string[];
+  plotChoices?: string[];
   replyTranslations?: string[];
   narrations?: string[];
   images?: Array<{ description: string }>;
@@ -793,6 +794,49 @@ function normalizeReplyMessages(payload: unknown) {
     if (replies.length) return replies;
   }
   return [];
+}
+
+const plotChoiceBlockPattern = /(?:\[\[PLOT_CHOICES\]\]|【剧情选择】|<plotChoices>)([\s\S]*?)(?:\[\[\/PLOT_CHOICES\]\]|【\/剧情选择】|<\/plotChoices>)/gi;
+
+function parsePlotChoicesFromText(content: string) {
+  const choices: string[] = [];
+  const cleaned = content.replace(plotChoiceBlockPattern, (_match, body: string) => {
+    choices.push(...normalizePlotChoices(body));
+    return '';
+  }).trim();
+  return { content: cleaned, choices };
+}
+
+function normalizePlotChoices(value: unknown): string[] {
+  if (Array.isArray(value)) return value.flatMap((item) => normalizePlotChoices(item)).slice(0, 6);
+  if (typeof value === 'string' || typeof value === 'number') {
+    return String(value)
+      .split(/\r?\n+/)
+      .map((item) => item.replace(/^(?:[-*•]|\d+[.)、：:]|选项\s*\d+[:：]?|剧情\s*\d+[:：]?)\s*/, '').trim())
+      .filter(Boolean)
+      .slice(0, 6);
+  }
+  if (value && typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    const candidates = [record.content, record.text, record.choice, record.option, record.direction, record.summary];
+    for (const candidate of candidates) {
+      const choices = normalizePlotChoices(candidate);
+      if (choices.length) return choices;
+    }
+  }
+  return [];
+}
+
+function normalizeNestedPlotChoices(value: unknown): string[] {
+  if (Array.isArray(value)) return value.flatMap((item) => normalizeNestedPlotChoices(item)).slice(0, 6);
+  if (!value || typeof value !== 'object') return [];
+  const record = value as Record<string, unknown>;
+  return [
+    ...normalizePlotChoices(record.plotChoices),
+    ...normalizePlotChoices(record.choices),
+    ...normalizePlotChoices(record.storyChoices),
+    ...normalizePlotChoices(record.directions)
+  ].slice(0, 6);
 }
 
 function normalizeTranslationFragments(value: unknown): string[] {
@@ -1817,8 +1861,26 @@ export async function generateRoleplayReply(input: GenerateReplyInput): Promise<
       const parsedRecord = parsed && typeof parsed === 'object' && !Array.isArray(parsed)
         ? parsed as Partial<RoleplayReplyResult>
         : {};
-      const replies = normalizeReplyMessages(parsed);
       const parsedRecordAny = parsedRecord as Record<string, unknown>;
+      const hiddenPlotChoices: string[] = [];
+      const replies = normalizeReplyMessages(parsed)
+        .map((reply) => {
+          const parsedReply = parsePlotChoicesFromText(reply);
+          hiddenPlotChoices.push(...parsedReply.choices);
+          return parsedReply.content || reply;
+        })
+        .filter(Boolean);
+      const plotChoices = input.mode === 'offline'
+        ? [...new Set([
+          ...normalizePlotChoices(parsedRecordAny.plotChoices),
+          ...normalizePlotChoices(parsedRecordAny.choices),
+          ...normalizePlotChoices(parsedRecordAny.storyChoices),
+          ...normalizePlotChoices(parsedRecordAny.directions),
+          ...normalizeNestedPlotChoices(parsedRecordAny.messages),
+          ...normalizeNestedPlotChoices(parsedRecordAny.replies),
+          ...hiddenPlotChoices
+        ].map((item) => item.trim()).filter(Boolean))].slice(0, 6)
+        : [];
       const replyTranslations = normalizeTranslationMessages(parsed);
       const narrations = input.mode === 'online' && input.narrationModeEnabled
         ? normalizeNarrationLines(parsedRecordAny.narrations ?? parsedRecordAny.narrationMessages ?? parsedRecordAny.actionNarrations ?? parsedRecordAny.actions)
@@ -1847,6 +1909,7 @@ export async function generateRoleplayReply(input: GenerateReplyInput): Promise<
       return JSON.stringify({
         reply: replies[0] ?? '',
         replies,
+        plotChoices,
         replyTranslations,
         narrations: narrations.slice(0, 3),
         images,
@@ -1869,8 +1932,15 @@ export async function generateRoleplayReply(input: GenerateReplyInput): Promise<
           : null
       } satisfies RoleplayReplyResult);
     } catch {
-      const replies = input.mode === 'online' ? normalizeRawOnlineReply(apiReply) : [apiReply];
-      return JSON.stringify({ reply: replies[0] ?? '', replies, narrations: [], images: [], stickers: [], stickerPlacements: [], segments: [], messageActions: { recallMessageIds: [], quotes: [] }, profileUpdate: null } satisfies RoleplayReplyResult);
+      const hiddenPlotChoices: string[] = [];
+      const replies = (input.mode === 'online' ? normalizeRawOnlineReply(apiReply) : [apiReply])
+        .map((reply) => {
+          const parsedReply = parsePlotChoicesFromText(reply);
+          hiddenPlotChoices.push(...parsedReply.choices);
+          return parsedReply.content || reply;
+        });
+      const plotChoices = input.mode === 'offline' ? [...new Set(hiddenPlotChoices)].slice(0, 6) : [];
+      return JSON.stringify({ reply: replies[0] ?? '', replies, plotChoices, narrations: [], images: [], stickers: [], stickerPlacements: [], segments: [], messageActions: { recallMessageIds: [], quotes: [] }, profileUpdate: null } satisfies RoleplayReplyResult);
     }
   }
   throw new Error('角色回复模型没有返回内容。');

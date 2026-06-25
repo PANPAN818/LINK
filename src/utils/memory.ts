@@ -1,4 +1,4 @@
-import type { ChatMemorySettings, ChatMessage, ChatMode, ConversationMemoryRecord, ConversationSettings } from '@/types/domain';
+import type { ChatMemorySettings, ChatMessage, ChatMode, ConversationMemoryRecord, ConversationOfflineSettings, ConversationSettings, OfflineInterruptionMode, OfflineParagraphMode, OfflinePerspective, OfflinePromptPreset, OfflineTonePreset } from '@/types/domain';
 import { createId } from './id';
 import { normalizeChatModelOverrides } from './settings';
 import { defaultTimeAwarenessSettings, normalizeTimeAwarenessSettings } from './timeAwareness';
@@ -14,6 +14,159 @@ export const defaultChatMemorySettings: ChatMemorySettings = {
   vectorMemoryEnabled: true,
   hideSummarizedMessages: true
 };
+
+export const defaultOfflineWritingStylePresets: OfflinePromptPreset[] = [
+  {
+    id: 'baimiao',
+    name: '白描',
+    content: '采用白描式叙事。只照亮此刻正在发生的人、物、动作和对话；少写背景和解释。语言朴素透明，不用华丽辞藻、夸张比喻或情绪宣告。用具体物件、动作、停顿和空间距离承载情绪，让读者自己读出未说出口的东西。'
+  },
+  {
+    id: 'dialogue-driven',
+    name: '对话推进',
+    content: '让对白承担主要推进力。叙述只保留必要动作、停顿和空间变化，每句对白都要符合人物身份、情绪和关系距离。允许欲言又止、岔开话题、沉默和答非所问。'
+  },
+  {
+    id: 'sensory-slow',
+    name: '慢镜头感官',
+    content: '放慢关键瞬间。用声音、温度、气味、触感和细小动作呈现场景，不急着解释情绪。每一段都围绕当下可感知的细节展开，避免跳场和总结式叙述。'
+  }
+];
+
+export const defaultOfflineTonePresets: OfflinePromptPreset[] = [
+  {
+    id: 'daily',
+    name: '日常',
+    content: '基调是平实的日常。重点写生活正在继续：消息、饭点、天气、工作或学习的残留、房间里的物件、临时被打断的琐事。情绪轻轻落在动作里，不要突然拔高。'
+  },
+  {
+    id: 'push-pull',
+    name: '拉扯',
+    content: '基调是克制的拉扯。人物会靠近又收回，说出口的话比真实想法少半寸。用停顿、改口、避开视线、重复小动作和空间距离表现试探，不要让关系进展过快。'
+  },
+  {
+    id: 'ambiguous',
+    name: '暧昧',
+    content: '基调是低温暧昧。亲近感来自细节和误差：一句普通话被听出别的意思，一次短暂停留，一件被顺手整理的小事。不要直白告白，保留不确定和余温。'
+  },
+  {
+    id: 'romance',
+    name: '热恋',
+    content: '基调是明亮而具体的热恋。互动可以更直接、更柔软，但仍要有真实生活的边界和琐碎感。用对话、触碰前后的停顿、分享日常和自然照顾呈现热度，不写油腻情话。'
+  },
+  {
+    id: 'bittersweet',
+    name: '酸涩',
+    content: '基调是酸涩和留白。人物不是彻底崩溃，而是在正常行动里露出细小裂缝：收好的东西、没说完的话、过期的票据、冷掉的水。情绪要克制，结尾保留余味。'
+  }
+];
+
+const defaultWritingStylePresetId = defaultOfflineWritingStylePresets[0].id;
+const defaultTonePresetId = defaultOfflineTonePresets[0].id;
+
+export const defaultOfflineSettings: ConversationOfflineSettings = {
+  enhanceAppearance: true,
+  enhanceOutfit: true,
+  expandLength: false,
+  characterPsychology: true,
+  paragraphMode: 'mixed',
+  perspective: 'omniscient-third',
+  interruptionMode: 'strict',
+  wordCount: '1200-1800字',
+  writingStylePresetId: defaultWritingStylePresetId,
+  writingStylePresets: defaultOfflineWritingStylePresets,
+  writingStyle: defaultOfflineWritingStylePresets[0].content,
+  tonePresetId: defaultTonePresetId,
+  tonePresets: defaultOfflineTonePresets,
+  tone: 'daily',
+  customTone: defaultOfflineTonePresets[0].content
+};
+
+const offlineParagraphModes: OfflineParagraphMode[] = ['long', 'short', 'mixed'];
+const offlinePerspectives: OfflinePerspective[] = ['omniscient-third', 'character-third', 'character-second', 'user-first', 'user-second'];
+const offlineInterruptionModes: OfflineInterruptionMode[] = ['advance', 'strict'];
+const offlineTonePresets: OfflineTonePreset[] = ['daily', 'push-pull', 'ambiguous', 'romance', 'bittersweet', 'custom'];
+
+function normalizeStringOption<T extends string>(value: unknown, allowed: readonly T[], fallback: T) {
+  const normalizedValue = String(value ?? '').trim() as T;
+  return allowed.includes(normalizedValue) ? normalizedValue : fallback;
+}
+
+function normalizePromptPreset(preset: Partial<OfflinePromptPreset> | null | undefined, fallback: OfflinePromptPreset, index: number): OfflinePromptPreset {
+  const id = String(preset?.id ?? '').trim() || `${fallback.id}_${index}`;
+  const name = String(preset?.name ?? '').trim() || fallback.name;
+  const content = String(preset?.content ?? '').trim() || fallback.content;
+  return { id, name, content };
+}
+
+function mergePromptPresets(defaults: OfflinePromptPreset[], presets: unknown): OfflinePromptPreset[] {
+  const sourcePresets = Array.isArray(presets) && presets.length ? presets : defaults;
+  const customPresets = sourcePresets
+    .map((preset, index) => normalizePromptPreset(preset as Partial<OfflinePromptPreset>, defaults[index % defaults.length], index))
+    .filter((preset) => preset.id && preset.name && preset.content);
+  const byId = new Map<string, OfflinePromptPreset>();
+  customPresets.forEach((preset) => {
+    byId.set(preset.id, preset);
+  });
+  const normalized = [...byId.values()];
+  return normalized.length ? normalized : defaults.map((preset) => ({ ...preset }));
+}
+
+function normalizeActivePresetId(presetId: unknown, presets: OfflinePromptPreset[], fallbackId: string) {
+  const normalizedId = String(presetId ?? '').trim();
+  if (presets.some((preset) => preset.id === normalizedId)) return normalizedId;
+  if (presets.some((preset) => preset.id === fallbackId)) return fallbackId;
+  return presets[0]?.id ?? fallbackId;
+}
+
+function legacyTonePresetId(settings: Partial<ConversationOfflineSettings> | null | undefined) {
+  const tone = normalizeStringOption(settings?.tone, offlineTonePresets, defaultOfflineSettings.tone);
+  return tone === 'custom' ? '' : tone;
+}
+
+export function activeOfflineWritingStylePreset(settings: ConversationOfflineSettings) {
+  return settings.writingStylePresets.find((preset) => preset.id === settings.writingStylePresetId) ?? settings.writingStylePresets[0] ?? defaultOfflineWritingStylePresets[0];
+}
+
+export function activeOfflineTonePreset(settings: ConversationOfflineSettings) {
+  return settings.tonePresets.find((preset) => preset.id === settings.tonePresetId) ?? settings.tonePresets[0] ?? defaultOfflineTonePresets[0];
+}
+
+export function normalizeOfflineSettings(settings: Partial<ConversationOfflineSettings> | null | undefined): ConversationOfflineSettings {
+  const legacyWritingStyle = String(settings?.writingStyle ?? '').trim();
+  const writingStylePresets = mergePromptPresets(defaultOfflineWritingStylePresets, settings?.writingStylePresets);
+  if (legacyWritingStyle && !['白描', defaultOfflineWritingStylePresets[0].content].includes(legacyWritingStyle) && !writingStylePresets.some((preset) => preset.content === legacyWritingStyle)) {
+    writingStylePresets.push({ id: 'legacy-writing-style', name: '旧文风', content: legacyWritingStyle });
+  }
+  const writingStylePresetId = normalizeActivePresetId(settings?.writingStylePresetId || (legacyWritingStyle && !['白描', defaultOfflineWritingStylePresets[0].content].includes(legacyWritingStyle) ? 'legacy-writing-style' : defaultWritingStylePresetId), writingStylePresets, defaultWritingStylePresetId);
+
+  const legacyCustomTone = String(settings?.customTone ?? '').trim();
+  const tonePresets = mergePromptPresets(defaultOfflineTonePresets, settings?.tonePresets);
+  if (legacyCustomTone && !tonePresets.some((preset) => preset.content === legacyCustomTone)) {
+    tonePresets.push({ id: 'legacy-tone', name: '旧基调', content: legacyCustomTone });
+  }
+  const tonePresetId = normalizeActivePresetId(settings?.tonePresetId || legacyTonePresetId(settings) || (legacyCustomTone ? 'legacy-tone' : defaultTonePresetId), tonePresets, defaultTonePresetId);
+  const activeWritingStyle = writingStylePresets.find((preset) => preset.id === writingStylePresetId) ?? defaultOfflineWritingStylePresets[0];
+  const activeTone = tonePresets.find((preset) => preset.id === tonePresetId) ?? defaultOfflineTonePresets[0];
+
+  return {
+    enhanceAppearance: settings?.enhanceAppearance ?? defaultOfflineSettings.enhanceAppearance,
+    enhanceOutfit: settings?.enhanceOutfit ?? defaultOfflineSettings.enhanceOutfit,
+    expandLength: settings?.expandLength ?? defaultOfflineSettings.expandLength,
+    characterPsychology: settings?.characterPsychology ?? defaultOfflineSettings.characterPsychology,
+    paragraphMode: normalizeStringOption(settings?.paragraphMode, offlineParagraphModes, defaultOfflineSettings.paragraphMode),
+    perspective: normalizeStringOption(settings?.perspective, offlinePerspectives, defaultOfflineSettings.perspective),
+    interruptionMode: normalizeStringOption(settings?.interruptionMode, offlineInterruptionModes, defaultOfflineSettings.interruptionMode),
+    wordCount: String(settings?.wordCount ?? defaultOfflineSettings.wordCount).trim() || defaultOfflineSettings.wordCount,
+    writingStylePresetId,
+    writingStylePresets,
+    writingStyle: activeWritingStyle.content,
+    tonePresetId,
+    tonePresets,
+    tone: normalizeStringOption(settings?.tone, offlineTonePresets, defaultOfflineSettings.tone),
+    customTone: activeTone.content
+  };
+}
 
 export function renderCharacterMemoryPrompt(prompt: string, characterName: string) {
   const resolvedCharacterName = characterName.trim() || '角色';
@@ -43,7 +196,7 @@ export const defaultConversationSettings: Omit<ConversationSettings, 'conversati
     showReadStatus: true,
     showUserAvatar: false,
     showOnlyFirstAvatarInReply: true,
-    hideVoomNarration: false
+    hideVoomNarration: true
   },
   narrationModeEnabled: true,
   autoGenerateVoom: true,
@@ -56,7 +209,8 @@ export const defaultConversationSettings: Omit<ConversationSettings, 'conversati
     enabled: true,
     frequency: 'medium',
     lastTriggeredAt: 0
-  }
+  },
+  offline: defaultOfflineSettings
 };
 
 export function normalizeConversationSettings(settings: Partial<ConversationSettings> | null | undefined, conversationId: string): ConversationSettings {
@@ -113,7 +267,7 @@ export function normalizeConversationSettings(settings: Partial<ConversationSett
       showReadStatus: appearance.showReadStatus ?? defaultConversationSettings.appearance.showReadStatus,
       showUserAvatar: appearance.showUserAvatar ?? defaultConversationSettings.appearance.showUserAvatar,
       showOnlyFirstAvatarInReply: appearance.showOnlyFirstAvatarInReply ?? defaultConversationSettings.appearance.showOnlyFirstAvatarInReply,
-      hideVoomNarration: appearance.hideVoomNarration ?? defaultConversationSettings.appearance.hideVoomNarration
+      hideVoomNarration: true
     },
     narrationModeEnabled: isLegacySettings ? defaultConversationSettings.narrationModeEnabled : settings?.narrationModeEnabled ?? defaultConversationSettings.narrationModeEnabled,
     autoGenerateVoom: settings?.autoGenerateVoom ?? defaultConversationSettings.autoGenerateVoom,
@@ -128,7 +282,8 @@ export function normalizeConversationSettings(settings: Partial<ConversationSett
       enabled: proactiveReply.enabled ?? defaultConversationSettings.proactiveReply.enabled,
       frequency: normalizeVoomFrequency(proactiveReply.frequency, defaultConversationSettings.proactiveReply.frequency),
       lastTriggeredAt: Math.max(0, Math.floor(Number(proactiveReply.lastTriggeredAt) || 0))
-    }
+    },
+    offline: normalizeOfflineSettings(settings?.offline)
   };
 }
 
@@ -170,6 +325,7 @@ export function getConversationFloors(messages: ChatMessage[]) {
   let currentMessages: ChatMessage[] = [];
 
   for (const message of messages) {
+    if (message.replyVariantState === 'inactive') continue;
     const nextKey = getMessageFloorGroupKey(message);
     if (currentMessages.length && nextKey !== currentKey) {
       floors.push(currentMessages);
@@ -210,7 +366,7 @@ export function getHiddenMessageIds(messages: ChatMessage[], memories: Conversat
 
 export function getVisibleMessages(messages: ChatMessage[], memories: ConversationMemoryRecord[], settings: ConversationSettings) {
   const hiddenIds = getHiddenMessageIds(messages, memories, settings);
-  return messages.filter((message) => !hiddenIds.has(message.id));
+  return messages.filter((message) => !hiddenIds.has(message.id) && message.replyVariantState !== 'inactive');
 }
 
 export function getMemoryContext(memories: ConversationMemoryRecord[]) {

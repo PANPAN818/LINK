@@ -134,6 +134,35 @@ export interface ConversationProactiveReplySettings {
   lastTriggeredAt: number;
 }
 
+export type OfflineParagraphMode = 'long' | 'short' | 'mixed';
+export type OfflinePerspective = 'omniscient-third' | 'character-third' | 'character-second' | 'user-first' | 'user-second';
+export type OfflineInterruptionMode = 'advance' | 'strict';
+export type OfflineTonePreset = 'daily' | 'push-pull' | 'ambiguous' | 'romance' | 'bittersweet' | 'custom';
+
+export interface OfflinePromptPreset {
+  id: string;
+  name: string;
+  content: string;
+}
+
+export interface ConversationOfflineSettings {
+  enhanceAppearance: boolean;
+  enhanceOutfit: boolean;
+  expandLength: boolean;
+  characterPsychology: boolean;
+  paragraphMode: OfflineParagraphMode;
+  perspective: OfflinePerspective;
+  interruptionMode: OfflineInterruptionMode;
+  wordCount: string;
+  writingStylePresetId: string;
+  writingStylePresets: OfflinePromptPreset[];
+  writingStyle: string;
+  tonePresetId: string;
+  tonePresets: OfflinePromptPreset[];
+  tone: OfflineTonePreset;
+  customTone: string;
+}
+
 export interface ConversationSettings {
   conversationId: string;
   memory: ChatMemorySettings;
@@ -147,6 +176,7 @@ export interface ConversationSettings {
   characterStickerGroupIds: string[];
   timeAwareness: ConversationTimeAwarenessSettings;
   proactiveReply: ConversationProactiveReplySettings;
+  offline: ConversationOfflineSettings;
 }
 
 export interface ConversationMemoryRecord {
@@ -299,6 +329,10 @@ export interface ChatMessage {
   transfer?: ChatTransferAttachment;
   quote?: ChatMessageQuote;
   replyBatchId?: string;
+  replyVariantGroupId?: string;
+  replyVariantIndex?: number;
+  replyVariantState?: 'active' | 'inactive';
+  plotChoices?: string[];
   status?: 'sending' | 'sent' | 'failed';
   editedAt?: number;
 }
@@ -672,6 +706,7 @@ export interface PromptContext {
   narrationModeEnabled?: boolean;
   availableStickers?: ChatStickerAttachment[];
   timeAwareness?: ConversationTimeAwarenessSettings;
+  offlineSettings?: ConversationOfflineSettings;
   replyInstruction?: string;
 }
 

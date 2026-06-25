@@ -256,13 +256,6 @@
               <strong>角色与用户的消息仅首条头像</strong>
             </div>
           </label>
-          <label class="switch-card wide">
-            <input v-model="draft.appearance.hideVoomNarration" type="checkbox" @change="saveDraft" />
-            <span class="switch-track"></span>
-            <div>
-              <strong>隐藏 VOOM 旁白</strong>
-            </div>
-          </label>
         </section>
       </section>
 
