@@ -155,11 +155,12 @@ import { computed, reactive, ref } from 'vue';
 import { ImagePlus } from 'lucide-vue-next';
 import AvatarCropperModal from '@/components/image/AvatarCropperModal.vue';
 import type { UserProfile, WorldBookEntry } from '@/types/domain';
+import { defaultNewFriendSignature } from '@/utils/character';
 import { importSillyTavernCharacterCard, type ImportedCharacterCard } from '@/utils/characterCard';
 import { readImageFileFromInput } from '@/utils/imageFile';
 
 const defaultAvatarSeed = 'NewFriend';
-const defaultSignature = '该用户很懒，什么也没留下';
+const defaultSignature = defaultNewFriendSignature;
 const defaultAvatar = `data:image/svg+xml;utf8,${encodeURIComponent(`
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" role="img" aria-label="默认角色头像">
     <defs>

@@ -69,6 +69,11 @@ export interface CharacterMindState {
   sourceConversationId?: string;
 }
 
+export interface CharacterInitialProfile {
+  nickname: string;
+  signature: string;
+}
+
 export interface CharacterProfile {
   id: string;
   nickname: string;
@@ -82,6 +87,7 @@ export interface CharacterProfile {
   lastSeen: string;
   localWorldBookIds: string[];
   voomFrequency: VoomFrequency;
+  initialProfile?: CharacterInitialProfile;
   profile?: VisualProfile;
   mindState?: CharacterMindState;
   modelOverrides?: ChatModelOverrides;

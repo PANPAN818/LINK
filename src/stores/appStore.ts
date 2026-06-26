@@ -4,7 +4,7 @@ import { deleteEntity, loadSnapshot, putEntity, replaceSnapshot } from '@/data/d
 import { defaultSettings } from '@/data/seed';
 import type { AppSettings, AppSnapshot, CharacterProfile, ChatImageAttachment, ChatImageCandidate, ChatLocationAttachment, ChatMessage, ChatMessageQuote, ChatMode, ChatModelOverrides, ChatModelScope, ChatTransferAttachment, ChatTransferStatus, ChatVoiceAttachment, Conversation, ConversationMemoryRecord, ConversationSettings, GeneratedImageRecord, ImageModuleId, MusicCommentThread, MusicTrack, Sticker, StickerGroup, UserProfile, VisualProfile, VoomComment, VoomFrequency, VoomImageCandidate, VoomPost, VoomPostVisibility, WorldBookEntry } from '@/types/domain';
 import { createAccountId, createId } from '@/utils/id';
-import { getCharacterVoomAuthorName, normalizeCharacterMindStateLines, normalizeCharacterProfile } from '@/utils/character';
+import { getCharacterInitialProfile, getCharacterVoomAuthorName, normalizeCharacterMindStateLines, normalizeCharacterProfile } from '@/utils/character';
 import { normalizeUserProfile, normalizeVisualProfile } from '@/utils/profile';
 import { getImageGenerationSize, getImagePromptPresetForProvider, getSelectedImageModelOption, mergeVendorModels, normalizeAppSettings, normalizeChatModelOverrides } from '@/utils/settings';
 import { normalizeWorldBookEntry, normalizeWorldBooks } from '@/utils/worldBook';
@@ -1086,8 +1086,11 @@ export const useAppStore = defineStore('app', () => {
   }
 
   async function saveCharacter(nextCharacter: CharacterProfile) {
-    const normalizedCharacter = normalizeCharacterProfile(nextCharacter, user.value?.id || users.value[0]?.id || '');
-    const existingCharacter = characters.value.find((character) => character.id === normalizedCharacter.id);
+    const existingCharacter = characters.value.find((character) => character.id === nextCharacter.id);
+    const characterToNormalize = existingCharacter?.initialProfile && !nextCharacter.initialProfile
+      ? { ...nextCharacter, initialProfile: existingCharacter.initialProfile }
+      : nextCharacter;
+    const normalizedCharacter = normalizeCharacterProfile(characterToNormalize, user.value?.id || users.value[0]?.id || '');
     const index = characters.value.findIndex((character) => character.id === normalizedCharacter.id);
     if (index >= 0) characters.value[index] = normalizedCharacter;
     else characters.value.push(normalizedCharacter);
@@ -1377,6 +1380,10 @@ export const useAppStore = defineStore('app', () => {
       avatar: payload.avatar,
       description: payload.description,
       signature: payload.signature,
+      initialProfile: {
+        nickname: payload.nickname,
+        signature: payload.signature
+      },
       userNote: payload.userNote ?? '',
       boundUserId: payload.boundUserId,
       subtitle: '刚刚成为好友',
@@ -1513,6 +1520,7 @@ export const useAppStore = defineStore('app', () => {
       .filter(Boolean));
     const postsToDelete: VoomPost[] = [];
     const postsToUpdate: VoomPost[] = [];
+    const initialProfile = getCharacterInitialProfile(character);
 
     for (const post of voomPosts.value) {
       const postConversationIds = post.conversationIds?.map((id) => id.trim()).filter(Boolean) ?? [];
@@ -1578,6 +1586,9 @@ export const useAppStore = defineStore('app', () => {
 
     const nextCharacter = normalizeCharacterProfile({
       ...character,
+      nickname: initialProfile.nickname,
+      signature: initialProfile.signature,
+      initialProfile,
       subtitle: '刚刚成为好友',
       lastSeen: '现在',
       voomFrequency: 'medium',
@@ -1589,6 +1600,8 @@ export const useAppStore = defineStore('app', () => {
 
     const nextConversation = conversation ? {
       ...conversation,
+      title: nextCharacter.nickname,
+      userId: nextCharacter.boundUserId,
       activeMode: 'online' as const,
       updatedAt: now,
       unreadCount: 0,

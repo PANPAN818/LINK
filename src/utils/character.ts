@@ -1,8 +1,9 @@
-import type { CharacterProfile } from '@/types/domain';
+import type { CharacterInitialProfile, CharacterProfile } from '@/types/domain';
 import { normalizeVisualProfile } from '@/utils/profile';
 import { normalizeChatModelOverrides } from '@/utils/settings';
 import { normalizeVoomFrequency } from '@/utils/voom';
 
+export const defaultNewFriendSignature = '该用户很懒，什么也没留下';
 const defaultCharacterSignature = '这个角色还没有写个性签名。';
 const maxMindStateLines = 5;
 
@@ -34,7 +35,24 @@ export function getCharacterVoomAuthorName(character: Pick<CharacterProfile, 'us
   return String(character.userNote ?? '').trim() || String(character.nickname ?? '').trim() || 'new.friend';
 }
 
+function normalizeCharacterInitialProfile(initialProfile: Partial<CharacterInitialProfile> | null | undefined, fallback: CharacterInitialProfile) {
+  if (!initialProfile || typeof initialProfile !== 'object') return undefined;
+  const nickname = String(initialProfile.nickname ?? '').trim() || fallback.nickname;
+  const signature = String(initialProfile.signature ?? '').trim() || fallback.signature || defaultNewFriendSignature;
+  return { nickname, signature };
+}
+
+export function getCharacterInitialProfile(character: Pick<CharacterProfile, 'initialProfile' | 'nickname' | 'name'>): CharacterInitialProfile {
+  const nickname = String(character.initialProfile?.nickname ?? '').trim()
+    || String(character.name ?? '').trim()
+    || String(character.nickname ?? '').trim()
+    || 'new.friend';
+  const signature = String(character.initialProfile?.signature ?? '').trim() || defaultNewFriendSignature;
+  return { nickname, signature };
+}
+
 export function normalizeCharacterProfile(character: CharacterProfile, fallbackUserId = ''): CharacterProfile {
+  const { initialProfile: rawInitialProfile, ...characterBase } = character;
   const nickname = String(character.nickname ?? '').trim() || String(character.name ?? '').trim() || 'new.friend';
   const name = String(character.name ?? '').trim() || nickname;
   const description = String(character.description ?? '').trim();
@@ -52,9 +70,10 @@ export function normalizeCharacterProfile(character: CharacterProfile, fallbackU
     avatar: character.avatar,
     signature
   });
+  const initialProfile = normalizeCharacterInitialProfile(rawInitialProfile, { nickname, signature });
 
   return {
-    ...character,
+    ...characterBase,
     nickname,
     name,
     description,
@@ -67,6 +86,7 @@ export function normalizeCharacterProfile(character: CharacterProfile, fallbackU
     voomFrequency,
     modelOverrides: normalizeChatModelOverrides(character.modelOverrides),
     profile,
+    ...(initialProfile ? { initialProfile } : {}),
     mindState: mindStateLines.length
       ? {
           lines: mindStateLines,
