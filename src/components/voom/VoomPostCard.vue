@@ -119,6 +119,7 @@ import AppModal from '@/components/common/AppModal.vue';
 import type { VoomPost } from '@/types/domain';
 import { formatRelativeDate } from '@/utils/time';
 import { formatContentWithChineseTranslation } from '@/utils/translation';
+import { stripVoomCommentReplyPrefix } from '@/utils/voom';
 
 const props = defineProps<{
   post: VoomPost;
@@ -194,7 +195,11 @@ const shortLikeSummary = computed(() => {
 const displayedLikeSummary = computed(() => compactLikeSummary.value ? shortLikeSummary.value : fullLikeSummary.value);
 
 function commentDisplayContent(comment: VoomPost['comments'][number]) {
-  return formatContentWithChineseTranslation(comment.content, comment.contentTranslation);
+  const targetName = replyTargetName(comment.parentId);
+  return formatContentWithChineseTranslation(
+    stripVoomCommentReplyPrefix(comment.content, targetName),
+    comment.contentTranslation ? stripVoomCommentReplyPrefix(comment.contentTranslation, targetName) : comment.contentTranslation
+  );
 }
 
 function openCommentComposer(parentId = '') {

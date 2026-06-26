@@ -19,3 +19,31 @@ export function normalizeVoomFrequency(value: unknown, fallback: VoomFrequency =
 export function getVoomFrequencyChance(frequency: VoomFrequency) {
   return voomFrequencyOptions.find((option) => option.value === frequency)?.chance ?? 0.25;
 }
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+export function stripVoomCommentReplyPrefix(content: string, targetName = '') {
+  let normalized = content.trim();
+  const target = targetName.trim();
+
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const previous = normalized;
+    if (target) {
+      const escapedTarget = escapeRegExp(target);
+      normalized = normalized
+        .replace(new RegExp(`^(?:回复\\s*)+${escapedTarget}\\s*[：:，,、-]?\\s*`, 'u'), '')
+        .replace(new RegExp(`^@${escapedTarget}\\s*[：:，,、-]?\\s*`, 'u'), '')
+        .trim();
+    }
+    normalized = normalized
+      .replace(/^(?:回复\s*){2,}/u, '回复 ')
+      .replace(/^回复\s+[^：:，,、\s]{1,24}\s*[：:，,、-]+\s*/u, '')
+      .replace(/^@[^：:，,、\s]{1,24}\s*[：:，,、-]?\s*/u, '')
+      .trim();
+    if (normalized === previous) break;
+  }
+
+  return normalized || content.trim();
+}

@@ -36,6 +36,7 @@ import { X } from 'lucide-vue-next';
 import { useAppStore } from '@/stores/appStore';
 import type { VoomComment, VoomPost } from '@/types/domain';
 import { formatContentWithChineseTranslation } from '@/utils/translation';
+import { stripVoomCommentReplyPrefix } from '@/utils/voom';
 
 const seenStorageKey = 'link:global-voom-notices:seen-posts';
 
@@ -96,7 +97,11 @@ function voomNoticeReplyTargetName(parentId?: string) {
 }
 
 function voomCommentDisplayContent(comment: VoomComment) {
-  return formatContentWithChineseTranslation(comment.content, comment.contentTranslation);
+  const targetName = voomNoticeReplyTargetName(comment.parentId);
+  return formatContentWithChineseTranslation(
+    stripVoomCommentReplyPrefix(comment.content, targetName),
+    comment.contentTranslation ? stripVoomCommentReplyPrefix(comment.contentTranslation, targetName) : comment.contentTranslation
+  );
 }
 
 watch(

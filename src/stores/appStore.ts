@@ -15,7 +15,7 @@ import { estimateRoleplayReplyInputTokens, fetchVendorModels, generateConversati
 import { GitHubBackupError, downloadGitHubBackup, downloadGitHubBackupVersion, ensureGitHubBackupRepository, formatGitHubBackupError, listGitHubBackupHistory, uploadGitHubBackup } from '@/services/githubBackup';
 import { synthesizeSpeech } from '@/services/tts';
 import { createLinkBackupFile, parseLinkBackupFileText, parseLinkBackupText } from '@/utils/backup';
-import { getVoomFrequencyChance } from '@/utils/voom';
+import { getVoomFrequencyChance, stripVoomCommentReplyPrefix } from '@/utils/voom';
 
 interface CreateUserVoomPostPayload {
   userId: string;
@@ -3615,8 +3615,9 @@ export const useAppStore = defineStore('app', () => {
   }
 
   async function addVoomComment(postId: string, content: string, parentId = '') {
-    const trimmedContent = content.trim();
     const post = voomPosts.value.find((entry) => entry.id === postId);
+    const parentName = parentId ? post?.comments.find((entry) => entry.id === parentId)?.authorName ?? '' : '';
+    const trimmedContent = stripVoomCommentReplyPrefix(content, parentName);
     if (!post || !trimmedContent) return;
 
     const currentUser = user.value;
@@ -3730,18 +3731,28 @@ export const useAppStore = defineStore('app', () => {
       const characterAuthorAliases = new Set([character.nickname, character.name, post.authorName, characterVoomAuthorName]
         .map((name) => name.trim().toLocaleLowerCase())
         .filter(Boolean));
+      const replyAuthorNameForIndex = (index: number) => {
+        const authorName = replies[index]?.authorName.trim() ?? '';
+        return characterAuthorAliases.has(authorName.toLocaleLowerCase()) ? characterVoomAuthorName : authorName;
+      };
+      const replyParentName = (parentId: string) => {
+        const existingComment = post.comments.find((comment) => comment.id === parentId);
+        if (existingComment) return existingComment.authorName;
+        const generatedIndex = generatedIds.indexOf(parentId);
+        return generatedIndex >= 0 ? replyAuthorNameForIndex(generatedIndex) : '';
+      };
       const nextComments: VoomComment[] = replies.map((reply, index) => {
         const resolvedParentId = reply.parentId && existingCommentIds.has(reply.parentId)
           ? reply.parentId
           : reply.parentId
             ? generatedIdByDraftId.get(reply.parentId)
             : '';
-        const replyAuthorName = reply.authorName.trim();
+        const parentName = resolvedParentId ? replyParentName(resolvedParentId) : '';
         return {
           id: generatedIds[index],
-          authorName: characterAuthorAliases.has(replyAuthorName.toLocaleLowerCase()) ? characterVoomAuthorName : replyAuthorName,
-          content: reply.content,
-          contentTranslation: reply.contentTranslation,
+          authorName: replyAuthorNameForIndex(index),
+          content: stripVoomCommentReplyPrefix(reply.content, parentName),
+          contentTranslation: reply.contentTranslation ? stripVoomCommentReplyPrefix(reply.contentTranslation, parentName) : undefined,
           parentId: resolvedParentId && resolvedParentId !== generatedIds[index] ? resolvedParentId : undefined,
           createdAt: createdAt + index
         };

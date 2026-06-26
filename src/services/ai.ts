@@ -6,7 +6,7 @@ import { defaultNovelAiModels, defaultPollinationsModels, getImageGenerationSize
 import { estimateTokenCount } from '@/utils/memory';
 import { renderTimeAwarenessPrompt } from '@/utils/timeAwareness';
 import { formatContentWithChineseTranslation, normalizeTranslationText } from '@/utils/translation';
-import { getVoomFrequencyChance } from '@/utils/voom';
+import { getVoomFrequencyChance, stripVoomCommentReplyPrefix } from '@/utils/voom';
 import { buildMomentPrompt, buildPrompt } from './prompt';
 
 const modelSelectionSeparator = '::';
@@ -1380,7 +1380,7 @@ function normalizeVoomMomentComments(input: unknown): VoomMomentPayload['comment
     if (!comment || typeof comment !== 'object') continue;
     const entry = comment as Record<string, unknown>;
     const authorName = String(entry.authorName ?? '').trim();
-    const content = String(entry.content ?? '').trim();
+    const content = stripVoomCommentReplyPrefix(String(entry.content ?? ''));
     const contentTranslation = normalizeTranslationText(entry.contentTranslation ?? entry.translation ?? entry.translationZh ?? entry.chineseTranslation);
     const parentId = String(entry.parentId ?? '').trim();
     if (!authorName || !content) continue;
@@ -1550,7 +1550,7 @@ function normalizeVoomCommentReplies(input: unknown, fallbackAuthorName: string,
     const authorName = String(reply.authorName ?? '').trim() || fallbackAuthorName;
     if (blockedAuthors.has(authorName.toLocaleLowerCase())) continue;
 
-    const content = String(reply.content ?? '').trim();
+    const content = stripVoomCommentReplyPrefix(String(reply.content ?? ''));
     if (!content) continue;
 
     const contentTranslation = normalizeTranslationText(reply.contentTranslation ?? reply.translation ?? reply.translationZh ?? reply.chineseTranslation);
@@ -2150,7 +2150,7 @@ function normalizeUserVoomComments(input: unknown, targetCharacters: CharacterPr
   for (const entry of source) {
     if (comments.length >= 6 || !entry || typeof entry !== 'object') continue;
     const record = entry as Record<string, unknown>;
-    const content = String(record.content ?? record.text ?? record.comment ?? '').trim();
+    const content = stripVoomCommentReplyPrefix(String(record.content ?? record.text ?? record.comment ?? ''));
     if (!content) continue;
 
     const requestedAuthorKey = String(record.authorId ?? record.characterId ?? record.authorName ?? '').trim().toLocaleLowerCase();

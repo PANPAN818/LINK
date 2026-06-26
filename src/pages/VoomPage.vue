@@ -594,6 +594,8 @@ async function confirmCreateUserVoomPost() {
   --top-icon-button-width: 26px;
   --top-icon-button-height: 30px;
   --top-icon-gap: 1px;
+  padding-bottom: calc(var(--tab-height) + var(--safe-bottom) + 24px);
+  scroll-padding-bottom: calc(var(--tab-height) + var(--safe-bottom) + 24px);
 }
 
 .voom-page :deep(.image-model-button) {
