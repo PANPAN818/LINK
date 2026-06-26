@@ -1,4 +1,4 @@
-import type { ChatMode, ConversationOfflineSettings, OfflinePromptPreset, PromptContext, WorldBookEntry, WorldBookLoreEntry } from '@/types/domain';
+import type { ChatMode, ConversationOfflineSettings, OfflinePromptPreset, PromptContext, VoomPost, WorldBookEntry, WorldBookLoreEntry } from '@/types/domain';
 import { normalizeTimeAwarenessSettings, renderTimeAwarenessPrompt } from '@/utils/timeAwareness';
 import { activeOfflineTonePreset, activeOfflineWritingStylePreset, defaultOfflineSettings, normalizeOfflineSettings } from '@/utils/memory';
 
@@ -611,6 +611,30 @@ export function buildPrompt(context: PromptContext) {
   ].filter(Boolean).join('\n\n');
 }
 
+function formatRecentVoomPostForPrompt(post: VoomPost, index: number) {
+  return [
+    `${index + 1}. ${post.content.trim()}`,
+    post.imageDescription?.trim() ? `配图：${post.imageDescription.trim()}` : ''
+  ].filter(Boolean).join('\n');
+}
+
+function renderRecentVoomDiversityPrompt(context: PromptContext) {
+  const recentPosts = (context.recentVoomPosts ?? [])
+    .filter((post) => post.content.trim() || post.imageDescription?.trim())
+    .slice(0, 12);
+  if (!recentPosts.length) {
+    return '该角色暂无近期 VOOM 历史。仍然要从当前对话和角色生活里挑一个具体、独特的瞬间，不要写泛泛的“日常”“天气”“想法”。';
+  }
+
+  return [
+    '该角色近期已经发布过这些 VOOM，下面内容是严格避雷表，不是参考范文：',
+    recentPosts.map(formatRecentVoomPostForPrompt).join('\n\n'),
+    '本次必须换一个明显不同的生活切面、事件触发点、物件、地点、时间感和情绪重心。',
+    '禁止复用上述动态的核心话题、画面元素、句式节奏或同类感慨；如果近期写过咖啡/天气/窗边/夜晚/疲惫/路上/房间/随手拍，这次就换成角色生活里另一个具体事件。',
+    '输出前自检：新动态能否用一句话清楚说出“它和最近每一条哪里不一样”。如果说不出来，就重写。'
+  ].join('\n');
+}
+
 export function buildMomentPrompt(context: PromptContext) {
-  return `${buildPrompt(context)}\n\n现在生成角色要发布的一条 LINK VOOM / 朋友圈动态，以及这条动态自然产生的点赞和评论区。只输出 JSON，不要输出 Markdown，不要输出 JSON 以外的任何文字。\n\n格式：\n{\n  "content": "朋友圈正文",\n  "contentTranslation": "只在 content 是非中文外语或粤语时填写简体中文译文，否则留空",\n  "imageDescription": "这条动态会同时发布的一张配图的文字描述",\n  "likes": ["NPC在社交软件上的网名"],\n  "comments": [\n    { "authorName": "NPC在社交软件上的网名", "content": "评论内容", "contentTranslation": "只在 content 是非中文外语或粤语时填写简体中文译文，否则留空" }\n  ]\n}\n\n要求：\n1. content 是角色真正发出去的动态文字，像社交软件朋友圈正文，可以短，可以日常，不要解释设定。\n2. contentTranslation 和每条 comment.contentTranslation 只翻译非中文外语或粤语；中文内容留空。译文必须是自然简体中文，不要加“翻译：”前缀。\n3. imageDescription 是配图画面描述，不是生图提示词，不要写英文标签、相机参数、画质词或模型术语。\n4. 配图内容由角色性格、对话历史、动态正文、最近经历和生活状态决定，不固定题材；可以是自拍、随手拍、物品、街景、餐食、房间、作业、工作现场等任何合理画面。\n5. imageDescription 描述“画面里有什么”和“看起来是什么氛围”，注意环境场景、时间、图片视角、角色设定形象，构图组成部分等，控制在 40-140 个中文字符。\n6. likes 和 comments 来自角色真实社交圈里的 NPC，不要包含{{user}}，也不要使用“NPC”这种占位名字。\n7. comments 控制在 2-6 条，内容要像社交软件评论区里会出现的真实评论。`;
+  return `${buildPrompt(context)}\n\n${renderRecentVoomDiversityPrompt(context)}\n\n现在生成角色要发布的一条 LINK VOOM / 朋友圈动态，以及这条动态自然产生的点赞和评论区。只输出 JSON，不要输出 Markdown，不要输出 JSON 以外的任何文字。\n\n格式：\n{\n  "content": "朋友圈正文",\n  "contentTranslation": "只在 content 是非中文外语或粤语时填写简体中文译文，否则留空",\n  "imageDescription": "这条动态会同时发布的一张配图的文字描述",\n  "likes": ["NPC在社交软件上的网名"],\n  "comments": [\n    { "authorName": "NPC在社交软件上的网名", "content": "评论内容", "contentTranslation": "只在 content 是非中文外语或粤语时填写简体中文译文，否则留空" }\n  ]\n}\n\n要求：\n1. content 是角色真正发出去的动态文字，像社交软件朋友圈正文，可以短，可以日常，不要解释设定。\n2. contentTranslation 和每条 comment.contentTranslation 只翻译非中文外语或粤语；中文内容留空。译文必须是自然简体中文，不要加“翻译：”前缀。\n3. imageDescription 是配图画面描述，不是生图提示词，不要写英文标签、相机参数、画质词或模型术语。\n4. 配图内容由角色性格、对话历史、动态正文、最近经历和生活状态决定，不固定题材；可以是自拍、随手拍、物品、街景、餐食、房间、作业、工作现场等任何合理画面。\n5. imageDescription 描述“画面里有什么”和“看起来是什么氛围”，注意环境场景、时间、图片视角、角色设定形象，构图组成部分等，控制在 40-140 个中文字符。\n6. likes 和 comments 来自角色真实社交圈里的 NPC，不要包含{{user}}，也不要使用“NPC”这种占位名字。\n7. comments 控制在 2-6 条，内容要像社交软件评论区里会出现的真实评论。\n8. 每条 VOOM 都必须独一无二：不要产出和近期 VOOM 内容相似、话题相似、画面相似或情绪模板相似的动态。`;
 }

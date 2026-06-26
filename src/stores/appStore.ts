@@ -2921,7 +2921,10 @@ export const useAppStore = defineStore('app', () => {
 
       const shouldGenerate = options?.generateMoment || (chatSettings.autoGenerateVoom && shouldAutoGenerateMoment(chatSettings.voomFrequency));
       if (shouldGenerate) {
-        await createMomentFromConversation(conversationId);
+        finishConversationReply(conversationId);
+        void createMomentFromConversation(conversationId).catch((error) => {
+          console.error(error);
+        });
       }
     } catch (error) {
       if (options?.proactive) {
@@ -3180,6 +3183,10 @@ export const useAppStore = defineStore('app', () => {
     }
     generatingMomentConversationIds.add(conversationId);
     try {
+      const recentVoomPosts = voomPosts.value
+        .filter((post) => post.authorType !== 'user' && (post.charId === character.id || post.conversationId === conversationId || post.conversationIds?.includes(conversationId)))
+        .sort((first, second) => second.createdAt - first.createdAt)
+        .slice(0, 16);
       const moment = await generateVoomPost(
         {
           user: boundUser,
@@ -3187,6 +3194,7 @@ export const useAppStore = defineStore('app', () => {
           boundUser,
           mode: conversation.activeMode,
           messages: visibleMessagesForConversation(conversationId),
+          recentVoomPosts,
           worldBooks: worldBooks.value,
           conversationSummary: conversation.summary,
           memorySummary: memoryContextForConversation(conversationId),
@@ -3217,7 +3225,8 @@ export const useAppStore = defineStore('app', () => {
           createdAt: post.createdAt
         });
       }
-      await recordVoomPostEvents(post, conversation.activeMode);
+      const latestConversation = conversationById(conversationId) ?? conversation;
+      await recordVoomPostEvents(post, latestConversation.activeMode);
       return post;
     } finally {
       generatingMomentConversationIds.delete(conversationId);

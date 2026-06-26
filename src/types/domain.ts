@@ -701,6 +701,7 @@ export interface PromptContext {
   boundUser: UserProfile;
   mode: ChatMode;
   messages: ChatMessage[];
+  recentVoomPosts?: VoomPost[];
   worldBooks: WorldBookEntry[];
   conversationSummary: string;
   memorySummary?: string;
