@@ -134,33 +134,56 @@
         </section>
       </div>
 
-      <section class="sheet-face sheet-face-back" aria-label="历史资料">
-        <div class="timeline-head">
-          <strong>历史资料</strong>
-        </div>
-
-        <div class="timeline-scroll">
-          <div v-if="profileHistoryItems.length" class="timeline-list">
-            <article v-for="item in profileHistoryItems" :key="item.id" class="timeline-item">
-              <div class="timeline-point"></div>
-              <div class="timeline-content">
-                <div class="timeline-meta">
-                  <span>{{ item.label }}</span>
-                  <time>{{ item.time }}</time>
-                </div>
-                <div class="timeline-change">
-                  <p>{{ item.previousValue || '空白' }}</p>
-                  <b>→</b>
-                  <p>{{ item.nextValue || '空白' }}</p>
-                </div>
-              </div>
-            </article>
-          </div>
-
-          <div v-else class="timeline-empty">还没有资料更改记录</div>
-        </div>
-      </section>
     </div>
+
+    <section
+      class="sheet-face sheet-face-back"
+      role="button"
+      tabindex="0"
+      aria-label="返回资料卡"
+      @pointerdown="startFlipGesture"
+      @pointermove="trackFlipGesture"
+      @pointerup="finishFlipGesture"
+      @pointercancel="cancelFlipGesture"
+      @keydown.enter.prevent="toggleFlip"
+      @keydown.space.prevent="toggleFlip"
+    >
+      <div class="timeline-head">
+        <strong>历史资料</strong>
+      </div>
+
+      <div
+        class="timeline-scroll"
+        @click.stop
+        @pointerdown.stop
+        @pointermove.stop
+        @pointerup.stop
+        @pointercancel.stop
+        @touchstart.stop="startTimelineTouch"
+        @touchmove.stop="moveTimelineTouch"
+        @touchend.stop="endTimelineTouch"
+        @touchcancel.stop="endTimelineTouch"
+      >
+        <div v-if="profileHistoryItems.length" class="timeline-list">
+          <article v-for="item in profileHistoryItems" :key="item.id" class="timeline-item">
+            <div class="timeline-point"></div>
+            <div class="timeline-content">
+              <div class="timeline-meta">
+                <span>{{ item.label }}</span>
+                <time>{{ item.time }}</time>
+              </div>
+              <div class="timeline-change">
+                <p>{{ item.previousValue || '空白' }}</p>
+                <b>→</b>
+                <p>{{ item.nextValue || '空白' }}</p>
+              </div>
+            </div>
+          </article>
+        </div>
+
+        <div v-else class="timeline-empty">还没有资料更改记录</div>
+      </div>
+    </section>
 
     <AvatarCropperModal v-model="showAvatarEditor" :src="avatarEditorSource" @confirm="applyEditedAvatar" />
   </section>
@@ -204,6 +227,7 @@ const avatarEditorSource = ref('');
 let flipGestureStart: { x: number; y: number } | null = null;
 let flipGestureMoved = false;
 const flipGestureMoveThreshold = 10;
+let timelineTouchY: number | null = null;
 
 const recentPosts = computed(() => props.posts
   .filter((post) => post.charId === props.character.id || post.visibleCharacterIds?.includes(props.character.id))
@@ -318,6 +342,32 @@ function cancelFlipGesture() {
   flipGestureMoved = false;
 }
 
+function startTimelineTouch(event: TouchEvent) {
+  const touch = event.touches[0];
+  timelineTouchY = touch ? touch.clientY : null;
+}
+
+function moveTimelineTouch(event: TouchEvent) {
+  if (timelineTouchY === null) return;
+  const touch = event.touches[0];
+  if (!touch) return;
+
+  const scroller = event.currentTarget instanceof HTMLElement ? event.currentTarget : null;
+  if (!scroller) return;
+
+  const deltaY = timelineTouchY - touch.clientY;
+  timelineTouchY = touch.clientY;
+  if (Math.abs(deltaY) < 0.5) return;
+
+  const previousScrollTop = scroller.scrollTop;
+  scroller.scrollTop += deltaY;
+  if (scroller.scrollTop !== previousScrollTop) event.preventDefault();
+}
+
+function endTimelineTouch() {
+  timelineTouchY = null;
+}
+
 function cancelEditor() {
   isEditing.value = false;
 }
@@ -399,6 +449,7 @@ function saveEditor() {
 
 .character-sheet.flipped .sheet-flipper {
   transform: rotateY(180deg);
+  pointer-events: none;
 }
 
 .sheet-face {
@@ -418,12 +469,20 @@ function saveEditor() {
   grid-template-rows: auto minmax(0, 1fr);
   gap: 18px;
   min-height: 0;
+  opacity: 0;
   overflow: hidden;
   padding: 52px 20px 24px;
-  transform: rotateY(180deg);
   background: linear-gradient(180deg, rgba(8, 10, 14, 0.72), rgba(8, 10, 14, 0.96));
   color: currentColor;
+  pointer-events: none;
   touch-action: pan-y;
+  transition: opacity 0.18s ease;
+  z-index: 4;
+}
+
+.character-sheet.flipped .sheet-face-back {
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .sheet-cover {
@@ -867,12 +926,16 @@ function saveEditor() {
 }
 
 .timeline-scroll {
+  position: relative;
+  height: 100%;
   min-height: 0;
+  max-height: 100%;
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
   touch-action: pan-y;
+  will-change: scroll-position;
   scrollbar-width: none;
 }
 
