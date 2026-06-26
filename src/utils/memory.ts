@@ -205,6 +205,7 @@ export const defaultConversationSettings: Omit<ConversationSettings, 'conversati
   voomFrequency: 'medium',
   stickerVisionEnabled: true,
   stickerSuggestionsEnabled: true,
+  offlineInvitationEnabled: true,
   characterStickerGroupIds: defaultCharacterStickerGroupIds,
   timeAwareness: defaultTimeAwarenessSettings,
   proactiveReply: {
@@ -278,6 +279,7 @@ export function normalizeConversationSettings(settings: Partial<ConversationSett
     voomFrequency,
     stickerVisionEnabled: settings?.stickerVisionEnabled ?? defaultConversationSettings.stickerVisionEnabled,
     stickerSuggestionsEnabled: settings?.stickerSuggestionsEnabled ?? defaultConversationSettings.stickerSuggestionsEnabled,
+    offlineInvitationEnabled: settings?.offlineInvitationEnabled ?? defaultConversationSettings.offlineInvitationEnabled,
     characterStickerGroupIds: Array.isArray(settings?.characterStickerGroupIds)
       ? [...new Set(settings.characterStickerGroupIds.map((item) => String(item).trim()).filter(Boolean))]
       : [...defaultConversationSettings.characterStickerGroupIds],

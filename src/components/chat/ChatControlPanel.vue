@@ -453,6 +453,14 @@
               <span>开启后，该角色会按频率在聊天中主动调用 API 联系你。</span>
             </div>
           </label>
+          <label class="switch-card wide">
+            <input :checked="draft.offlineInvitationEnabled" type="checkbox" @change="updateOfflineInvitationEnabled" />
+            <span class="switch-track"></span>
+            <div>
+              <strong>允许角色主动发起线下邀约</strong>
+              <span>开启后，角色可在想见面时主动发送线下邀约卡。</span>
+            </div>
+          </label>
           <label class="field frequency-field">
             <span>该角色主动消息频率</span>
             <select :value="draft.proactiveReply.frequency" :disabled="!draft.proactiveReply.enabled" @change="updateProactiveReplyFrequency">
@@ -698,6 +706,11 @@ function updateProactiveReplyEnabled(event: Event) {
 
 function updateProactiveReplyFrequency(event: Event) {
   draft.proactiveReply.frequency = normalizeVoomFrequency((event.target as HTMLSelectElement).value, draft.proactiveReply.frequency);
+  saveDraft();
+}
+
+function updateOfflineInvitationEnabled(event: Event) {
+  draft.offlineInvitationEnabled = (event.target as HTMLInputElement).checked;
   saveDraft();
 }
 

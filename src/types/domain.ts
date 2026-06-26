@@ -181,6 +181,7 @@ export interface ConversationSettings {
   voomFrequency: VoomFrequency;
   stickerVisionEnabled: boolean;
   stickerSuggestionsEnabled: boolean;
+  offlineInvitationEnabled: boolean;
   characterStickerGroupIds: string[];
   timeAwareness: ConversationTimeAwarenessSettings;
   proactiveReply: ConversationProactiveReplySettings;
@@ -306,6 +307,15 @@ export interface ChatTransferAttachment {
   respondedAt?: number;
 }
 
+export type ChatOfflineInvitationStatus = 'pending' | 'accepted' | 'rejected';
+
+export interface ChatOfflineInvitationAttachment {
+  prompt: string;
+  status: ChatOfflineInvitationStatus;
+  respondedAt?: number;
+  startedAt?: number;
+}
+
 export interface ChatMessageQuote {
   messageId: string;
   sender: 'user' | 'char' | 'system';
@@ -316,6 +326,7 @@ export interface ChatMessageQuote {
   voice?: ChatVoiceAttachment;
   location?: ChatLocationAttachment;
   transfer?: ChatTransferAttachment;
+  offlineInvitation?: ChatOfflineInvitationAttachment;
 }
 
 export interface ChatMessage {
@@ -335,6 +346,7 @@ export interface ChatMessage {
   voice?: ChatVoiceAttachment;
   location?: ChatLocationAttachment;
   transfer?: ChatTransferAttachment;
+  offlineInvitation?: ChatOfflineInvitationAttachment;
   quote?: ChatMessageQuote;
   replyBatchId?: string;
   replyVariantGroupId?: string;
@@ -713,6 +725,7 @@ export interface PromptContext {
   memorySummary?: string;
   stickerVisionEnabled?: boolean;
   narrationModeEnabled?: boolean;
+  offlineInvitationEnabled?: boolean;
   availableStickers?: ChatStickerAttachment[];
   timeAwareness?: ConversationTimeAwarenessSettings;
   offlineSettings?: ConversationOfflineSettings;

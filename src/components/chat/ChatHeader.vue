@@ -9,7 +9,7 @@
       </div>
     </div>
     <div class="icon-row">
-      <button v-if="mode === 'online'" class="icon-button" type="button" aria-label="进入线下模式" @click="$emit('offline')">
+      <button v-if="mode === 'online'" class="icon-button" type="button" aria-label="搜索聊天记录" @click="$emit('search')">
         <Search :size="24" />
       </button>
       <button v-else class="icon-button" type="button" aria-label="退出线下模式" @click="$emit('online')">
@@ -40,6 +40,7 @@ const props = defineProps<{
 defineEmits<{
   offline: [];
   online: [];
+  search: [];
   'open-menu': [];
 }>();
 

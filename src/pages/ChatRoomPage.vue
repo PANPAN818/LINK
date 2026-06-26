@@ -4,6 +4,7 @@
       :character="character"
       mode="online"
       @offline="showOfflineConfirm = true"
+      @search="openChatSearch"
       @open-menu="openChatSettings"
     />
 
@@ -23,12 +24,14 @@
         :selection-mode="selectionMode"
         :selected="isMessageSelected(message)"
         @apply-image="applyChatImageCandidate"
+        @accept-offline-invitation="acceptOfflineInvitation(message)"
         @busy-action="store.showConfigAlert"
         @long-press="openMessageActions"
         @open-card-detail="openCardDetail"
         @open-profile="openCharacterProfile"
         @open-user-profile="openUserProfile"
         @regenerate-image="regenerateChatImage"
+        @reject-offline-invitation="rejectOfflineInvitation(message)"
         @toggle-select="toggleMessageSelection(message)"
       />
       <div v-if="currentConversationReplying" class="typing-indicator">
@@ -188,6 +191,14 @@
           <RefreshCw :size="20" />
           <span>重新回复</span>
         </button>
+        <button type="button" :disabled="chatActionLocked" @click="openOfflineConfirmFromMenu">
+          <DoorOpen :size="20" />
+          <span>进入线下模式</span>
+        </button>
+        <button type="button" :disabled="chatActionLocked" @click="openNarrationPanel">
+          <MessageSquareText :size="20" />
+          <span>添加旁白</span>
+        </button>
         <button type="button" @click="openGobangPlaceholder">
           <Grid3X3 :size="20" />
           <span>五子棋</span>
@@ -275,6 +286,25 @@
         <div class="transfer-actions-sheet">
           <button class="secondary-action" type="button" @click="showTransferPanel = false">取消</button>
           <button class="primary-action" type="button" :disabled="!canSendTransfer || chatActionLocked" @click="sendTransferMessage">发送转账</button>
+        </div>
+      </section>
+    </AppModal>
+
+    <AppModal v-model="showNarrationPanel" title="添加旁白" :show-header="false" variant="ins">
+      <section class="narration-send-panel">
+        <div class="narration-panel-head">
+          <div>
+            <p>Narration</p>
+            <h3>添加系统旁白</h3>
+          </div>
+        </div>
+        <label class="narration-field">
+          <span>旁白内容</span>
+          <textarea v-model="narrationDraft" maxlength="500" rows="5" placeholder="例如：窗外忽然下起雨，聊天界面短暂安静下来。"></textarea>
+        </label>
+        <div class="narration-actions">
+          <button class="secondary-action" type="button" @click="showNarrationPanel = false">取消</button>
+          <button class="primary-action" type="button" :disabled="!narrationDraft.trim() || chatActionLocked" @click="sendNarrationMessage">发送旁白</button>
         </div>
       </section>
     </AppModal>
@@ -447,8 +477,8 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import { useRouter } from 'vue-router';
-import { ArchiveX, CheckSquare, ContactRound, Copy, Grid3X3, MapPin, Pencil, Quote, RefreshCw, RotateCcw, SlidersHorizontal, Sparkles, Trash2, UserMinus, UserRound, Wallet, X } from 'lucide-vue-next';
+import { useRoute, useRouter } from 'vue-router';
+import { ArchiveX, CheckSquare, ContactRound, Copy, DoorOpen, Grid3X3, MapPin, MessageSquareText, Pencil, Quote, RefreshCw, RotateCcw, SlidersHorizontal, Sparkles, Trash2, UserMinus, UserRound, Wallet, X } from 'lucide-vue-next';
 import AppModal from '@/components/common/AppModal.vue';
 import ChatHeader from '@/components/chat/ChatHeader.vue';
 import ChatModelSwitchPanel from '@/components/chat/ChatModelSwitchPanel.vue';
@@ -517,6 +547,7 @@ const props = defineProps<{
 
 const store = useAppStore();
 const router = useRouter();
+const route = useRoute();
 const showProfile = ref(false);
 const showUserProfile = ref(false);
 const showActionMenu = ref(false);
@@ -527,6 +558,7 @@ const showImagePanel = ref(false);
 const showVoicePanel = ref(false);
 const showLocationPanel = ref(false);
 const showTransferPanel = ref(false);
+const showNarrationPanel = ref(false);
 const showMessageMenu = ref(false);
 const showEditModal = ref(false);
 const showCardDetailModal = ref(false);
@@ -570,6 +602,7 @@ const locationAddressDraft = ref('');
 const locationDistanceDraft = ref('');
 const transferAmountDraft = ref('');
 const transferNoteDraft = ref('');
+const narrationDraft = ref('');
 const recordedVoiceDraft = ref<Pick<ChatVoiceAttachment, 'audioUrl' | 'duration' | 'mimeType'> | null>(null);
 const recordingVoice = ref(false);
 const recordingStartedAt = ref(0);
@@ -717,6 +750,25 @@ async function scrollMessagesToBottom() {
   scrollMessagesToBottomNow();
 }
 
+function focusedMessageId() {
+  const value = route.query.focus;
+  if (Array.isArray(value)) return value[0] ?? '';
+  return typeof value === 'string' ? value : '';
+}
+
+async function scrollToOnlineMessage(messageId: string) {
+  const targetIndex = allOnlineMessages.value.findIndex((message) => message.id === messageId);
+  if (targetIndex < 0) return false;
+  visibleMessageLimit.value = Math.max(visibleMessageLimit.value, allOnlineMessages.value.length - targetIndex);
+  await nextTick();
+  const target = messageListRef.value?.querySelector<HTMLElement>(`[data-message-id="${messageId}"]`);
+  if (!target) return false;
+  target.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  target.classList.add('message-focus-pulse');
+  window.setTimeout(() => target.classList.remove('message-focus-pulse'), 1400);
+  return true;
+}
+
 function handleComposerFocus() {
   const shouldStickToBottom = isMessageListNearBottom();
   composerFocused.value = true;
@@ -760,7 +812,12 @@ onMounted(async () => {
   await store.hydrate();
   await syncConversationState(props.id);
   resetMessageWindow();
-  await scrollMessagesToBottom();
+  const focusId = focusedMessageId();
+  if (focusId) {
+    await scrollToOnlineMessage(focusId);
+  } else {
+    await scrollMessagesToBottom();
+  }
   void store.maybeRequestProactiveReply(props.id);
   proactiveReplyTimer = window.setInterval(() => {
     void store.maybeRequestProactiveReply(props.id);
@@ -771,12 +828,23 @@ watch(() => props.id, (id) => {
   void (async () => {
     resetMessageWindow();
     await syncConversationState(id);
-    await scrollMessagesToBottom();
+    const focusId = focusedMessageId();
+    if (focusId) {
+      await scrollToOnlineMessage(focusId);
+    } else {
+      await scrollMessagesToBottom();
+    }
     void store.maybeRequestProactiveReply(id);
   })();
 });
 
+watch(() => route.query.focus, (value) => {
+  const focusId = Array.isArray(value) ? value[0] ?? '' : typeof value === 'string' ? value : '';
+  if (focusId) void scrollToOnlineMessage(focusId);
+}, { flush: 'post' });
+
 watch(() => [allOnlineMessages.value.length, currentConversationReplying.value], () => {
+  if (focusedMessageId()) return;
   void scrollMessagesToBottom();
 }, {
   flush: 'post'
@@ -910,6 +978,19 @@ function openTransferPanel() {
   showTransferPanel.value = true;
 }
 
+function openNarrationPanel() {
+  if (chatActionLocked.value) return;
+  showActionMenu.value = false;
+  narrationDraft.value = '';
+  showNarrationPanel.value = true;
+}
+
+function openOfflineConfirmFromMenu() {
+  if (chatActionLocked.value) return;
+  showActionMenu.value = false;
+  showOfflineConfirm.value = true;
+}
+
 async function sendTransferMessage() {
   if (!canSendTransfer.value || chatActionLocked.value) return;
   releaseKeyboardScrollGuard();
@@ -933,6 +1014,18 @@ async function respondToTransferFromDetail(status: Exclude<ChatTransferStatus, '
   await respondToTransfer(message.id, status);
 }
 
+async function rejectOfflineInvitation(message: ChatMessage) {
+  if (!message.offlineInvitation || message.offlineInvitation.status !== 'pending') return;
+  await store.rejectOfflineInvitation(message.id);
+}
+
+async function acceptOfflineInvitation(message: ChatMessage) {
+  if (!message.offlineInvitation || message.offlineInvitation.status !== 'pending') return;
+  const accepted = await store.acceptOfflineInvitation(message.id);
+  if (!accepted) return;
+  await router.push({ name: 'offline-room', params: { id: props.id } });
+}
+
 async function appendLocationMessage(location: ChatLocationAttachment) {
   releaseKeyboardScrollGuard();
   const userMessage = await store.appendUserLocationMessage(props.id, location, quoteTarget.value);
@@ -951,6 +1044,17 @@ async function sendLocationMessage() {
     distance
   });
   showLocationPanel.value = false;
+}
+
+async function sendNarrationMessage() {
+  const content = narrationDraft.value.trim();
+  if (!content || chatActionLocked.value) return;
+  releaseKeyboardScrollGuard();
+  const message = await store.appendConversationEvent(props.id, content, { mode: 'online' });
+  if (!message) return;
+  narrationDraft.value = '';
+  showNarrationPanel.value = false;
+  await scrollMessagesToBottom();
 }
 
 function getPreferredAudioMimeType() {
@@ -1534,6 +1638,10 @@ function openChatSettings() {
   void router.push({ name: 'chat-settings', params: { id: props.id } });
 }
 
+function openChatSearch() {
+  void router.push({ name: 'chat-search', params: { id: props.id } });
+}
+
 async function regenerateReply() {
   if (currentConversationReplying.value) {
     store.showConfigAlert('正在生成回复，请等待当前生成完成。', '正在生成');
@@ -1610,6 +1718,19 @@ onBeforeUnmount(() => {
   -webkit-overflow-scrolling: touch;
   overflow-anchor: none;
   scroll-padding-bottom: calc(8px + var(--keyboard-inset));
+}
+
+.message-list :deep(.message-focus-pulse .bubble) {
+  animation: message-focus-pulse 1.2s ease-out;
+}
+
+@keyframes message-focus-pulse {
+  0%, 100% {
+    box-shadow: none;
+  }
+  35% {
+    box-shadow: 0 0 0 4px rgba(104, 113, 122, 0.18);
+  }
 }
 
 .history-loader {
@@ -1825,14 +1946,16 @@ onBeforeUnmount(() => {
   min-width: 0;
 }
 
-.transfer-send-panel {
+.transfer-send-panel,
+.narration-send-panel {
   display: grid;
   gap: 12px;
   width: 100%;
   min-width: 0;
 }
 
-.transfer-panel-head {
+.transfer-panel-head,
+.narration-panel-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1840,11 +1963,13 @@ onBeforeUnmount(() => {
   min-width: 0;
 }
 
-.transfer-panel-head > div {
+.transfer-panel-head > div,
+.narration-panel-head > div {
   min-width: 0;
 }
 
-.transfer-panel-head p {
+.transfer-panel-head p,
+.narration-panel-head p {
   margin: 0 0 3px;
   color: #60646b;
   font-size: 10px;
@@ -1853,7 +1978,8 @@ onBeforeUnmount(() => {
   text-transform: uppercase;
 }
 
-.transfer-panel-head h3 {
+.transfer-panel-head h3,
+.narration-panel-head h3 {
   margin: 0;
   color: #211f24;
   font-size: 16px;
@@ -1918,20 +2044,23 @@ onBeforeUnmount(() => {
   font-weight: 760;
 }
 
-.transfer-field {
+.transfer-field,
+.narration-field {
   display: grid;
   gap: 6px;
   min-width: 0;
 }
 
-.transfer-field span {
+.transfer-field span,
+.narration-field span {
   color: #686b70;
   font-size: 12px;
   font-weight: 900;
 }
 
 .transfer-field input,
-.transfer-field select {
+.transfer-field select,
+.narration-field textarea {
   width: 100%;
   min-width: 0;
   min-height: 40px;
@@ -1943,22 +2072,33 @@ onBeforeUnmount(() => {
   font: inherit;
 }
 
-.transfer-actions-sheet {
+.narration-field textarea {
+  min-height: 118px;
+  padding: 10px;
+  resize: vertical;
+  line-height: 1.45;
+}
+
+.transfer-actions-sheet,
+.narration-actions {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 8px;
 }
 
-.transfer-actions-sheet button {
+.transfer-actions-sheet button,
+.narration-actions button {
   min-height: 40px;
 }
 
-.transfer-actions-sheet .primary-action {
+.transfer-actions-sheet .primary-action,
+.narration-actions .primary-action {
   background: #d8dce0;
   color: #202329;
 }
 
-.transfer-actions-sheet .primary-action:disabled {
+.transfer-actions-sheet .primary-action:disabled,
+.narration-actions .primary-action:disabled {
   background: #eceef1;
   color: #9ba1a8;
 }
@@ -2683,6 +2823,11 @@ onBeforeUnmount(() => {
 
 .offline-confirm-actions button {
   min-height: 42px;
+}
+
+.offline-confirm-actions .primary-action {
+  background: #dfe3e8;
+  color: #202329;
 }
 
 @keyframes typing {

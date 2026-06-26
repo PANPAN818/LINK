@@ -2,7 +2,7 @@ import { computed, ref, toRaw } from 'vue';
 import { defineStore } from 'pinia';
 import { deleteEntity, loadSnapshot, putEntity, replaceSnapshot } from '@/data/db';
 import { defaultSettings } from '@/data/seed';
-import type { AppSettings, AppSnapshot, CharacterProfile, ChatImageAttachment, ChatImageCandidate, ChatLocationAttachment, ChatMessage, ChatMessageQuote, ChatMode, ChatModelOverrides, ChatModelScope, ChatTransferAttachment, ChatTransferStatus, ChatVoiceAttachment, Conversation, ConversationMemoryRecord, ConversationSettings, GeneratedImageRecord, ImageModuleId, MusicCommentThread, MusicTrack, Sticker, StickerGroup, UserProfile, VisualProfile, VoomComment, VoomFrequency, VoomImageCandidate, VoomPost, VoomPostVisibility, WorldBookEntry } from '@/types/domain';
+import type { AppSettings, AppSnapshot, CharacterProfile, ChatImageAttachment, ChatImageCandidate, ChatLocationAttachment, ChatMessage, ChatMessageQuote, ChatMode, ChatModelOverrides, ChatModelScope, ChatOfflineInvitationAttachment, ChatOfflineInvitationStatus, ChatTransferAttachment, ChatTransferStatus, ChatVoiceAttachment, Conversation, ConversationMemoryRecord, ConversationSettings, GeneratedImageRecord, ImageModuleId, MusicCommentThread, MusicTrack, Sticker, StickerGroup, UserProfile, VisualProfile, VoomComment, VoomFrequency, VoomImageCandidate, VoomPost, VoomPostVisibility, WorldBookEntry } from '@/types/domain';
 import { createAccountId, createId } from '@/utils/id';
 import { getCharacterInitialProfile, getCharacterVoomAuthorName, normalizeCharacterMindStateLines, normalizeCharacterProfile } from '@/utils/character';
 import { normalizeUserProfile, normalizeVisualProfile } from '@/utils/profile';
@@ -462,6 +462,7 @@ export const useAppStore = defineStore('app', () => {
       memorySummary: memoryContextForConversation(id),
       stickerVisionEnabled: chatSettings.stickerVisionEnabled,
       narrationModeEnabled: chatSettings.narrationModeEnabled,
+      offlineInvitationEnabled: chatSettings.offlineInvitationEnabled,
       timeAwareness: chatSettings.timeAwareness,
       offlineSettings: chatSettings.offline,
       availableStickers: availableCharacterStickers.map((sticker) => ({
@@ -728,6 +729,24 @@ export const useAppStore = defineStore('app', () => {
     return `[转账] ¥${transfer.amount}${transfer.note ? ` · ${transfer.note}` : ''} · ${statusText}`;
   }
 
+  function formatOfflineInvitationContent(invitation: Pick<ChatOfflineInvitationAttachment, 'status'>) {
+    const statusText = {
+      pending: '等待选择',
+      accepted: '已接受',
+      rejected: '已拒绝'
+    }[invitation.status];
+    return `[线下邀请] ${statusText}`;
+  }
+
+  function normalizeOfflineInvitationAttachment(prompt: string): ChatOfflineInvitationAttachment | null {
+    const normalizedPrompt = prompt.trim();
+    if (!normalizedPrompt) return null;
+    return {
+      prompt: normalizedPrompt,
+      status: 'pending'
+    };
+  }
+
   async function appendConversationEvent(conversationId: string, content: string, options: Partial<Pick<ChatMessage, 'mode' | 'voomPostId' | 'voomCommentId' | 'voomEventType' | 'replyBatchId' | 'createdAt'>> = {}) {
     const conversation = conversationById(conversationId);
     if (!conversation || !content.trim()) return null;
@@ -778,7 +797,8 @@ export const useAppStore = defineStore('app', () => {
       image: quote.image ? { ...quote.image } : undefined,
       voice: quote.voice ? { ...quote.voice } : undefined,
       location: quote.location ? { ...quote.location } : undefined,
-      transfer: quote.transfer ? { ...quote.transfer } : undefined
+      transfer: quote.transfer ? { ...quote.transfer } : undefined,
+      offlineInvitation: quote.offlineInvitation ? { ...quote.offlineInvitation } : undefined
     };
   }
 
@@ -788,6 +808,7 @@ export const useAppStore = defineStore('app', () => {
     if (message.voice) return `[语音] ${message.voice.transcript}`.trim();
     if (message.location) return formatLocationContent(message.location).trim();
     if (message.transfer) return formatTransferContent(message.transfer).trim();
+    if (message.offlineInvitation) return formatOfflineInvitationContent(message.offlineInvitation).trim();
     return message.content.trim();
   }
 
@@ -817,7 +838,8 @@ export const useAppStore = defineStore('app', () => {
       image: message.image ? { ...message.image } : undefined,
       voice: message.voice ? { ...message.voice } : undefined,
       location: message.location ? { ...message.location } : undefined,
-      transfer: message.transfer ? { ...message.transfer } : undefined
+      transfer: message.transfer ? { ...message.transfer } : undefined,
+      offlineInvitation: message.offlineInvitation ? { ...message.offlineInvitation } : undefined
     };
   }
 
@@ -2528,7 +2550,7 @@ export const useAppStore = defineStore('app', () => {
     }));
   }
 
-  async function requestRoleplayReply(conversationId: string, options?: { generateMoment?: boolean; proactive?: boolean; replyVariantGroupId?: string; replyVariantIndex?: number }) {
+  async function requestRoleplayReply(conversationId: string, options?: { generateMoment?: boolean; proactive?: boolean; replyInstruction?: string; replyVariantGroupId?: string; replyVariantIndex?: number }) {
     const conversation = conversationById(conversationId);
     if (!conversation || isConversationReplying(conversationId)) return;
     const character = characterById(conversation.charId);
@@ -2569,9 +2591,12 @@ export const useAppStore = defineStore('app', () => {
         memorySummary: memoryContextForConversation(conversationId),
         stickerVisionEnabled: chatSettings.stickerVisionEnabled,
         narrationModeEnabled: chatSettings.narrationModeEnabled,
+        offlineInvitationEnabled: chatSettings.offlineInvitationEnabled,
         timeAwareness: chatSettings.timeAwareness,
         offlineSettings: chatSettings.offline,
-        replyInstruction: options?.proactive
+        replyInstruction: options?.replyInstruction
+          ? options.replyInstruction
+          : options?.proactive
           ? `这不是用户刚发来的新消息，而是${character.nickname || character.name}在自己的生活节奏里主动联系${boundUser.nickname || boundUser.name}。请基于最近对话、关系状态、时间流逝和角色当前生活，生成一组自然的主动消息；不要假装用户刚说了什么，也不要替用户发言。`
           : undefined,
         availableStickers: availableCharacterStickers.map((sticker) => ({
@@ -2686,13 +2711,16 @@ export const useAppStore = defineStore('app', () => {
           status: decision.status === 'accepted' ? 'accepted' as const : decision.status === 'rejected' ? 'rejected' as const : null
         }))
         .filter((decision): decision is { messageId: string; status: 'accepted' | 'rejected' } => Boolean(decision.messageId && decision.status && messages.value.some((message) => message.id === decision.messageId && message.conversationId === conversationId && message.sender === 'user' && message.transfer?.status === 'pending')));
+      const offlineInvitation = conversation.activeMode === 'online' && chatSettings.offlineInvitationEnabled
+        ? normalizeOfflineInvitationAttachment(parsedReply.messageActions?.offlineInvitation?.prompt ?? '')
+        : null;
       const quoteByReplyIndex = new Map<number, ChatMessageQuote>();
       for (const quoteAction of parsedReply.messageActions?.quotes ?? []) {
         const targetMessage = messages.value.find((message) => message.id === quoteAction.messageId && message.conversationId === conversationId && message.sender === 'user');
         const quote = targetMessage ? createMessageQuoteSnapshot(targetMessage) : null;
         if (quote) quoteByReplyIndex.set(Math.max(0, Math.floor(quoteAction.replyIndex)), quote);
       }
-      if (!effectiveReplyMessages.length && !replyStickers.length && !replyImages.length && !narrationMessages.length && !hasOrderedSticker && !hasOrderedNarration && !hasOrderedImage && !hasOrderedVoice && !hasOrderedLocation && !hasOrderedTransfer && !validRecallMessageIds.length && !validTransferDecisions.length) {
+      if (!effectiveReplyMessages.length && !replyStickers.length && !replyImages.length && !narrationMessages.length && !hasOrderedSticker && !hasOrderedNarration && !hasOrderedImage && !hasOrderedVoice && !hasOrderedLocation && !hasOrderedTransfer && !validRecallMessageIds.length && !validTransferDecisions.length && !offlineInvitation) {
         showConfigAlert('AI 返回内容中没有可显示的聊天文本，请重试或检查模型输出格式。', '回复异常');
         return;
       }
@@ -2908,6 +2936,20 @@ export const useAppStore = defineStore('app', () => {
       }
       appendStickerMessages(replyStickers);
       const charMessages: ChatMessage[] = orderedSegments.length ? orderedCharMessages : [...charNarrationMessages, ...charMessagesAfterNarration];
+      if (offlineInvitation) {
+        charMessages.push({
+          id: createId('msg'),
+          conversationId,
+          sender: 'char' as const,
+          mode: 'online' as const,
+          content: formatOfflineInvitationContent(offlineInvitation),
+          offlineInvitation,
+          replyBatchId,
+          ...replyVariantFields,
+          createdAt: createdAt + charMessageOffset++,
+          status: 'sent' as const
+        } satisfies ChatMessage);
+      }
       if (plotChoices.length) {
         const plotChoiceMessage = charMessages.find((message) => message.sender === 'char' && !message.sticker && !message.image && !message.voice && !message.location && !message.transfer);
         if (plotChoiceMessage) plotChoiceMessage.plotChoices = plotChoices;
@@ -2958,6 +3000,53 @@ export const useAppStore = defineStore('app', () => {
 
   async function sendStickerMessage(conversationId: string, sticker: Sticker, quote?: ChatMessageQuote | null) {
     return appendStickerMessage(conversationId, sticker, quote);
+  }
+
+  async function updateOfflineInvitationStatus(messageId: string, status: ChatOfflineInvitationStatus, options: { started?: boolean } = {}) {
+    const message = messages.value.find((item) => item.id === messageId);
+    if (!message?.offlineInvitation) return null;
+    if (message.offlineInvitation.status !== 'pending' && !options.started) return null;
+    const now = Date.now();
+    const nextInvitation: ChatOfflineInvitationAttachment = {
+      ...message.offlineInvitation,
+      status,
+      respondedAt: message.offlineInvitation.respondedAt ?? now,
+      startedAt: options.started ? message.offlineInvitation.startedAt ?? now : message.offlineInvitation.startedAt
+    };
+    const nextMessage: ChatMessage = {
+      ...message,
+      content: formatOfflineInvitationContent(nextInvitation),
+      offlineInvitation: nextInvitation,
+      editedAt: now
+    };
+    const messageIndex = messages.value.findIndex((item) => item.id === messageId);
+    if (messageIndex >= 0) messages.value[messageIndex] = nextMessage;
+    await putEntity('messages', nextMessage);
+    return nextMessage;
+  }
+
+  async function rejectOfflineInvitation(messageId: string) {
+    return updateOfflineInvitationStatus(messageId, 'rejected');
+  }
+
+  async function acceptOfflineInvitation(messageId: string) {
+    const message = messages.value.find((item) => item.id === messageId);
+    if (!message?.offlineInvitation || message.offlineInvitation.status !== 'pending') return false;
+    const conversation = conversationById(message.conversationId);
+    if (!conversation) return false;
+    await updateConversationMode(message.conversationId, 'offline');
+    await updateOfflineInvitationStatus(messageId, 'accepted', { started: true });
+    const latestConversation = conversationById(message.conversationId) ?? conversation;
+    const acceptedAt = Date.now();
+    const nextConversation = { ...latestConversation, activeMode: 'offline' as const, updatedAt: acceptedAt, unreadCount: 0 };
+    const conversationIndex = conversations.value.findIndex((item) => item.id === message.conversationId);
+    if (conversationIndex >= 0) conversations.value[conversationIndex] = nextConversation;
+    await putEntity('conversations', nextConversation);
+    const openingPrompt = message.offlineInvitation.prompt.trim() || '用户接受了线下邀约。请从当前关系和氛围自然开启线下模块的新章节。';
+    void requestRoleplayReply(message.conversationId, {
+      replyInstruction: `用户刚刚点击接受了你发出的线下邀约，现在已经进入线下模块。请立刻生成线下模式的新章节正文，承接这份邀约：${openingPrompt}。可以描写两人见面和面对面互动，但不要让角色知道用户未提供的现实位置、行程、心理或决定；不要输出线上聊天气泡。`
+    });
+    return true;
   }
 
   async function regenerateLatestReply(conversationId: string) {
@@ -3767,6 +3856,7 @@ export const useAppStore = defineStore('app', () => {
     bindWorldBook,
     updateConversationMode,
     markConversationRead,
+    appendConversationEvent,
     appendUserMessage,
     appendStickerMessage,
     appendUserImageMessage,
@@ -3793,6 +3883,8 @@ export const useAppStore = defineStore('app', () => {
     maybeRequestProactiveReply,
     sendMessage,
     sendStickerMessage,
+    acceptOfflineInvitation,
+    rejectOfflineInvitation,
     regenerateChatMessageImage,
     applyChatMessageImageCandidate,
     createUserVoomPost,

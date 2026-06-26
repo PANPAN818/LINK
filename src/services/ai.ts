@@ -28,6 +28,7 @@ export interface RoleplayMessageActions {
   recallMessageIds: string[];
   quotes: RoleplayQuoteAction[];
   transferDecisions?: Array<{ messageId: string; status: 'accepted' | 'rejected' }>;
+  offlineInvitation?: { prompt: string } | null;
 }
 
 export type RoleplayStickerPosition = 'before' | 'after';
@@ -1215,7 +1216,38 @@ function normalizeRoleplayMessageActions(record: Record<string, unknown>): Rolep
     ...normalizeQuoteActions(actionRecord.quoteReplies),
     ...normalizeQuoteActions(actionRecord.references)
   ];
-  return { recallMessageIds, quotes };
+  return { recallMessageIds, quotes, offlineInvitation: normalizeOfflineInvitationAction(record, actionRecord) };
+}
+
+function normalizeOfflineInvitationAction(record: Record<string, unknown>, actionRecord: Record<string, unknown>): { prompt: string } | null {
+  const candidates = [
+    actionRecord.offlineInvitation,
+    actionRecord.offlineInvite,
+    actionRecord.inviteOffline,
+    record.offlineInvitation,
+    record.offlineInvite,
+    record.inviteOffline
+  ];
+  for (const candidate of candidates) {
+    if (!candidate) continue;
+    if (typeof candidate === 'string') {
+      const prompt = candidate.trim();
+      if (prompt) return { prompt };
+      continue;
+    }
+    if (candidate && typeof candidate === 'object' && !Array.isArray(candidate)) {
+      const inviteRecord = candidate as Record<string, unknown>;
+      const explicitDisabled = inviteRecord.enabled === false || inviteRecord.enabled === 'false' || inviteRecord.status === 'none';
+      if (explicitDisabled) continue;
+      const prompt = normalizeLocationText(inviteRecord.prompt)
+        || normalizeLocationText(inviteRecord.openingPrompt)
+        || normalizeLocationText(inviteRecord.scene)
+        || normalizeLocationText(inviteRecord.content)
+        || normalizeLocationText(inviteRecord.text);
+      if (prompt) return { prompt };
+    }
+  }
+  return null;
 }
 
 function normalizeRawOnlineReply(content: string) {

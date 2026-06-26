@@ -135,7 +135,8 @@ export const profileMutationPrompt = `补充输出规则：
   "messageActions": {
     "recallMessageIds": [],
     "quotes": [],
-    "transferDecisions": []
+    "transferDecisions": [],
+    "offlineInvitation": null
   },
   "profileUpdate": {
     "nickname": "",
@@ -160,7 +161,8 @@ export const profileMutationPrompt = `补充输出规则：
   "messageActions": {
     "recallMessageIds": [],
     "quotes": [],
-    "transferDecisions": []
+    "transferDecisions": [],
+    "offlineInvitation": null
   },
   "profileUpdate": {
     "nickname": "新的网名，可留空表示不改",
@@ -187,7 +189,10 @@ export const profileMutationPrompt = `补充输出规则：
 14. 最近对话每条消息前的 [msg_xxx] 是 messageId。你可以像真实社交软件一样撤回自己之前发出的某条消息，但只能把你自己发过的角色消息 id 放进 messageActions.recallMessageIds；不要撤回用户或系统消息。
 15. 你可以引用用户之前发过的某条消息进行回复。若第 n 个 text 气泡要引用用户消息，在 messageActions.quotes 里写 {"replyIndex": n, "messageId": "用户消息id"}；replyIndex 从 0 开始，只按 text 气泡计数，不把 voice、image、location、transfer、sticker、narration 算进去。
 16. 引用用于自然承接上下文。引用时 text.content 里仍只写你真正要发出的新消息，不要重复被引用内容。
-17. 如果没有撤回、引用或转账处理动作，messageActions 里的数组都保持空数组。`;
+17. 如果没有撤回、引用或转账处理动作，messageActions 里的数组都保持空数组。
+18. 线上聊天必须始终保持“正在社交软件网聊”的现状：绝对禁止写成两人已经见面、正在同一物理空间、你主动来找{{user}}、你已经在{{user}}附近等待、你知道或安排了{{user}}线下行程。除非{{user}}自己明确发来定位或描述，否则你不知道{{user}}在哪里、在做什么。
+19. 你可以在关系和语境合适时主动发起线下邀约：本质是你想和{{user}}见面，在线上聊天里只表示“提出邀约”，不代表两人已经见面、你已经在路上、你已经到{{user}}附近或知道{{user}}未告知的现实行程。邀约必须先用正常 text 气泡自然说出，然后在 messageActions.offlineInvitation 写 { "prompt": "用户接受后进入线下模块时，本章开场要承接的场景/动作/关系氛围，50-160字" }。不邀约时 offlineInvitation 固定为 null。
+20. offlineInvitation.prompt 只给线下模块作为开章输入；可以写你想开启的见面场景、氛围和角色主动性，但不能把用户接受前的线下见面写成已发生事实，不能写角色已知{{user}}未告知的现实位置、行程或住址。`;
 
 export const offlineReplyOutputPrompt = `补充线下输出规则：
 
@@ -272,8 +277,8 @@ export const strictRoleplayRules = `补充严格规则：
 你的朋友圈受众是你的整个社交网络。不要生成{{user}}的点赞或评论--{{user}}的行为由User决定。生成NPC的互动时，NPC的身份和数量应与角色的社交圈设定一致。`;
 
 const modeInstructions: Record<ChatMode, string> = {
-  online: '当前是线上聊天模式。回复要模拟当前在使用社交软件，并把你的独立日程、空档经历、精力状态和可能的生活打断自然体现在消息节奏里。',
-  offline: '当前是线下模式。回复为长文本 RP，像小说章节一样呈现，并把你的私人生活推进、身体状态、社交圈与当下场景自然写进叙事。'
+  online: '当前是线上聊天模式。回复要模拟当前在使用社交软件，并把你的独立日程、空档经历、精力状态和可能的生活打断自然体现在消息节奏里。必须保持网聊现状，不能写两人线下见面、你来找用户、你已经和用户在一起或知道用户未告知的线下行程。',
+  offline: '当前是线下模式。回复为长文本 RP，像小说章节一样呈现，并把你的私人生活推进、身体状态、社交圈与当下场景自然写进叙事。线下模式可以描写两人见面和同场互动，但仍必须遵守信息边界，不能让角色全知全能。'
 };
 
 const offlineParagraphInstruction: Record<ConversationOfflineSettings['paragraphMode'], string> = {
@@ -353,7 +358,8 @@ function renderOfflineProhibitedInstruction(characterName: string, userName: str
 ${characterName}可以有欲望、软肋、狼狈和失控，但必须真实、有铺垫。
 禁止邪魅一笑、霸道总裁式壁咚、油腻情话、刻板霸总/娇妻反应、毫无理由的掌控感。
 拒绝全知全能：${characterName}不知道事情全貌，会犯错，会误解，只能基于当下信息反应。
-拒绝围着${userName}转：${characterName}有自己的生活、精神世界、工作、爱好、过往和日常压力。两人的关系是两个独立世界的交汇，不是一方对另一方的依附。`;
+拒绝围着${userName}转：${characterName}有自己的生活、精神世界、工作、爱好、过往和日常压力。两人的关系是两个独立世界的交汇，不是一方对另一方的依附。
+线下模块允许描写两人见面、同场行动和面对面互动，但只能承接${userName}已经接受进入线下模块这一事实与用户输入；不要补写${userName}未输入的关键行程、心理、决定或现实地址。`;
 }
 
 function renderOfflineRhythmInstruction(settings: ConversationOfflineSettings) {
@@ -426,7 +432,7 @@ function formatPromptMessageTime(timestamp: number) {
   return promptMessageTimeFormatter.format(timestamp);
 }
 
-function getMessageText(message: Pick<PromptContext['messages'][number], 'content' | 'sender' | 'sticker' | 'image' | 'voice' | 'location' | 'transfer'>) {
+function getMessageText(message: Pick<PromptContext['messages'][number], 'content' | 'sender' | 'sticker' | 'image' | 'voice' | 'location' | 'transfer' | 'offlineInvitation'>) {
   if (message.sticker) return `[Sticker] ${message.sticker.description}`;
   if (message.image) {
     if (message.image.kind === 'description') return `用户发送了一张图片，图片内容为“${message.image.description}”。`;
@@ -456,6 +462,14 @@ function getMessageText(message: Pick<PromptContext['messages'][number], 'conten
     }[message.transfer.status];
     const noteText = message.transfer.note ? `，备注为“${message.transfer.note}”` : '';
     return `${senderText}发起了一笔转账：金额 ¥${message.transfer.amount}${noteText}，当前状态：${statusText}。`;
+  }
+  if (message.offlineInvitation) {
+    const statusText = {
+      pending: '用户尚未选择',
+      accepted: '用户已接受并进入线下模块',
+      rejected: '用户已拒绝，希望继续保持线上网聊现状'
+    }[message.offlineInvitation.status];
+    return `角色发起了进入线下模块的邀请，状态：${statusText}。`;
   }
   return message.content;
 }
@@ -601,6 +615,9 @@ export function buildPrompt(context: PromptContext) {
           '{{char}}': context.character.name,
           '{{user}}': context.user.name
         })
+      : '',
+    context.mode === 'online' && context.offlineInvitationEnabled === false
+      ? '线下邀约功能当前已关闭：本轮以及后续线上回复都禁止发起线下邀约，messageActions.offlineInvitation 必须固定为 null。'
       : '',
     timeAwarenessPrompt,
     `当前对话总结：\n${context.conversationSummary || '暂无总结。'}`,

@@ -1,5 +1,5 @@
 <template>
-  <article :class="['message-row', message.sender, { selecting: selectionMode, selected, 'hide-avatar': hideAvatar, 'profile-alert': showProfileAlert }]">
+  <article :data-message-id="message.id" :class="['message-row', message.sender, { selecting: selectionMode, selected, 'hide-avatar': hideAvatar, 'profile-alert': showProfileAlert }]">
     <button v-if="selectionMode" class="selection-dot" type="button" :aria-pressed="selected" @click.stop="emit('toggle-select')">
       <span></span>
     </button>
@@ -17,7 +17,7 @@
         @pointermove="trackPointerMove"
         @pointerup="cancelLongPress"
       >
-        <div class="bubble" :class="{ narration: message.displayStyle === 'narration', sticker: message.sticker, image: message.image, voice: message.voice, location: message.location, transfer: message.transfer }" :style="bubbleStyle">
+        <div class="bubble" :class="{ narration: message.displayStyle === 'narration', sticker: message.sticker, image: message.image, voice: message.voice, location: message.location, transfer: message.transfer, offlineInvitation: message.offlineInvitation }" :style="bubbleStyle">
           <template v-if="message.sticker">
             <img class="sticker-image" :src="message.sticker.imageUrl" :alt="message.sticker.description" />
           </template>
@@ -60,6 +60,25 @@
                 <strong>¥{{ message.transfer.amount }}</strong>
                 <span class="transfer-note" :aria-hidden="!message.transfer.note">{{ message.transfer.note || ' ' }}</span>
               </span>
+            </section>
+          </template>
+          <template v-else-if="message.offlineInvitation">
+            <section class="offline-invitation-message" :class="`offline-invitation-message--${message.offlineInvitation.status}`" aria-label="线下模块邀请">
+              <div class="offline-invitation-copy">
+                <span>发起线下邀约</span>
+                <strong>{{ offlineInvitationStatusLabel }}</strong>
+                <small>{{ offlineInvitationDetail }}</small>
+              </div>
+              <div v-if="message.offlineInvitation.status === 'pending'" class="offline-invitation-actions">
+                <button type="button" @click.stop="emit('reject-offline-invitation')">
+                  <X :size="14" />
+                  <span>拒绝</span>
+                </button>
+                <button type="button" @click.stop="emit('accept-offline-invitation')">
+                  <DoorOpen :size="14" />
+                  <span>接受</span>
+                </button>
+              </div>
             </section>
           </template>
           <template v-else>
@@ -145,7 +164,7 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
-import { LoaderCircle, MapPin, Pause, Play } from 'lucide-vue-next';
+import { DoorOpen, LoaderCircle, MapPin, Pause, Play, X } from 'lucide-vue-next';
 import AppModal from '@/components/common/AppModal.vue';
 import type { CharacterProfile, ChatAppearanceSettings, ChatImageCandidate, ChatMessage, UserProfile } from '@/types/domain';
 import { useAppStore } from '@/stores/appStore';
@@ -185,6 +204,8 @@ const emit = defineEmits<{
   'apply-image': [messageId: string, candidateId: string];
   'busy-action': [message: string, title: string];
   'open-card-detail': [message: ChatMessage];
+  'accept-offline-invitation': [];
+  'reject-offline-invitation': [];
 }>();
 
 const store = useAppStore();
@@ -319,7 +340,7 @@ const quoteThumbnail = computed(() => props.message.quote?.sticker?.imageUrl ?? 
 const quoteAuthorLabel = computed(() => (props.message.quote?.authorName ? `${props.message.quote.authorName}：` : ''));
 
 const bubbleStyle = computed(() => {
-  if (props.message.sticker || props.message.image || props.message.location || props.message.transfer) return {};
+  if (props.message.sticker || props.message.image || props.message.location || props.message.transfer || props.message.offlineInvitation) return {};
   if (props.message.displayStyle === 'narration') {
     return {
       background: props.appearance.narrationBubbleColor,
@@ -395,6 +416,16 @@ const locationDistanceLabel = computed(() => (props.message.sender === 'user'
   ? `距离对方 ${props.message.location?.distance ?? ''}`
   : `距离你 ${props.message.location?.distance ?? ''}`));
 const transferTitle = computed(() => (props.message.sender === 'user' ? '转账给对方' : '转账给你'));
+const offlineInvitationStatusLabel = computed(() => ({
+  pending: '要进入线下模式继续这一幕吗？',
+  accepted: '已进入线下模块',
+  rejected: '已保持线上网聊'
+}[props.message.offlineInvitation?.status ?? 'pending']));
+const offlineInvitationDetail = computed(() => ({
+  pending: '接受后会切到线下页面，并自动生成新的章节。',
+  accepted: '新的故事篇章会在线下页面继续生成。',
+  rejected: '继续在线上聊天。'
+}[props.message.offlineInvitation?.status ?? 'pending']));
 const voiceDuration = computed(() => {
   const duration = props.message.voice?.duration ?? 0;
   if (Number.isFinite(duration) && duration > 0) return Math.max(1, Math.round(duration));
@@ -842,11 +873,82 @@ onBeforeUnmount(stopVoicePlayback);
   box-shadow: 0 8px 20px rgba(17, 20, 24, 0.06);
 }
 
+.bubble.offlineInvitation {
+  min-width: min(248px, 74vw);
+  padding: 0;
+  overflow: hidden;
+  border-radius: 16px;
+  background: #ffffff;
+  color: #202329;
+  border: 1px solid #e6e8eb;
+  box-shadow: 0 8px 20px rgba(17, 20, 24, 0.06);
+}
+
 .message-row.user .bubble.location,
 .message-row.char .bubble.location,
 .message-row.user .bubble.transfer,
-.message-row.char .bubble.transfer {
+.message-row.char .bubble.transfer,
+.message-row.char .bubble.offlineInvitation,
+.message-row.system .bubble.offlineInvitation {
   background: #ffffff;
+  color: #202329;
+}
+
+.offline-invitation-message {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding: 12px;
+}
+
+.offline-invitation-copy {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.offline-invitation-copy span {
+  color: #69717b;
+  font-size: 11px;
+  font-weight: 860;
+}
+
+.offline-invitation-copy strong {
+  color: #202329;
+  font-size: 13px;
+  font-weight: 930;
+  line-height: 1.28;
+}
+
+.offline-invitation-copy small {
+  color: #69717b;
+  font-size: 11px;
+  font-weight: 720;
+  line-height: 1.36;
+}
+
+.offline-invitation-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.offline-invitation-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-height: 32px;
+  border: 0;
+  border-radius: 10px;
+  background: #f0f2f5;
+  color: #333943;
+  font-size: 12px;
+  font-weight: 860;
+}
+
+.offline-invitation-actions button:last-child {
+  background: #dfe3e8;
   color: #202329;
 }
 

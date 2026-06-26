@@ -156,7 +156,7 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue';
-import { useRouter } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import { ArrowLeft, BookOpenText, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, ListTree, PencilLine, SendHorizontal, Settings2 } from 'lucide-vue-next';
 import { useAppStore } from '@/stores/appStore';
 import type { ChatMessage } from '@/types/domain';
@@ -172,6 +172,7 @@ const props = defineProps<{
 
 const store = useAppStore();
 const router = useRouter();
+const route = useRoute();
 const draft = ref('');
 const truncateDeleteMode = ref(false);
 const showJumpPanel = ref(false);
@@ -551,6 +552,24 @@ function jumpToFloor(floor: ChapterFloor) {
   showJumpPanel.value = false;
 }
 
+function focusedMessageId() {
+  const value = route.query.focus;
+  if (Array.isArray(value)) return value[0] ?? '';
+  return typeof value === 'string' ? value : '';
+}
+
+async function scrollToFocusedFloor(messageId: string) {
+  await nextTick();
+  const floor = chapterFloors.value.find((entry) => entry.id === messageId || entry.messages.some((message) => message.id === messageId));
+  if (!floor) return false;
+  const target = offlineScrollRef.value?.querySelector<HTMLElement>(`[data-floor-id="${floor.id}"]`);
+  if (!target) return false;
+  target.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  target.classList.add('chapter-entry--focus');
+  window.setTimeout(() => target.classList.remove('chapter-entry--focus'), 1400);
+  return true;
+}
+
 async function applySelectedReplyOption(floor: ChapterFloor) {
   const option = selectedReplyOption(floor);
   if (!option || option.active) return;
@@ -567,6 +586,8 @@ async function applySelectedReplyOption(floor: ChapterFloor) {
 onMounted(async () => {
   await store.hydrate();
   await syncConversationState(props.id);
+  const focusId = focusedMessageId();
+  if (focusId) await scrollToFocusedFloor(focusId);
 });
 
 watch(() => props.id, (id) => {
@@ -578,8 +599,17 @@ watch(() => props.id, (id) => {
   selectedReplyOptionIds.value = {};
   cancelFloorEdit();
   pendingDelete.value = null;
-  void syncConversationState(id);
+  void (async () => {
+    await syncConversationState(id);
+    const focusId = focusedMessageId();
+    if (focusId) await scrollToFocusedFloor(focusId);
+  })();
 });
+
+watch(() => route.query.focus, (value) => {
+  const focusId = Array.isArray(value) ? value[0] ?? '' : typeof value === 'string' ? value : '';
+  if (focusId) void scrollToFocusedFloor(focusId);
+}, { flush: 'post' });
 
 watch(chapterFloors, () => {
   void nextTick(() => {
@@ -707,6 +737,19 @@ async function exitOffline() {
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.68);
   box-shadow: 0 14px 34px rgba(96, 74, 88, 0.08);
+}
+
+.chapter-entry--focus {
+  animation: chapter-focus-pulse 1.2s ease-out;
+}
+
+@keyframes chapter-focus-pulse {
+  0%, 100% {
+    box-shadow: 0 14px 34px rgba(96, 74, 88, 0.08);
+  }
+  35% {
+    box-shadow: 0 0 0 4px rgba(139, 82, 104, 0.18), 0 14px 34px rgba(96, 74, 88, 0.08);
+  }
 }
 
 .chapter-entry--delete-target {

@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router';
 import HomePage from '@/pages/HomePage.vue';
 import ChatsPage from '@/pages/ChatsPage.vue';
 import ChatSettingsPage from '@/pages/ChatSettingsPage.vue';
+import ChatSearchPage from '@/pages/ChatSearchPage.vue';
 import ChatRoomPage from '@/pages/ChatRoomPage.vue';
 import OfflineSettingsPage from '@/pages/OfflineSettingsPage.vue';
 import OfflineRoomPage from '@/pages/OfflineRoomPage.vue';
@@ -38,6 +39,7 @@ export const router = createRouter({
     { path: '/settings/image/:module/gallery', name: 'image-gallery', component: ImageGalleryPage },
     { path: '/settings/image/:module', name: 'image-module-settings', component: ImageModuleSettingsPage },
     { path: '/chats', name: 'chats', component: ChatsPage },
+    { path: '/chats/:id/search', name: 'chat-search', component: ChatSearchPage, props: true },
     { path: '/chats/:id/settings', name: 'chat-settings', component: ChatSettingsPage, props: true },
     { path: '/chats/:id', name: 'chat-room', component: ChatRoomPage, props: true },
     { path: '/offline/:id/settings', name: 'offline-chat-settings', component: OfflineSettingsPage, props: true },
