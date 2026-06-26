@@ -355,11 +355,49 @@ export function getMessagesInFloorRange(messages: ChatMessage[], startFloor: num
     .flat();
 }
 
+export const memoryVisibleTailFloors = 5;
+
+export interface HiddenFloorRange {
+  start: number;
+  end: number;
+}
+
+export function getMemoryHiddenEndFloor(startFloor: number, endFloor: number) {
+  const normalizedStartFloor = Math.max(1, Math.floor(startFloor));
+  const normalizedEndFloor = Math.max(normalizedStartFloor, Math.floor(endFloor));
+  return Math.max(normalizedStartFloor - 1, normalizedEndFloor - memoryVisibleTailFloors);
+}
+
+export function getEffectiveHiddenFloorRanges(memories: ConversationMemoryRecord[]): HiddenFloorRange[] {
+  const ranges: Array<HiddenFloorRange & { summarizedEnd: number }> = [];
+  const hiddenMemories = [...memories]
+    .filter((memory) => memory.hiddenStartFloor > 0 && memory.hiddenEndFloor >= memory.hiddenStartFloor)
+    .sort((a, b) => a.startFloor - b.startFloor || a.endFloor - b.endFloor);
+
+  hiddenMemories.forEach((memory) => {
+    const start = Math.max(1, Math.floor(memory.hiddenStartFloor));
+    const end = Math.max(start, Math.floor(memory.hiddenEndFloor));
+    const summarizedStart = Math.max(1, Math.floor(memory.startFloor));
+    const summarizedEnd = Math.max(summarizedStart, Math.floor(memory.endFloor));
+    const previous = ranges[ranges.length - 1];
+    const continuesPreviousSummary = previous && summarizedStart <= previous.summarizedEnd + 1 && start <= previous.summarizedEnd + 1;
+    const touchesPreviousRange = previous && start <= previous.end + 1;
+
+    if (previous && (continuesPreviousSummary || touchesPreviousRange)) {
+      previous.end = Math.max(previous.end, end);
+      previous.summarizedEnd = Math.max(previous.summarizedEnd, summarizedEnd);
+      return;
+    }
+
+    ranges.push({ start, end, summarizedEnd });
+  });
+
+  return ranges.map(({ start, end }) => ({ start, end }));
+}
+
 export function getHiddenMessageIds(messages: ChatMessage[], memories: ConversationMemoryRecord[], settings: ConversationSettings) {
   if (!settings.memory.hideSummarizedMessages) return new Set<string>();
-  const hiddenRanges = memories
-    .filter((memory) => memory.hiddenStartFloor > 0 && memory.hiddenEndFloor >= memory.hiddenStartFloor)
-    .map((memory) => ({ start: memory.hiddenStartFloor, end: memory.hiddenEndFloor }));
+  const hiddenRanges = getEffectiveHiddenFloorRanges(memories);
 
   const floorMap = getMessageFloorMap(messages);
   return new Set(messages
@@ -394,12 +432,11 @@ export function getNextSummaryRange(messages: ChatMessage[], memories: Conversat
   const endFloor = completedEndFloor + step;
   if (floorCount < endFloor) return null;
   const sourceMessages = getMessagesInFloorRange(messages, startFloor, endFloor);
-  const keepTail = Math.min(10, Math.max(1, Math.ceil(step * 0.1)));
   return {
     startFloor,
     endFloor,
     hiddenStartFloor: startFloor,
-    hiddenEndFloor: Math.max(startFloor - 1, endFloor - keepTail),
+    hiddenEndFloor: getMemoryHiddenEndFloor(startFloor, endFloor),
     sourceMessages
   };
 }

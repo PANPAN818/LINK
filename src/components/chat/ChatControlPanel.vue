@@ -500,7 +500,7 @@ import AvatarCropperModal from '@/components/image/AvatarCropperModal.vue';
 import { useAppStore } from '@/stores/appStore';
 import type { CharacterProfile, ChatAppearanceSettings, ConversationMemoryRecord, ConversationSettings } from '@/types/domain';
 import { readImageFileFromInput } from '@/utils/imageFile';
-import { estimateTokenCount, getConversationFloorCount, normalizeConversationSettings } from '@/utils/memory';
+import { estimateTokenCount, getConversationFloorCount, getEffectiveHiddenFloorRanges, getMemoryHiddenEndFloor, normalizeConversationSettings } from '@/utils/memory';
 import { defaultProfileAvatar } from '@/utils/profile';
 import { normalizeChatModelOverrides } from '@/utils/settings';
 import { normalizeVoomFrequency, voomFrequencyOptions } from '@/utils/voom';
@@ -544,9 +544,8 @@ const summaryModelValue = computed(() => localModelOverrides.value.summary.trim(
 const totalMemoryTokens = computed(() => store.nextReplyTokenCountForConversation(props.conversationId));
 const messageCount = computed(() => getConversationFloorCount(store.messagesForConversation(props.conversationId)));
 const hiddenFloorStatus = computed(() => {
-  const hiddenRanges = memories.value
-    .filter((memory) => memory.hiddenStartFloor > 0 && memory.hiddenEndFloor >= memory.hiddenStartFloor)
-    .map((memory) => `${memory.hiddenStartFloor}-${memory.hiddenEndFloor}楼`);
+  const hiddenRanges = getEffectiveHiddenFloorRanges(memories.value)
+    .map((range) => `${range.start}-${range.end}楼`);
   if (!hiddenRanges.length) return `当前对话共 ${messageCount.value} 楼，暂无隐藏楼层。`;
   return `当前对话共 ${messageCount.value} 楼，已隐藏 ${hiddenRanges.join('、')}。`;
 });
@@ -765,9 +764,7 @@ function fillLatestRange() {
   const endFloor = Math.max(startFloor, messageCount.value);
   manualSummary.startFloor = startFloor;
   manualSummary.endFloor = endFloor;
-  const length = endFloor - startFloor + 1;
-  const keepTail = Math.min(10, Math.max(1, Math.ceil(length * 0.1)));
-  const hiddenEndFloor = Math.max(startFloor - 1, endFloor - keepTail);
+  const hiddenEndFloor = getMemoryHiddenEndFloor(startFloor, endFloor);
   manualSummary.hiddenStartFloor = hiddenEndFloor >= startFloor ? startFloor : 0;
   manualSummary.hiddenEndFloor = hiddenEndFloor >= startFloor ? hiddenEndFloor : 0;
 }

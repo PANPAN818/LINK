@@ -9,7 +9,7 @@ import { normalizeUserProfile, normalizeVisualProfile } from '@/utils/profile';
 import { getImageGenerationSize, getImagePromptPresetForProvider, getSelectedImageModelOption, mergeVendorModels, normalizeAppSettings, normalizeChatModelOverrides } from '@/utils/settings';
 import { normalizeWorldBookEntry, normalizeWorldBooks } from '@/utils/worldBook';
 import { RECENT_STICKER_GROUP_NAME, createStickerFromDraft, createStickerGroup, isLegacyGanadiSticker, isLegacyGanadiStickerGroup, isRecentStickerGroupId, localizeStickerImageUrl, normalizeSticker, normalizeStickerGroup, shouldLocalizeStickerImageUrl, sortRecentStickers, type StickerImportDraft } from '@/utils/stickers';
-import { ageMemoryKind, createMemoryRecord, getConversationFloorCount, getHiddenMessageIds, getMemoryContext, getMessageFloorMap, getMessagesInFloorRange, getNextSummaryRange, getVisibleMessages, normalizeConversationSettings, renderCharacterMemoryPrompt, shouldCompressMemory } from '@/utils/memory';
+import { ageMemoryKind, createMemoryRecord, getConversationFloorCount, getHiddenMessageIds, getMemoryContext, getMemoryHiddenEndFloor, getMessageFloorMap, getMessagesInFloorRange, getNextSummaryRange, getVisibleMessages, normalizeConversationSettings, renderCharacterMemoryPrompt, shouldCompressMemory } from '@/utils/memory';
 import { formatContentWithChineseTranslation, normalizeTranslationText } from '@/utils/translation';
 import { estimateRoleplayReplyInputTokens, fetchVendorModels, generateConversationSummary, generateEmbeddingVector, generateImageByProvider, generateRoleplayReply, generateUserVoomComments, generateVoomCommentReplies, generateVoomPost, hasTextGenerationConfig, shouldAutoGenerateMoment, type RoleplayReplyResult, type RoleplayReplySegment } from '@/services/ai';
 import { GitHubBackupError, downloadGitHubBackup, downloadGitHubBackupVersion, ensureGitHubBackupRepository, formatGitHubBackupError, listGitHubBackupHistory, uploadGitHubBackup } from '@/services/githubBackup';
@@ -2253,13 +2253,12 @@ export const useAppStore = defineStore('app', () => {
     const partialStartFloor = completedEndFloor + 1;
     const partialEndFloor = conversationFloorCount;
     const partialLength = partialEndFloor - partialStartFloor + 1;
-    const partialKeepTail = Math.min(10, Math.max(1, Math.ceil(partialLength * 0.1)));
     const range = options.forceStartFloor && options.forceEndFloor
       ? {
           startFloor: options.forceStartFloor,
           endFloor: options.forceEndFloor,
           hiddenStartFloor: options.hiddenStartFloor ?? options.forceStartFloor,
-          hiddenEndFloor: options.hiddenEndFloor ?? Math.max(options.forceStartFloor - 1, options.forceEndFloor - Math.min(10, Math.max(1, Math.ceil((options.forceEndFloor - options.forceStartFloor + 1) * 0.1)))),
+          hiddenEndFloor: options.hiddenEndFloor ?? getMemoryHiddenEndFloor(options.forceStartFloor, options.forceEndFloor),
           sourceMessages: getMessagesInFloorRange(conversationMessages, options.forceStartFloor, options.forceEndFloor)
         }
       : nextRange ?? (options.allowPartial && partialLength > 0
@@ -2267,7 +2266,7 @@ export const useAppStore = defineStore('app', () => {
             startFloor: partialStartFloor,
             endFloor: partialEndFloor,
             hiddenStartFloor: partialStartFloor,
-            hiddenEndFloor: Math.max(partialStartFloor - 1, partialEndFloor - partialKeepTail),
+            hiddenEndFloor: getMemoryHiddenEndFloor(partialStartFloor, partialEndFloor),
             sourceMessages: getMessagesInFloorRange(conversationMessages, partialStartFloor, partialEndFloor)
           }
         : null);
@@ -2433,11 +2432,10 @@ export const useAppStore = defineStore('app', () => {
   async function toggleMemoryHiddenRange(memoryId: string, hidden: boolean) {
     const memory = conversationMemories.value.find((entry) => entry.id === memoryId);
     if (!memory) return;
-    const keepTail = Math.min(10, Math.max(1, Math.ceil((memory.endFloor - memory.startFloor + 1) * 0.1)));
     await updateMemoryRecord({
       ...memory,
       hiddenStartFloor: hidden ? memory.startFloor : 0,
-      hiddenEndFloor: hidden ? Math.max(memory.startFloor - 1, memory.endFloor - keepTail) : 0
+      hiddenEndFloor: hidden ? getMemoryHiddenEndFloor(memory.startFloor, memory.endFloor) : 0
     });
   }
 
