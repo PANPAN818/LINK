@@ -1,6 +1,10 @@
+import { isLinkBackupChunkManifest, type LinkBackupChunkManifest } from '@/utils/backup';
+
 export interface GitHubViewer {
   login: string;
 }
+
+const githubBackupChunkSize = 768 * 1024;
 
 export interface GitHubBackupRepository {
   owner: string;
@@ -83,6 +87,27 @@ function encodeBase64(text: string) {
   }
 
   return btoa(binary);
+}
+
+function encodeBytesBase64(bytes: Uint8Array) {
+  const chunkSize = 0x8000;
+  let binary = '';
+
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    binary += String.fromCharCode(...bytes.slice(index, index + chunkSize));
+  }
+
+  return btoa(binary);
+}
+
+function decodeBytesBase64(text: string) {
+  const normalized = text.replace(/\s+/g, '');
+  const binary = atob(normalized);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return bytes;
 }
 
 function decodeBase64(text: string) {
@@ -257,11 +282,21 @@ export async function ensureGitHubBackupRepository(target: Pick<GitHubBackupTarg
 }
 
 export async function uploadGitHubBackup(target: GitHubBackupTarget, content: string, message: string) {
+  const bytes = new TextEncoder().encode(content);
+  if (bytes.length > githubBackupChunkSize) {
+    await uploadGitHubChunkedBackup(target, bytes, message);
+    return;
+  }
+
+  await uploadGitHubTextFile(target, target.path, content, message);
+}
+
+async function uploadGitHubTextFile(target: GitHubBackupTarget, pathValue: string, content: string, message: string) {
   const token = target.token.trim();
   const owner = target.owner.trim();
   const repo = normalizeRepoName(target.repo);
   const branch = target.branch.trim() || 'main';
-  const path = target.path.trim().replace(/^\/+/, '') || 'link-backup.json';
+  const path = pathValue.trim().replace(/^\/+/, '') || 'link-backup.json';
   let sha = '';
 
   if (!token || !owner || !repo) throw new GitHubBackupError('GitHub 备份配置不完整。');
@@ -285,20 +320,76 @@ export async function uploadGitHubBackup(target: GitHubBackupTarget, content: st
   });
 }
 
-export async function downloadGitHubBackup(target: GitHubBackupTarget) {
+async function uploadGitHubChunkedBackup(target: GitHubBackupTarget, bytes: Uint8Array, message: string) {
+  const path = target.path.trim().replace(/^\/+/, '') || 'link-backup.json';
+  const exportedAt = Date.now();
+  const backupId = new Date(exportedAt).toISOString().replace(/[:.]/g, '-');
+  const partDir = `${path}.parts/${backupId}`;
+  const chunks: LinkBackupChunkManifest['chunks'] = [];
+
+  for (let offset = 0, index = 0; offset < bytes.length; offset += githubBackupChunkSize, index += 1) {
+    const chunk = bytes.slice(offset, Math.min(offset + githubBackupChunkSize, bytes.length));
+    const chunkPath = `${partDir}/part-${String(index + 1).padStart(4, '0')}.b64`;
+    chunks.push({ index, path: chunkPath, byteLength: chunk.byteLength });
+    await uploadGitHubTextFile(target, chunkPath, encodeBytesBase64(chunk), `${message} part ${index + 1}`);
+  }
+
+  const manifest: LinkBackupChunkManifest = {
+    app: 'LINK',
+    backupVersion: 1,
+    chunked: true,
+    exportedAt,
+    encoding: 'base64-bytes',
+    originalByteLength: bytes.byteLength,
+    chunkSize: githubBackupChunkSize,
+    chunks
+  };
+  await uploadGitHubTextFile(target, path, JSON.stringify(manifest), `${message} manifest (${chunks.length} parts)`);
+}
+
+async function downloadGitHubBackupTextAtPath(target: GitHubBackupTarget, pathValue: string, ref: string, missingMessage: string) {
   const token = target.token.trim();
   const owner = target.owner.trim();
   const repo = normalizeRepoName(target.repo);
-  const branch = target.branch.trim() || 'main';
-  const path = target.path.trim().replace(/^\/+/, '') || 'link-backup.json';
+  const normalizedRef = ref.trim() || target.branch.trim() || 'main';
+  const path = pathValue.trim().replace(/^\/+/, '') || 'link-backup.json';
 
   if (!token || !owner || !repo) throw new GitHubBackupError('GitHub 备份配置不完整。');
 
   return await readGitHubFileText(
-    `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/contents/${encodePath(path)}?ref=${encodeURIComponent(branch)}`,
+    `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/contents/${encodePath(path)}?ref=${encodeURIComponent(normalizedRef)}`,
     token,
-    '未找到 GitHub 备份文件内容。'
+    missingMessage
   );
+}
+
+async function resolveGitHubBackupText(target: GitHubBackupTarget, text: string, ref: string) {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return text;
+  }
+  if (!isLinkBackupChunkManifest(parsed)) return text;
+
+  const chunks = [...parsed.chunks].sort((left, right) => left.index - right.index);
+  const merged = new Uint8Array(parsed.originalByteLength);
+  let offset = 0;
+  for (const chunk of chunks) {
+    const chunkText = await downloadGitHubBackupTextAtPath(target, chunk.path, ref, `未找到 GitHub 分片备份：${chunk.path}`);
+    const chunkBytes = decodeBytesBase64(chunkText);
+    if (chunkBytes.byteLength !== chunk.byteLength) throw new GitHubBackupError('GitHub 分片备份大小校验失败。');
+    merged.set(chunkBytes, offset);
+    offset += chunkBytes.byteLength;
+  }
+  if (offset !== parsed.originalByteLength) throw new GitHubBackupError('GitHub 分片备份不完整。');
+  return new TextDecoder().decode(merged);
+}
+
+export async function downloadGitHubBackup(target: GitHubBackupTarget) {
+  const branch = target.branch.trim() || 'main';
+  const text = await downloadGitHubBackupTextAtPath(target, target.path, branch, '未找到 GitHub 备份文件内容。');
+  return await resolveGitHubBackupText(target, text, branch);
 }
 
 export async function listGitHubBackupHistory(target: GitHubBackupTarget, limit = 3): Promise<GitHubBackupHistoryItem[]> {
@@ -320,18 +411,8 @@ export async function listGitHubBackupHistory(target: GitHubBackupTarget, limit 
 }
 
 export async function downloadGitHubBackupVersion(target: GitHubBackupTarget, ref: string) {
-  const token = target.token.trim();
-  const owner = target.owner.trim();
-  const repo = normalizeRepoName(target.repo);
-  const path = target.path.trim().replace(/^\/+/, '') || 'link-backup.json';
-
-  if (!token || !owner || !repo) throw new GitHubBackupError('GitHub 备份配置不完整。');
-
-  return await readGitHubFileText(
-    `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/contents/${encodePath(path)}?ref=${encodeURIComponent(ref)}`,
-    token,
-    '未找到指定版本的 GitHub 备份文件内容。'
-  );
+  const text = await downloadGitHubBackupTextAtPath(target, target.path, ref, '未找到指定版本的 GitHub 备份文件内容。');
+  return await resolveGitHubBackupText(target, text, ref);
 }
 
 export function formatGitHubBackupError(error: unknown) {

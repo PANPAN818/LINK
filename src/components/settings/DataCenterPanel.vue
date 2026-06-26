@@ -10,13 +10,15 @@
 
       <div class="action-row">
         <button class="primary-action local-export-action" type="button" :disabled="Boolean(localBusy)" @click="exportBackup">
-          <span>导出备份</span>
+          <span>导出压缩备份</span>
         </button>
         <label class="secondary-action file-action" :class="{ disabled: Boolean(localBusy) }" :aria-disabled="Boolean(localBusy)">
           <span>导入备份</span>
-          <input type="file" accept=".json,application/json" :disabled="Boolean(localBusy)" @change="importBackup" />
+          <input type="file" accept=".zip,.json,application/zip,application/json" :disabled="Boolean(localBusy)" @change="importBackup" />
         </label>
       </div>
+
+      <p class="card-note">默认导出 ZIP 压缩包，旧版 JSON 备份仍可导入。</p>
 
       <p v-if="localFeedback" class="feedback" :class="localFeedbackKind">{{ localFeedback }}</p>
     </section>
@@ -138,6 +140,7 @@
       <p v-if="githubFeedback" class="feedback" :class="githubFeedbackKind">{{ githubFeedback }}</p>
       <p v-else-if="settings.githubBackup.lastBackupError" class="feedback error">{{ settings.githubBackup.lastBackupError }}</p>
     </section>
+
   </section>
 </template>
 
@@ -147,7 +150,7 @@ import { CloudUpload, Download, Github, Lock } from 'lucide-vue-next';
 import { buildGitHubLoginUrl, ensureGitHubBackupRepository, fetchGitHubViewer, formatGitHubBackupError, getGitHubOAuthWorkerOrigin } from '@/services/githubBackup';
 import { useAppStore } from '@/stores/appStore';
 import type { AppSettings, GitHubBackupHistoryRecord, GitHubBackupSettings } from '@/types/domain';
-import { createBackupFilename, downloadLinkBackupFile, parseLinkBackupText } from '@/utils/backup';
+import { createBackupArchiveFilename, downloadLinkBackupArchive, parseLinkBackupBlob } from '@/utils/backup';
 
 const props = defineProps<{
   userId: string;
@@ -309,8 +312,8 @@ async function exportBackup() {
 
   try {
     const backup = await store.createBackupFile();
-    downloadLinkBackupFile(backup, createBackupFilename(props.userId));
-    setLocalFeedback('备份已导出。');
+    downloadLinkBackupArchive(backup, createBackupArchiveFilename(props.userId));
+    setLocalFeedback('压缩备份已导出。');
   } catch (error) {
     setLocalFeedback(error instanceof Error ? error.message : '导出失败。', 'error');
   } finally {
@@ -332,8 +335,8 @@ async function importBackup(event: Event) {
   localFeedback.value = '';
 
   try {
-    const snapshot = parseLinkBackupText(await file.text());
-    await store.importBackupSnapshot(snapshot);
+    const backup = await parseLinkBackupBlob(file);
+    await store.importBackupSnapshot(backup.snapshot);
     setLocalFeedback('备份已导入。');
   } catch (error) {
     setLocalFeedback(error instanceof Error ? error.message : '导入失败。', 'error');
@@ -679,6 +682,15 @@ async function runGitHubImport() {
   color: var(--muted);
 }
 
+.card-note,
+.mini-copy {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.4;
+}
+
 .progress-head,
 .history-head {
   justify-content: space-between;
@@ -906,5 +918,6 @@ async function runGitHubImport() {
     padding: 0 10px;
     font-size: 12px;
   }
+
 }
 </style>

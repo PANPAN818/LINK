@@ -23,10 +23,11 @@
         <TtsSettingsEditor v-else-if="activeTab === 'tts'" :settings="currentSettings" @save="saveSettings" />
         <ImageSettingsEditor v-else-if="activeTab === 'image'" :settings="currentSettings" @save="saveSettings" />
         <DataCenterPanel
-          v-else
+          v-else-if="activeTab === 'data'"
           :user-id="store.user?.id || '--'"
           :settings="currentSettings"
         />
+        <DataManagementPanel v-else />
       </section>
     </main>
 
@@ -51,10 +52,11 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { CloudUpload, ImagePlus, Plus, SlidersHorizontal, Volume2 } from 'lucide-vue-next';
+import { CloudUpload, Database, ImagePlus, Plus, SlidersHorizontal, Volume2 } from 'lucide-vue-next';
 import ChatModelSwitchPanel from '@/components/chat/ChatModelSwitchPanel.vue';
 import ApiSettingsEditor from '@/components/home/ApiSettingsEditor.vue';
 import DataCenterPanel from '@/components/settings/DataCenterPanel.vue';
+import DataManagementPanel from '@/components/settings/DataManagementPanel.vue';
 import ImageSettingsEditor from '@/components/settings/ImageSettingsEditor.vue';
 import ImageModelPickerButton from '@/components/settings/ImageModelPickerButton.vue';
 import TtsModelPickerButton from '@/components/settings/TtsModelPickerButton.vue';
@@ -63,7 +65,7 @@ import { useAppStore } from '@/stores/appStore';
 import type { AppSettings } from '@/types/domain';
 import { normalizeAppSettings } from '@/utils/settings';
 
-type SettingsTab = 'api' | 'tts' | 'image' | 'data';
+type SettingsTab = 'api' | 'tts' | 'image' | 'data' | 'storage';
 
 const tabs = [
   {
@@ -97,6 +99,14 @@ const tabs = [
     title: 'Backup',
     longDescription: '数据页提供本地导入导出和 GitHub 私有仓库自动备份。',
     icon: CloudUpload
+  },
+  {
+    id: 'storage' as SettingsTab,
+    label: 'Data',
+    shortLabel: 'Data',
+    title: 'Data',
+    longDescription: '数据管理页用于查看本地存储组成，并提供缓存瘦身和分区清理。',
+    icon: Database
   }
 ];
 
@@ -229,9 +239,9 @@ async function saveSettings(nextSettings: AppSettings) {
 
 .settings-tabs {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 4px;
-  padding: 8px calc(12px + var(--safe-right)) calc(10px + var(--safe-bottom)) calc(12px + var(--safe-left));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 3px;
+  padding: 7px calc(8px + var(--safe-right)) calc(9px + var(--safe-bottom)) calc(8px + var(--safe-left));
   border-top: 1px solid rgba(17, 17, 17, 0.05);
   background: rgba(255, 255, 255, 0.96);
   backdrop-filter: blur(18px);
@@ -240,13 +250,21 @@ async function saveSettings(nextSettings: AppSettings) {
 .settings-tab {
   display: grid;
   justify-items: center;
-  gap: 4px;
-  min-height: 48px;
-  padding: 6px 4px;
-  border-radius: 14px;
+  gap: 3px;
+  min-width: 0;
+  min-height: 46px;
+  padding: 6px 2px;
+  border-radius: 13px;
   color: var(--muted);
   font-size: 10px;
   font-weight: 800;
+}
+
+.settings-tab span {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .settings-tab.active {
@@ -255,7 +273,7 @@ async function saveSettings(nextSettings: AppSettings) {
 }
 
 .settings-tab svg {
-  width: 20px;
-  height: 20px;
+  width: 19px;
+  height: 19px;
 }
 </style>

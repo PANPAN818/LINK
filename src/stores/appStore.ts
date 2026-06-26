@@ -14,7 +14,7 @@ import { formatContentWithChineseTranslation, normalizeTranslationText } from '@
 import { estimateRoleplayReplyInputTokens, fetchVendorModels, generateConversationSummary, generateEmbeddingVector, generateImageByProvider, generateRoleplayReply, generateUserVoomComments, generateVoomCommentReplies, generateVoomPost, hasTextGenerationConfig, shouldAutoGenerateMoment, type RoleplayReplyResult, type RoleplayReplySegment } from '@/services/ai';
 import { GitHubBackupError, downloadGitHubBackup, downloadGitHubBackupVersion, ensureGitHubBackupRepository, formatGitHubBackupError, listGitHubBackupHistory, uploadGitHubBackup } from '@/services/githubBackup';
 import { synthesizeSpeech } from '@/services/tts';
-import { createLinkBackupFile, parseLinkBackupFileText, parseLinkBackupText } from '@/utils/backup';
+import { createLinkBackupFile, parseLinkBackupFileText, parseLinkBackupText, stickerBackupPlaceholder, stringifyLinkBackupFile } from '@/utils/backup';
 import { getVoomFrequencyChance, stripVoomCommentReplyPrefix } from '@/utils/voom';
 
 interface CreateUserVoomPostPayload {
@@ -27,6 +27,9 @@ interface CreateUserVoomPostPayload {
 }
 
 type ConversationSummaryResultStatus = 'created' | 'updated' | 'existing' | 'busy';
+
+export type DataCleanupAction = 'generated-images' | 'message-media' | 'sticker-local-cache' | 'image-candidates' | 'voice-audio' | 'memory-vectors';
+export type ClearableDataSection = 'messages' | 'voomPosts' | 'music' | 'worldBooks' | 'stickers' | 'conversationSettings' | 'conversationMemories' | 'generatedImages';
 
 interface ConversationSummaryResult {
   record: ConversationMemoryRecord;
@@ -694,6 +697,73 @@ export const useAppStore = defineStore('app', () => {
     return Math.max(1, Math.ceil(content.trim().length / 4));
   }
 
+  function estimateJsonBytes(value: unknown) {
+    try {
+      return new Blob([JSON.stringify(value)]).size;
+    } catch {
+      return 0;
+    }
+  }
+
+  function isInlineMediaUrl(value = '') {
+    return /^data:(?:image|audio)\//i.test(value.trim());
+  }
+
+  function stripInlineMediaUrl(value: string | undefined, fallback = '') {
+    const normalizedValue = String(value ?? '').trim();
+    return isInlineMediaUrl(normalizedValue) ? fallback : normalizedValue;
+  }
+
+  function stripChatImageCache(image: ChatImageAttachment): ChatImageAttachment {
+    return {
+      ...image,
+      url: stripInlineMediaUrl(image.url),
+      candidates: image.candidates?.map((candidate) => ({ ...candidate, image: stripInlineMediaUrl(candidate.image) })).filter((candidate) => candidate.image)
+    };
+  }
+
+  function stripVoiceAudioCache(voice: ChatVoiceAttachment): ChatVoiceAttachment {
+    return {
+      ...voice,
+      audioUrl: stripInlineMediaUrl(voice.audioUrl)
+    };
+  }
+
+  function stripMessageMediaCache(message: ChatMessage): ChatMessage {
+    return {
+      ...message,
+      sticker: message.sticker ? { ...message.sticker, imageUrl: stripInlineMediaUrl(message.sticker.imageUrl, stickerBackupPlaceholder) } : undefined,
+      image: message.image ? stripChatImageCache(message.image) : undefined,
+      voice: message.voice ? stripVoiceAudioCache(message.voice) : undefined,
+      quote: message.quote ? {
+        ...message.quote,
+        sticker: message.quote.sticker ? { ...message.quote.sticker, imageUrl: stripInlineMediaUrl(message.quote.sticker.imageUrl, stickerBackupPlaceholder) } : undefined,
+        image: message.quote.image ? stripChatImageCache(message.quote.image) : undefined,
+        voice: message.quote.voice ? stripVoiceAudioCache(message.quote.voice) : undefined
+      } : undefined
+    };
+  }
+
+  function stripImageCandidates(message: ChatMessage): ChatMessage {
+    return message.image?.candidates?.length
+      ? { ...message, image: { ...message.image, candidates: undefined } }
+      : message;
+  }
+
+  function stripVoiceAudio(message: ChatMessage): ChatMessage {
+    return message.voice?.audioUrl || message.quote?.voice?.audioUrl
+      ? {
+        ...message,
+        voice: message.voice ? { ...message.voice, audioUrl: '' } : undefined,
+        quote: message.quote?.voice ? { ...message.quote, voice: { ...message.quote.voice, audioUrl: '' } } : message.quote
+      }
+      : message;
+  }
+
+  function estimateFreedBytes(beforeValue: unknown, afterValue: unknown) {
+    return Math.max(0, estimateJsonBytes(beforeValue) - estimateJsonBytes(afterValue));
+  }
+
   function normalizeLocationAttachment(location: ChatLocationAttachment): ChatLocationAttachment | null {
     const name = location.name.trim();
     const distance = location.distance.trim();
@@ -1276,10 +1346,7 @@ export const useAppStore = defineStore('app', () => {
   async function saveSticker(nextSticker: Sticker) {
     const fallbackGroupId = stickerGroups.value[0]?.id ?? '';
     const groupIds = nextSticker.groupIds.filter((id) => !isRecentStickerGroupId(id));
-    const imageUrl = shouldLocalizeStickerImageUrl(nextSticker.imageUrl)
-      ? await localizeStickerImageUrl(nextSticker.imageUrl)
-      : nextSticker.imageUrl;
-    const normalizedSticker = normalizeSticker({ ...nextSticker, imageUrl, groupIds, updatedAt: Date.now() }, fallbackGroupId);
+    const normalizedSticker = normalizeSticker({ ...nextSticker, groupIds, updatedAt: Date.now() }, fallbackGroupId);
     if (!normalizedSticker) return;
     const index = stickers.value.findIndex((sticker) => sticker.id === normalizedSticker.id);
     if (index >= 0) stickers.value[index] = normalizedSticker;
@@ -1288,34 +1355,7 @@ export const useAppStore = defineStore('app', () => {
   }
 
   async function persistImportedStickerInBackground(importedSticker: Sticker, draft: StickerImportDraft) {
-    const sourceImageUrl = importedSticker.imageUrl;
-    const cacheImageUrl = draft.cacheImageUrl;
-    if (!cacheImageUrl) await putEntity('stickers', importedSticker);
-    if (!cacheImageUrl && !shouldLocalizeStickerImageUrl(sourceImageUrl)) return;
-
-    let cachedImageUrl = '';
-    try {
-      cachedImageUrl = cacheImageUrl ? await cacheImageUrl() : await localizeStickerImageUrl(sourceImageUrl);
-    } catch (error) {
-      console.warn('Sticker background cache failed.', error);
-      return;
-    }
-    if (!cachedImageUrl || cachedImageUrl === sourceImageUrl) return;
-
-    const index = stickers.value.findIndex((sticker) => sticker.id === importedSticker.id);
-    if (index < 0) {
-      draft.cleanupImageUrl?.();
-      return;
-    }
-    const currentSticker = stickers.value[index];
-    if (currentSticker.imageUrl !== sourceImageUrl) {
-      draft.cleanupImageUrl?.();
-      return;
-    }
-
-    const cachedSticker = { ...currentSticker, imageUrl: cachedImageUrl, updatedAt: Date.now() };
-    stickers.value[index] = cachedSticker;
-    await putEntity('stickers', cachedSticker);
+    await putEntity('stickers', importedSticker);
     draft.cleanupImageUrl?.();
   }
 
@@ -1809,7 +1849,7 @@ export const useAppStore = defineStore('app', () => {
           branch: activeConfig.branch,
           path: activeConfig.path
         },
-        JSON.stringify(backup, null, 2),
+        stringifyLinkBackupFile(backup),
         `${reason === 'auto' ? 'Auto' : 'Manual'} LINK backup ${new Date().toISOString()}`
       );
       const history = await loadGitHubBackupHistory(3).catch(() => activeConfig.history ?? []);
@@ -2036,14 +2076,11 @@ export const useAppStore = defineStore('app', () => {
     const conversation = conversationById(conversationId);
     if (!conversation) return;
     const sentAt = Date.now();
-    const imageUrl = shouldLocalizeStickerImageUrl(sticker.imageUrl)
-      ? await localizeStickerImageUrl(sticker.imageUrl)
-      : sticker.imageUrl;
     const resolvedSticker = {
       ...sticker,
-      imageUrl,
+      imageUrl: sticker.imageUrl,
       lastUsedAt: sentAt,
-      updatedAt: imageUrl === sticker.imageUrl ? sticker.updatedAt : sentAt
+      updatedAt: sticker.updatedAt
     };
 
     const stickerIndex = stickers.value.findIndex((item) => item.id === resolvedSticker.id);
@@ -2094,15 +2131,171 @@ export const useAppStore = defineStore('app', () => {
       };
       const messageIndex = messages.value.findIndex((item) => item.id === nextMessage.id);
       if (messageIndex >= 0) messages.value[messageIndex] = nextMessage;
-      await putEntity('messages', nextMessage);
-
-      const stickerIndex = stickers.value.findIndex((item) => item.id === sticker.stickerId);
-      if (stickerIndex >= 0 && shouldLocalizeStickerImageUrl(stickers.value[stickerIndex].imageUrl)) {
-        const nextSticker = { ...stickers.value[stickerIndex], imageUrl, updatedAt: Date.now() };
-        stickers.value[stickerIndex] = nextSticker;
-        await putEntity('stickers', nextSticker);
-      }
     }
+  }
+
+  function getDataInventory() {
+    const sections = [
+      { id: 'users', label: '用户资料', count: users.value.length, bytes: estimateJsonBytes(users.value), protected: true },
+      { id: 'characters', label: '角色资料', count: characters.value.length, bytes: estimateJsonBytes(characters.value), protected: true },
+      { id: 'conversations', label: '会话索引', count: conversations.value.length, bytes: estimateJsonBytes(conversations.value), protected: true },
+      { id: 'messages', label: '聊天消息', count: messages.value.length, bytes: estimateJsonBytes(messages.value), clearable: true },
+      { id: 'voomPosts', label: 'VOOM 动态', count: voomPosts.value.length, bytes: estimateJsonBytes(voomPosts.value), clearable: true },
+      { id: 'music', label: '音乐收藏与评论', count: musicFavoriteTracks.value.length + musicCommentThreads.value.length, bytes: estimateJsonBytes([musicFavoriteTracks.value, musicCommentThreads.value]), clearable: true },
+      { id: 'worldBooks', label: '世界书', count: worldBooks.value.length, bytes: estimateJsonBytes(worldBooks.value), clearable: true },
+      { id: 'stickers', label: '贴纸库', count: stickerGroups.value.length + stickers.value.length, bytes: estimateJsonBytes([stickerGroups.value, stickers.value]), clearable: true },
+      { id: 'conversationSettings', label: '会话设置', count: conversationSettings.value.length, bytes: estimateJsonBytes(conversationSettings.value), clearable: true },
+      { id: 'conversationMemories', label: '记忆摘要', count: conversationMemories.value.length, bytes: estimateJsonBytes(conversationMemories.value), clearable: true },
+      { id: 'generatedImages', label: '生成图历史', count: generatedImages.value.length, bytes: estimateJsonBytes(generatedImages.value), clearable: true },
+      { id: 'settings', label: '全局设置', count: 1, bytes: estimateJsonBytes(settings.value), protected: true }
+    ];
+    const totalBytes = sections.reduce((total, section) => total + section.bytes, 0);
+    return { sections, totalBytes };
+  }
+
+  function estimateCleanupFreedBytes(action: DataCleanupAction) {
+    if (action === 'generated-images') return estimateJsonBytes(generatedImages.value);
+
+    if (action === 'message-media') {
+      return estimateFreedBytes(messages.value, messages.value.map((message) => stripMessageMediaCache(message)));
+    }
+
+    if (action === 'sticker-local-cache') {
+      const nextStickers = stickers.value.map((sticker) => isInlineMediaUrl(sticker.imageUrl) ? { ...sticker, imageUrl: stickerBackupPlaceholder, updatedAt: sticker.updatedAt } : sticker);
+      return estimateFreedBytes(stickers.value, nextStickers);
+    }
+
+    if (action === 'image-candidates') {
+      const messageFreedBytes = estimateFreedBytes(messages.value, messages.value.map((message) => stripImageCandidates(message)));
+      const nextPosts = voomPosts.value.map((post) => post.imageCandidates?.length ? { ...post, imageCandidates: undefined } : post);
+      return messageFreedBytes + estimateFreedBytes(voomPosts.value, nextPosts);
+    }
+
+    if (action === 'voice-audio') {
+      return estimateFreedBytes(messages.value, messages.value.map((message) => stripVoiceAudio(message)));
+    }
+
+    const nextMemories = conversationMemories.value.map((memory) => memory.vector.length ? { ...memory, vector: [] } : memory);
+    return estimateFreedBytes(conversationMemories.value, nextMemories);
+  }
+
+  async function cleanupData(action: DataCleanupAction) {
+    if (action === 'generated-images') return clearDataSections(['generatedImages']);
+
+    if (action === 'message-media') {
+      const nextMessages = messages.value.map((message) => stripMessageMediaCache(message));
+      const changedMessages = nextMessages.filter((message, index) => JSON.stringify(message) !== JSON.stringify(messages.value[index]));
+      if (changedMessages.length) await saveMessages(changedMessages);
+      return changedMessages.length;
+    }
+
+    if (action === 'sticker-local-cache') {
+      const nextStickers = stickers.value.map((sticker) => isInlineMediaUrl(sticker.imageUrl) ? { ...sticker, imageUrl: stickerBackupPlaceholder, updatedAt: Date.now() } : sticker);
+      const changedStickers = nextStickers.filter((sticker, index) => sticker.imageUrl !== stickers.value[index].imageUrl);
+      if (changedStickers.length) {
+        const changedMap = new Map(changedStickers.map((sticker) => [sticker.id, sticker]));
+        stickers.value = stickers.value.map((sticker) => changedMap.get(sticker.id) ?? sticker);
+        await Promise.all(changedStickers.map((sticker) => putEntity('stickers', sticker)));
+      }
+      return changedStickers.length;
+    }
+
+    if (action === 'image-candidates') {
+      const nextMessages = messages.value.map((message) => stripImageCandidates(message));
+      const changedMessages = nextMessages.filter((message, index) => message !== messages.value[index]);
+      const nextPosts = voomPosts.value.map((post) => post.imageCandidates?.length ? { ...post, imageCandidates: undefined } : post);
+      const changedPosts = nextPosts.filter((post, index) => post !== voomPosts.value[index]);
+      if (changedMessages.length) await saveMessages(changedMessages);
+      if (changedPosts.length) {
+        const postMap = new Map(changedPosts.map((post) => [post.id, post]));
+        voomPosts.value = voomPosts.value.map((post) => postMap.get(post.id) ?? post);
+        await Promise.all(changedPosts.map((post) => putEntity('voomPosts', createPersistableVoomPost(post))));
+      }
+      return changedMessages.length + changedPosts.length;
+    }
+
+    if (action === 'voice-audio') {
+      const nextMessages = messages.value.map((message) => stripVoiceAudio(message));
+      const changedMessages = nextMessages.filter((message, index) => message !== messages.value[index]);
+      if (changedMessages.length) await saveMessages(changedMessages);
+      return changedMessages.length;
+    }
+
+    const nextMemories = conversationMemories.value.map((memory) => memory.vector.length ? { ...memory, vector: [] } : memory);
+    const changedMemories = nextMemories.filter((memory, index) => memory !== conversationMemories.value[index]);
+    if (changedMemories.length) {
+      const memoryMap = new Map(changedMemories.map((memory) => [memory.id, memory]));
+      conversationMemories.value = conversationMemories.value.map((memory) => memoryMap.get(memory.id) ?? memory);
+      await Promise.all(changedMemories.map((memory) => putEntity('conversationMemories', memory)));
+    }
+    return changedMemories.length;
+  }
+
+  async function clearDataSections(sectionIds: ClearableDataSection[]) {
+    const sectionSet = new Set(sectionIds);
+    let changed = 0;
+
+    if (sectionSet.has('messages')) {
+      changed += await deleteMessages(messages.value.map((message) => message.id));
+    }
+    if (sectionSet.has('voomPosts')) {
+      const posts = [...voomPosts.value];
+      voomPosts.value = [];
+      await Promise.all(posts.map((post) => deleteEntity('voomPosts', post.id)));
+      changed += posts.length;
+    }
+    if (sectionSet.has('music')) {
+      const tracks = [...musicFavoriteTracks.value];
+      const threads = [...musicCommentThreads.value];
+      musicFavoriteTracks.value = [];
+      musicCommentThreads.value = [];
+      await Promise.all([
+        ...tracks.map((track) => deleteEntity('musicFavoriteTracks', track.id)),
+        ...threads.map((thread) => deleteEntity('musicCommentThreads', thread.trackKey))
+      ]);
+      changed += tracks.length + threads.length;
+    }
+    if (sectionSet.has('worldBooks')) {
+      const books = [...worldBooks.value];
+      worldBooks.value = [];
+      characters.value = characters.value.map((character) => ({ ...character, localWorldBookIds: [] }));
+      await Promise.all([
+        ...books.map((book) => deleteEntity('worldBooks', book.id)),
+        ...characters.value.map((character) => putEntity('characters', character))
+      ]);
+      changed += books.length;
+    }
+    if (sectionSet.has('stickers')) {
+      const groups = [...stickerGroups.value];
+      const entries = [...stickers.value];
+      stickerGroups.value = [];
+      stickers.value = [];
+      await Promise.all([
+        ...groups.map((group) => deleteEntity('stickerGroups', group.id)),
+        ...entries.map((sticker) => deleteEntity('stickers', sticker.id))
+      ]);
+      changed += groups.length + entries.length;
+    }
+    if (sectionSet.has('conversationSettings')) {
+      const entries = [...conversationSettings.value];
+      conversationSettings.value = [];
+      await Promise.all(entries.map((entry) => deleteEntity('conversationSettings', entry.conversationId)));
+      changed += entries.length;
+    }
+    if (sectionSet.has('conversationMemories')) {
+      const entries = [...conversationMemories.value];
+      conversationMemories.value = [];
+      await Promise.all(entries.map((entry) => deleteEntity('conversationMemories', entry.id)));
+      changed += entries.length;
+    }
+    if (sectionSet.has('generatedImages')) {
+      const entries = [...generatedImages.value];
+      generatedImages.value = [];
+      await Promise.all(entries.map((entry) => deleteEntity('generatedImages', entry.id)));
+      changed += entries.length;
+    }
+
+    return changed;
   }
 
   async function appendUserImageMessage(conversationId: string, content: string, image: ChatImageAttachment, quote?: ChatMessageQuote | null) {
@@ -3861,6 +4054,10 @@ export const useAppStore = defineStore('app', () => {
     addGeneratedImage,
     updateGeneratedImageUrl,
     deleteGeneratedImage,
+    getDataInventory,
+    estimateCleanupFreedBytes,
+    cleanupData,
+    clearDataSections,
     refreshEnabledVendorModels,
     bindWorldBook,
     updateConversationMode,
