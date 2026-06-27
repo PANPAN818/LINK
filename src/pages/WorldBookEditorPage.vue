@@ -238,7 +238,7 @@ import { useAppStore } from '@/stores/appStore';
 import type { ImageProviderType, WorldBookEntry, WorldBookEntryActivation, WorldBookLoreEntry } from '@/types/domain';
 import { createId } from '@/utils/id';
 import { getImagePromptPresetForProvider, getSelectedImageModelOption, normalizeAppSettings } from '@/utils/settings';
-import { readImageFileFromInput } from '@/utils/imageFile';
+import { compressInlineImageDataUrl, readImageFileFromInput } from '@/utils/imageFile';
 import { createWorldBookLoreEntry, getWorldBookContentSummary, normalizeWorldBookEntry, resolveWorldBookCover } from '@/utils/worldBook';
 
 type CoverState = 'idle' | 'loading' | 'success' | 'error';
@@ -548,6 +548,15 @@ function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : '封面生成失败，请检查图片接口配置。';
 }
 
+async function compactCoverImage(imageUrl: string) {
+  if (!/^data:image\//i.test(imageUrl.trim())) return imageUrl;
+  try {
+    return await compressInlineImageDataUrl(imageUrl, { maxDimension: 800, quality: 0.62, minBytes: 160 * 1024 });
+  } catch {
+    return imageUrl;
+  }
+}
+
 function getCoverModelLabel(provider: ImageProviderType) {
   const selected = getSelectedImageModelOption(currentSettings.value, 'worldBook');
   return selected?.provider === provider ? selected.label : '';
@@ -601,12 +610,13 @@ async function generateCover() {
 
   try {
     const result = await generateImageByProvider(provider, imageSettings, imageOverrides);
-    clearBrokenCoverImage(result.imageUrl);
-    draft.coverImage = result.imageUrl;
+    const imageUrl = await compactCoverImage(result.imageUrl);
+    clearBrokenCoverImage(imageUrl);
+    draft.coverImage = imageUrl;
     draft.coverProvider = result.provider;
     await store.addGeneratedImage({
       provider: result.provider,
-      imageUrl: result.imageUrl,
+      imageUrl,
       title: `${draft.title.trim() || '世界书'}封面`,
       prompt: positivePrompt,
       negativePrompt: promptPreset.negativePrompt,

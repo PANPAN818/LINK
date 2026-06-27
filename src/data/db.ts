@@ -1,6 +1,7 @@
 import { openDB, type DBSchema, type IDBPDatabase } from 'idb';
 import { toRaw } from 'vue';
-import type { AppSettings, AppSnapshot, CharacterProfile, ChatMessage, Conversation, ConversationMemoryRecord, ConversationSettings, GeneratedImageRecord, MusicCommentThread, MusicTrack, Sticker, StickerGroup, UserProfile, VoomPost, WorldBookEntry } from '@/types/domain';
+import type { AppSettings, AppSnapshot, CharacterProfile, ChatImageAttachment, ChatMessage, Conversation, ConversationMemoryRecord, ConversationSettings, GeneratedImageRecord, MusicCommentThread, MusicTrack, Sticker, StickerGroup, UserProfile, VoomPost, WorldBookEntry } from '@/types/domain';
+import { compressInlineImageDataUrl } from '@/utils/imageFile';
 import { normalizeUserProfile } from '@/utils/profile';
 import { normalizeAppSettings } from '@/utils/settings';
 import { isLegacyGanadiSticker, isLegacyGanadiStickerGroup, isRecentStickerGroupId } from '@/utils/stickers';
@@ -32,6 +33,166 @@ const legacyDefaultCharacterIds = new Set(['2000100001', '2000100002', '20001000
 const legacyDefaultConversationIds = new Set(['conv_2000100001', 'conv_2000100002', 'conv_2000100003']);
 const legacyDefaultWorldBookIds = new Set(['wb_global_online', 'wb_global_offline', 'wb_local_campus', 'wb_local_art', 'wb_local_tokyo']);
 const legacyDefaultVoomPostIds = new Set(['voom_seed_1']);
+const inlineImageCompressionOptions = { maxDimension: 800, quality: 0.62, minBytes: 160 * 1024 };
+
+function isInlineImageDataUrl(value: string | undefined) {
+  return /^data:image\//i.test(String(value ?? '').trim());
+}
+
+async function compactInlineImageValue(value: string | undefined) {
+  if (!isInlineImageDataUrl(value)) return value;
+  try {
+    return await compressInlineImageDataUrl(String(value), inlineImageCompressionOptions);
+  } catch {
+    return value;
+  }
+}
+
+async function compactChatImageAttachment(image: ChatImageAttachment): Promise<ChatImageAttachment> {
+  let changed = false;
+  const nextUrl = await compactInlineImageValue(image.url);
+  if (nextUrl !== image.url) changed = true;
+
+  const nextCandidates = image.candidates
+    ? await Promise.all(image.candidates.map(async (candidate) => {
+        const nextImage = await compactInlineImageValue(candidate.image) ?? candidate.image;
+        if (nextImage !== candidate.image) changed = true;
+        return nextImage === candidate.image ? candidate : { ...candidate, image: nextImage };
+      }))
+    : image.candidates;
+
+  return changed ? { ...image, url: nextUrl, candidates: nextCandidates } : image;
+}
+
+async function compactMessageInlineImages(message: ChatMessage): Promise<ChatMessage> {
+  let changed = false;
+  const nextImage = message.image ? await compactChatImageAttachment(message.image) : message.image;
+  if (nextImage !== message.image) changed = true;
+
+  const nextQuoteImage = message.quote?.image ? await compactChatImageAttachment(message.quote.image) : message.quote?.image;
+  if (nextQuoteImage !== message.quote?.image) changed = true;
+
+  return changed
+    ? {
+        ...message,
+        image: nextImage,
+        quote: message.quote ? { ...message.quote, image: nextQuoteImage } : message.quote
+      }
+    : message;
+}
+
+async function compactVoomPostInlineImages(post: VoomPost): Promise<VoomPost> {
+  let changed = false;
+  const nextImage = await compactInlineImageValue(post.image);
+  if (nextImage !== post.image) changed = true;
+
+  const nextCandidates = post.imageCandidates
+    ? await Promise.all(post.imageCandidates.map(async (candidate) => {
+        const nextCandidateImage = await compactInlineImageValue(candidate.image) ?? candidate.image;
+        if (nextCandidateImage !== candidate.image) changed = true;
+        return nextCandidateImage === candidate.image ? candidate : { ...candidate, image: nextCandidateImage };
+      }))
+    : post.imageCandidates;
+
+  return changed ? { ...post, image: nextImage, imageCandidates: nextCandidates } : post;
+}
+
+async function compactGeneratedImageRecord(record: GeneratedImageRecord): Promise<GeneratedImageRecord> {
+  const nextImageUrl = await compactInlineImageValue(record.imageUrl) ?? record.imageUrl;
+  return nextImageUrl === record.imageUrl ? record : { ...record, imageUrl: nextImageUrl };
+}
+
+async function compactWorldBookInlineImages(entry: WorldBookEntry): Promise<WorldBookEntry> {
+  const nextCoverImage = await compactInlineImageValue(entry.coverImage) ?? entry.coverImage;
+  return nextCoverImage === entry.coverImage ? entry : { ...entry, coverImage: nextCoverImage };
+}
+
+async function compactSettingsInlineImages(entry: AppSettings): Promise<AppSettings> {
+  let changed = false;
+  const nextOpenAiLastImageUrl = await compactInlineImageValue(entry.imageOpenAi.lastImageUrl) ?? entry.imageOpenAi.lastImageUrl;
+  const nextNovelAiLastImageUrl = await compactInlineImageValue(entry.imageNovelAi.lastImageUrl) ?? entry.imageNovelAi.lastImageUrl;
+  const nextPollinationsLastImageUrl = await compactInlineImageValue(entry.imagePollinations.lastImageUrl) ?? entry.imagePollinations.lastImageUrl;
+  const nextPollinationsReferenceImage = await compactInlineImageValue(entry.imagePollinations.referenceImage) ?? entry.imagePollinations.referenceImage;
+  changed ||= nextOpenAiLastImageUrl !== entry.imageOpenAi.lastImageUrl;
+  changed ||= nextNovelAiLastImageUrl !== entry.imageNovelAi.lastImageUrl;
+  changed ||= nextPollinationsLastImageUrl !== entry.imagePollinations.lastImageUrl;
+  changed ||= nextPollinationsReferenceImage !== entry.imagePollinations.referenceImage;
+
+  return changed
+    ? {
+        ...entry,
+        imageOpenAi: { ...entry.imageOpenAi, lastImageUrl: nextOpenAiLastImageUrl },
+        imageNovelAi: { ...entry.imageNovelAi, lastImageUrl: nextNovelAiLastImageUrl },
+        imagePollinations: {
+          ...entry.imagePollinations,
+          lastImageUrl: nextPollinationsLastImageUrl,
+          referenceImage: nextPollinationsReferenceImage
+        }
+      }
+    : entry;
+}
+
+async function compactValueForStore<TStore extends StoreName>(storeName: TStore, value: LinkDb[TStore]['value']): Promise<LinkDb[TStore]['value']> {
+  if (storeName === 'messages') return await compactMessageInlineImages(value as ChatMessage) as LinkDb[TStore]['value'];
+  if (storeName === 'voomPosts') return await compactVoomPostInlineImages(value as VoomPost) as LinkDb[TStore]['value'];
+  if (storeName === 'generatedImages') return await compactGeneratedImageRecord(value as GeneratedImageRecord) as LinkDb[TStore]['value'];
+  if (storeName === 'worldBooks') return await compactWorldBookInlineImages(value as WorldBookEntry) as LinkDb[TStore]['value'];
+  if (storeName === 'settings') return await compactSettingsInlineImages(value as AppSettings) as LinkDb[TStore]['value'];
+  return value;
+}
+
+async function compactSnapshotInlineImages(snapshot: AppSnapshot): Promise<AppSnapshot> {
+  const messages: ChatMessage[] = [];
+  for (const message of snapshot.messages) messages.push(await compactMessageInlineImages(message));
+
+  const voomPosts: VoomPost[] = [];
+  for (const post of snapshot.voomPosts) voomPosts.push(await compactVoomPostInlineImages(post));
+
+  const generatedImages: GeneratedImageRecord[] = [];
+  for (const record of snapshot.generatedImages ?? []) generatedImages.push(await compactGeneratedImageRecord(record));
+
+  const worldBooks: WorldBookEntry[] = [];
+  for (const entry of snapshot.worldBooks) worldBooks.push(await compactWorldBookInlineImages(entry));
+
+  return {
+    ...snapshot,
+    messages,
+    voomPosts,
+    worldBooks,
+    generatedImages,
+    settings: await compactSettingsInlineImages(snapshot.settings)
+  };
+}
+
+async function compactStoredInlineImagesForStore<TStore extends StoreName>(storeName: TStore) {
+  const db = await getDb();
+  const keys = await db.getAllKeys(storeName);
+  let changed = 0;
+
+  for (const key of keys) {
+    const value = await db.get(storeName, key as never);
+    if (!value) continue;
+    const compactedValue = await compactValueForStore(storeName, value);
+    if (compactedValue === value) continue;
+
+    const persistableValue = toPersistableValue(compactedValue);
+    if (storeName === 'settings') await db.put('settings', persistableValue as AppSettings, key as string);
+    else await db.put(storeName, persistableValue as never);
+    changed += 1;
+  }
+
+  return changed;
+}
+
+export async function compactStoredInlineImages() {
+  let changed = 0;
+  changed += await compactStoredInlineImagesForStore('messages');
+  changed += await compactStoredInlineImagesForStore('voomPosts');
+  changed += await compactStoredInlineImagesForStore('generatedImages');
+  changed += await compactStoredInlineImagesForStore('worldBooks');
+  changed += await compactStoredInlineImagesForStore('settings');
+  return changed;
+}
 
 export function getDb() {
   dbPromise ??= openDB<LinkDb>('link-local-db', 6, {
@@ -180,6 +341,7 @@ async function pruneLegacyDefaultData() {
 
 export async function loadSnapshot() {
   await seedDatabase();
+  await compactStoredInlineImages();
   await pruneLegacyDefaultData();
   const db = await getDb();
   const [users, characters, conversations, messages, voomPosts, musicFavoriteTracks, musicCommentThreads, worldBooks, stickerGroups, stickers, conversationSettings, conversationMemories, generatedImages, settings] = await Promise.all([
@@ -218,6 +380,7 @@ export async function loadSnapshot() {
 }
 
 export async function replaceSnapshot(snapshot: AppSnapshot) {
+  snapshot = await compactSnapshotInlineImages(snapshot);
   const db = await getDb();
   const tx = db.transaction(storeNames, 'readwrite');
 
@@ -334,7 +497,8 @@ function stripVueProxy(value: unknown, seen: WeakMap<object, unknown>): unknown 
 
 export async function putEntity<TStore extends StoreName>(storeName: TStore, value: LinkDb[TStore]['value'], key?: LinkDb[TStore]['key']) {
   const db = await getDb();
-  const persistableValue = toPersistableValue(value);
+  const compactedValue = await compactValueForStore(storeName, value);
+  const persistableValue = toPersistableValue(compactedValue);
   if (key !== undefined) {
     await db.put(storeName, persistableValue as never, key as never);
     return;

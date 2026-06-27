@@ -16,6 +16,7 @@ import { GitHubBackupError, downloadGitHubBackup, downloadGitHubBackupVersion, e
 import { synthesizeSpeech } from '@/services/tts';
 import { createLinkBackupFile, parseLinkBackupFileText, parseLinkBackupText, stickerBackupPlaceholder, stringifyLinkBackupFile } from '@/utils/backup';
 import { getVoomFrequencyChance, stripVoomCommentReplyPrefix } from '@/utils/voom';
+import { compressInlineImageDataUrl } from '@/utils/imageFile';
 
 interface CreateUserVoomPostPayload {
   userId: string;
@@ -733,6 +734,16 @@ export const useAppStore = defineStore('app', () => {
 
   function isInlineMediaUrl(value = '') {
     return /^data:(?:image|audio)\//i.test(value.trim());
+  }
+
+  async function compactInlineDisplayImage(value = '') {
+    const imageUrl = value.trim();
+    if (!/^data:image\//i.test(imageUrl)) return value;
+    try {
+      return await compressInlineImageDataUrl(imageUrl, { maxDimension: 800, quality: 0.62, minBytes: 160 * 1024 });
+    } catch {
+      return value;
+    }
   }
 
   function stripInlineMediaUrl(value: string | undefined, fallback = '') {
@@ -1989,10 +2000,11 @@ export const useAppStore = defineStore('app', () => {
   }
 
   async function addGeneratedImage(record: Omit<GeneratedImageRecord, 'id' | 'createdAt'> & { id?: string; createdAt?: number }) {
+    const compactImageUrl = await compactInlineDisplayImage(record.imageUrl);
     const normalizedRecord = normalizeGeneratedImages([{
       id: record.id || createId('image'),
       provider: record.provider,
-      imageUrl: record.imageUrl,
+      imageUrl: compactImageUrl,
       title: record.title,
       prompt: record.prompt,
       negativePrompt: record.negativePrompt,
@@ -2010,7 +2022,7 @@ export const useAppStore = defineStore('app', () => {
 
   async function updateGeneratedImageUrl(imageId: string, imageUrl: string) {
     const normalizedImageId = imageId.trim();
-    const normalizedImageUrl = imageUrl.trim();
+    const normalizedImageUrl = (await compactInlineDisplayImage(imageUrl)).trim();
     if (!normalizedImageId || !normalizedImageUrl) return null;
     const imageIndex = generatedImages.value.findIndex((entry) => entry.id === normalizedImageId);
     if (imageIndex < 0) return null;
@@ -3483,7 +3495,7 @@ export const useAppStore = defineStore('app', () => {
       return null;
     }
 
-    const image = payload.image?.trim() || '';
+    const image = await compactInlineDisplayImage(payload.image?.trim() || '');
     const imageDescription = payload.imageDescription?.trim() || '';
     const createdAt = Date.now();
     const post: VoomPost = {
@@ -3607,8 +3619,9 @@ export const useAppStore = defineStore('app', () => {
     }
 
     const result = await generateImageByProvider(provider, imageSettings, imageOverrides);
+    const imageUrl = await compactInlineDisplayImage(result.imageUrl);
     return createChatImageCandidate({
-      image: result.imageUrl,
+      image: imageUrl,
       description: imageDescription,
       provider: result.provider,
       model: selectedModel.label,
@@ -3760,10 +3773,11 @@ export const useAppStore = defineStore('app', () => {
 
     try {
       const result = await generateImageByProvider(provider, imageSettings, imageOverrides);
+      const imageUrl = await compactInlineDisplayImage(result.imageUrl);
       const latestPost = voomPosts.value.find((entry) => entry.id === normalizedPostId);
       if (!latestPost) return null;
       const nextCandidate = createVoomImageCandidate({
-        image: result.imageUrl,
+        image: imageUrl,
         description: imageDescription,
         provider: result.provider,
         model: selectedModel.label,
@@ -3771,7 +3785,7 @@ export const useAppStore = defineStore('app', () => {
       });
       const nextPost = {
         ...latestPost,
-        image: result.imageUrl,
+        image: imageUrl,
         imageDescription,
         imageProvider: result.provider,
         imageCandidates: [...(latestPost.imageCandidates ?? []), nextCandidate]
@@ -3779,7 +3793,7 @@ export const useAppStore = defineStore('app', () => {
       await saveVoomPost(nextPost);
       await addGeneratedImage({
         provider: result.provider,
-        imageUrl: result.imageUrl,
+        imageUrl,
         title: `${voomAuthorNameForPost(latestPost)} 的 VOOM 配图`,
         prompt: positivePrompt,
         negativePrompt: promptPreset.negativePrompt,

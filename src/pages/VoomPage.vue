@@ -253,6 +253,7 @@ import VoomPostCard from '@/components/voom/VoomPostCard.vue';
 import { useAppStore } from '@/stores/appStore';
 import type { VoomPost, VoomPostVisibility } from '@/types/domain';
 import { getCharacterDisplayName, getCharacterVoomAuthorName } from '@/utils/character';
+import { readChatImageFile } from '@/utils/imageFile';
 import { getSelectedImageModelOption } from '@/utils/settings';
 
 const store = useAppStore();
@@ -541,17 +542,22 @@ function toggleUserVoomCharacter(characterId: string) {
     : [...selectedUserVoomCharacterIds.value, characterId];
 }
 
-function readUserVoomImage(event: Event) {
+async function readUserVoomImage(event: Event) {
   const input = event.target as HTMLInputElement;
   const file = input.files?.[0];
-  if (!file || !file.type.startsWith('image/')) return;
-
-  const reader = new FileReader();
-  reader.addEventListener('load', () => {
-    userVoomImage.value = String(reader.result ?? '');
+  if (!file || !file.type.startsWith('image/')) {
     input.value = '';
-  });
-  reader.readAsDataURL(file);
+    return;
+  }
+
+  try {
+    const image = await readChatImageFile(file, 800, 0.72);
+    userVoomImage.value = image.dataUrl;
+  } catch (error) {
+    store.showConfigAlert(error instanceof Error ? error.message : '图片读取失败。', '无法读取图片');
+  } finally {
+    input.value = '';
+  }
 }
 
 function resolvePublisherCharacter() {
