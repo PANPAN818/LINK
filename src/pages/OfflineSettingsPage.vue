@@ -368,6 +368,11 @@ function deletePreset(kind: PresetKind) {
 }
 
 function goBack() {
+  const backPath = window.history.state?.back;
+  if (typeof backPath === 'string' && backPath.startsWith(`/offline/${props.id}`) && !backPath.includes('/settings')) {
+    router.back();
+    return;
+  }
   void router.replace({ name: 'offline-room', params: { id: props.id } });
 }
 </script>

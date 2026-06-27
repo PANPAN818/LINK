@@ -1,6 +1,6 @@
 <template>
   <section v-if="conversation && character" class="screen no-tabs offline-room">
-    <OfflineMemoryPanel v-if="showMemoryPanel" :conversation-id="props.id" :character="character" @back="showMemoryPanel = false" />
+    <OfflineMemoryPanel v-if="showMemoryPanel" :conversation-id="props.id" :character="character" @back="closeMemoryPanel" />
 
     <template v-else>
     <header class="offline-topbar">
@@ -17,7 +17,7 @@
         <strong>{{ characterDisplayName }}</strong>
       </div>
       <div class="offline-topbar-actions offline-topbar-actions--right">
-        <button class="offline-icon-button" type="button" aria-label="线下总结" @click="showMemoryPanel = true">
+        <button class="offline-icon-button" type="button" aria-label="线下总结" @click="openMemoryPanel">
           <BookOpenText :size="20" />
         </button>
         <button class="offline-icon-button" type="button" aria-label="线下设置" @click="openOfflineSettings">
@@ -269,6 +269,46 @@ interface PendingDelete {
 }
 
 const pendingDelete = ref<PendingDelete | null>(null);
+
+function isMemoryPanelRoute() {
+  return route.query.panel === 'memory';
+}
+
+function queryWithoutMemoryPanel() {
+  const { panel, ...query } = route.query;
+  return query;
+}
+
+function canReturnToOfflineRoom() {
+  const backPath = window.history.state?.back;
+  return typeof backPath === 'string' && backPath.startsWith(`/offline/${props.id}`) && !backPath.includes('/settings');
+}
+
+function openMemoryPanel() {
+  truncateDeleteMode.value = false;
+  cancelFloorEdit();
+  if (isMemoryPanelRoute()) {
+    showMemoryPanel.value = true;
+    return;
+  }
+  void router.push({
+    name: 'offline-room',
+    params: { id: props.id },
+    query: { ...route.query, panel: 'memory' }
+  });
+}
+
+function closeMemoryPanel() {
+  if (!showMemoryPanel.value) return;
+  if (isMemoryPanelRoute() && canReturnToOfflineRoom()) {
+    router.back();
+    return;
+  }
+  showMemoryPanel.value = false;
+  if (isMemoryPanelRoute()) {
+    void router.replace({ name: 'offline-room', params: { id: props.id }, query: queryWithoutMemoryPanel() });
+  }
+}
 
 function createChapterFloor(messages: ChatMessage[], index: number): ChapterFloor {
   const primary = messages[0];
@@ -696,6 +736,10 @@ watch(() => route.query.focus, (value) => {
   if (focusId) void scrollToFocusedFloor(focusId);
 }, { flush: 'post' });
 
+watch(() => route.query.panel, () => {
+  showMemoryPanel.value = isMemoryPanelRoute();
+}, { immediate: true });
+
 watch(chapterFloors, () => {
   void nextTick(() => {
     if (currentConversationReplying.value) jumpToLastFloor();
@@ -731,7 +775,7 @@ async function regenerateLatestReply() {
 }
 
 function openOfflineSettings() {
-  void router.replace({ name: 'offline-chat-settings', params: { id: props.id } });
+  void router.push({ name: 'offline-chat-settings', params: { id: props.id } });
 }
 
 function goBack() {
