@@ -1,5 +1,5 @@
 <template>
-  <section ref="voomPageRef" class="screen voom-page" @scroll="handleVoomPageScroll">
+  <section ref="voomPageRef" class="screen voom-page" @scroll.passive="handleVoomPageScroll">
     <header class="top-bar">
       <h1 class="top-title">LINK VOOM</h1>
       <div class="icon-row">
@@ -43,7 +43,7 @@
       </button>
     </section>
 
-    <div v-if="!filteredSortedVoomPosts.length" class="empty-state">
+    <div v-if="!hasFilteredVoomPosts" class="empty-state">
       <div>
         <h2>马上就开始使用LINK VOOM吧!</h2>
         <p>到LINK VOOM看看大家的近况吧!<br />您也试着分享看看吧!</p>
@@ -68,7 +68,7 @@
       @delete-post="requestDeleteVoomPost"
     />
 
-    <div v-if="hasMoreVoomPosts" class="voom-loader">继续下滑加载更多</div>
+    <div v-if="hasMoreVoomPosts" ref="voomLoaderRef" class="voom-loader">继续下滑加载更多</div>
 
     <AppModal v-model="showDeletePostConfirm" title="确认删除" :show-header="false" variant="ins">
       <section class="voom-delete-confirm">
@@ -246,7 +246,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { FileText, Globe2, Image as ImageIcon, LoaderCircle, Plus, Shuffle, SquarePen, Upload, UserCog, UserRound, X } from 'lucide-vue-next';
 import AppModal from '@/components/common/AppModal.vue';
 import VoomPostCard from '@/components/voom/VoomPostCard.vue';
@@ -264,7 +264,9 @@ const creatingVoomPost = ref(false);
 const creatingUserVoomPost = ref(false);
 const regeneratingImagePostIds = ref<string[]>([]);
 const voomPageRef = ref<HTMLElement | null>(null);
-const visibleVoomPostLimit = ref(12);
+const voomLoaderRef = ref<HTMLElement | null>(null);
+const initialVoomPostLimit = 12;
+const visibleVoomPostLimit = ref(initialVoomPostLimit);
 const randomPublisherId = 'random';
 const selectedPublisherId = ref(randomPublisherId);
 const selectedUserVoomAccountId = ref('');
@@ -294,23 +296,32 @@ const voomStoryCharacters = computed(() => store.charactersForActiveUser
   .filter((character) => voomLatestPostAtByCharacter.value.has(character.id))
   .sort((a, b) => (voomLatestPostAtByCharacter.value.get(b.id) ?? 0) - (voomLatestPostAtByCharacter.value.get(a.id) ?? 0))
 );
-const filteredSortedVoomPosts = computed(() => {
+function matchesSelectedVoomFeed(post: VoomPost) {
   if (selectedVoomCharacterId.value) {
-    return store.sortedVoomPosts.filter((post) => post.charId === selectedVoomCharacterId.value && post.authorType !== 'user');
+    return post.charId === selectedVoomCharacterId.value && post.authorType !== 'user';
   }
 
   const activeAccountId = store.user?.id ?? '';
-  return store.sortedVoomPosts.filter((post) => {
-    if (post.authorType === 'user') return Boolean(activeAccountId && post.userId === activeAccountId);
-    return Boolean(post.charId && activeUserCharacterIds.value.has(post.charId));
-  });
+  if (post.authorType === 'user') return Boolean(activeAccountId && post.userId === activeAccountId);
+  return Boolean(post.charId && activeUserCharacterIds.value.has(post.charId));
+}
+const visibleVoomPostState = computed(() => {
+  const posts: VoomPost[] = [];
+  for (const post of store.sortedVoomPosts) {
+    if (!matchesSelectedVoomFeed(post)) continue;
+    if (posts.length >= visibleVoomPostLimit.value) return { posts, hasMore: true, hasAny: true };
+    posts.push(post);
+  }
+  return { posts, hasMore: false, hasAny: Boolean(posts.length) };
 });
-const visibleVoomPosts = computed(() => filteredSortedVoomPosts.value.slice(0, visibleVoomPostLimit.value));
-const hasMoreVoomPosts = computed(() => visibleVoomPostLimit.value < filteredSortedVoomPosts.value.length);
+const visibleVoomPosts = computed(() => visibleVoomPostState.value.posts);
+const hasMoreVoomPosts = computed(() => visibleVoomPostState.value.hasMore);
+const hasFilteredVoomPosts = computed(() => visibleVoomPostState.value.hasAny);
 const accountHasUnreadVoom = computed(() => voomStoryCharacters.value.some((character) => hasUnreadVoomForCharacter(character.id)));
 
 const voomPostLoadStep = 8;
 const voomLoadThreshold = 320;
+let voomLoadObserver: IntersectionObserver | undefined;
 
 const selectedUserVoomAccount = computed(() => {
   const selectedId = selectedUserVoomAccountId.value.trim();
@@ -374,13 +385,15 @@ async function switchActiveAccount(userId: string) {
 
 function loadMoreVoomPosts() {
   if (!hasMoreVoomPosts.value) return;
-  visibleVoomPostLimit.value = Math.min(filteredSortedVoomPosts.value.length, visibleVoomPostLimit.value + voomPostLoadStep);
+  visibleVoomPostLimit.value += voomPostLoadStep;
 }
 
 function handleVoomPageScroll() {
+  if ('IntersectionObserver' in window) return;
   const page = voomPageRef.value;
   if (!page || page.scrollHeight - page.scrollTop - page.clientHeight > voomLoadThreshold) return;
   loadMoreVoomPosts();
+  void refreshVoomLazyLoader();
 }
 
 async function ensureVoomScrollable() {
@@ -393,17 +406,54 @@ async function ensureVoomScrollable() {
   }
 }
 
+function disconnectVoomLoadObserver() {
+  voomLoadObserver?.disconnect();
+  voomLoadObserver = undefined;
+}
+
+function connectVoomLoadObserver() {
+  disconnectVoomLoadObserver();
+  const page = voomPageRef.value;
+  const loader = voomLoaderRef.value;
+  if (!page || !loader || !hasMoreVoomPosts.value || !('IntersectionObserver' in window)) return;
+
+  voomLoadObserver = new IntersectionObserver((entries) => {
+    if (!entries.some((entry) => entry.isIntersecting)) return;
+    loadMoreVoomPosts();
+    void refreshVoomLazyLoader();
+  }, {
+    root: page,
+    rootMargin: `0px 0px ${voomLoadThreshold}px 0px`,
+    threshold: 0
+  });
+  voomLoadObserver.observe(loader);
+}
+
+async function refreshVoomLazyLoader() {
+  await ensureVoomScrollable();
+  await nextTick();
+  connectVoomLoadObserver();
+}
+
 onMounted(() => {
-  void ensureVoomScrollable();
+  void refreshVoomLazyLoader();
 });
 
-watch(() => filteredSortedVoomPosts.value.length, () => {
-  void ensureVoomScrollable();
+onBeforeUnmount(() => {
+  disconnectVoomLoadObserver();
+});
+
+watch(() => store.sortedVoomPosts.length, () => {
+  void refreshVoomLazyLoader();
+});
+
+watch(hasMoreVoomPosts, () => {
+  void refreshVoomLazyLoader();
 });
 
 watch([() => selectedVoomCharacterId.value, () => store.user?.id], () => {
-  visibleVoomPostLimit.value = 12;
-  void ensureVoomScrollable();
+  visibleVoomPostLimit.value = initialVoomPostLimit;
+  void refreshVoomLazyLoader();
 });
 
 async function handleComment(postId: string, content: string, parentId?: string) {

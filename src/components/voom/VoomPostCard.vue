@@ -27,7 +27,7 @@
     </header>
     <p>{{ postDisplayContent }}</p>
     <figure v-if="hasVisualContent" class="post-visual" :class="{ mock: !post.image || isBrokenImageSource(post.image) }" :style="visualStyle" @click="openVisualModal">
-      <img v-if="post.image && !isBrokenImageSource(post.image)" :src="post.image" :alt="post.imageDescription || post.content" @error="markBrokenImageSource(post.image)" />
+      <img v-if="post.image && !isBrokenImageSource(post.image)" :src="post.image" :alt="post.imageDescription || post.content" loading="lazy" decoding="async" @error="markBrokenImageSource(post.image)" />
       <figcaption v-else>{{ visualDescription }}</figcaption>
     </figure>
     <footer>
@@ -64,7 +64,7 @@
       <section class="visual-viewer" :class="{ flipped: visualFlipped }" :style="visualStyle">
         <button class="visual-flip-card" type="button" @click="toggleVisualFlip">
           <span class="visual-face visual-image-face">
-            <img v-if="modalImageSrc && !isBrokenImageSource(modalImageSrc)" :src="modalImageSrc" :alt="selectedVisualDescription" @error="markBrokenImageSource(modalImageSrc)" />
+            <img v-if="modalImageSrc && !isBrokenImageSource(modalImageSrc)" :src="modalImageSrc" :alt="selectedVisualDescription" decoding="async" @error="markBrokenImageSource(modalImageSrc)" />
             <span v-else>{{ selectedVisualDescription }}</span>
           </span>
           <span class="visual-face visual-text-face">
@@ -82,7 +82,7 @@
             :aria-label="`查看配图 ${index + 1}`"
             @click="selectCandidate(candidate.id)"
           >
-            <img :src="candidate.image" :alt="candidate.description || 'VOOM 配图'" @error="markBrokenImageSource(candidate.image)" />
+            <img :src="candidate.image" :alt="candidate.description || 'VOOM 配图'" loading="lazy" decoding="async" @error="markBrokenImageSource(candidate.image)" />
           </button>
         </div>
 
