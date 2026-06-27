@@ -124,12 +124,14 @@
 import { computed, reactive, ref } from 'vue';
 import { Pencil } from 'lucide-vue-next';
 import AvatarCropperModal from '@/components/image/AvatarCropperModal.vue';
-import type { UserProfile, VoomPost } from '@/types/domain';
+import type { UserProfile, VisualProfile, VoomPost } from '@/types/domain';
 import { readImageFileFromInput } from '@/utils/imageFile';
-import { createVisualProfile, getVisualProfile, normalizeVisualProfile } from '@/utils/profile';
+import { normalizeVisualProfile } from '@/utils/profile';
+
+type LocalUserProfile = UserProfile & { profile: Partial<VisualProfile> };
 
 const props = defineProps<{
-  user: UserProfile;
+  user: LocalUserProfile;
   posts: VoomPost[];
 }>();
 
@@ -152,7 +154,7 @@ const editorForm = reactive({
   following: ''
 });
 
-const visualProfile = computed(() => getVisualProfile(props.user) ?? createVisualProfile(props.user));
+const visualProfile = computed(() => normalizeVisualProfile(props.user.profile, props.user));
 const sheetBackgroundImage = computed(() => visualProfile.value.backgroundImage || displayAvatar.value);
 const sheetStyle = computed(() => ({
   color: visualProfile.value.textColor || '#f5f3f1',
@@ -238,6 +240,7 @@ function saveEditor() {
 
   emit('save', {
     ...props.user,
+    avatar: nextProfileAvatar,
     nickname: nextNickname,
     signature: nextSignature,
     profile: normalizeVisualProfile({

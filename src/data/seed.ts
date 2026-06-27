@@ -1,5 +1,5 @@
 import type { AppSettings, CharacterProfile, ChatMessage, Conversation, Sticker, StickerGroup, UserProfile, VoomPost, WorldBookEntry } from '@/types/domain';
-import { createVisualProfile, defaultProfileAvatar } from '@/utils/profile';
+import { createUserVisualProfile, defaultProfileAvatar } from '@/utils/profile';
 
 export const defaultUsers: UserProfile[] = [
   {
@@ -10,7 +10,7 @@ export const defaultUsers: UserProfile[] = [
     description: '该用户很懒，什么也没留下',
     signature: 'link to your excutive character',
     boundCharacterIds: [],
-    profile: createVisualProfile({
+    profile: createUserVisualProfile({
       id: '1008600001',
       nickname: 'Linker',
       name: 'momo',

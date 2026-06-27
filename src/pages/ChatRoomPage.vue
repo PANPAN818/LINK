@@ -494,7 +494,7 @@ import { useAppStore } from '@/stores/appStore';
 import type { CharacterProfile, ChatImageAttachment, ChatLocationAttachment, ChatMessage, ChatMessageQuote, ChatTransferStatus, ChatVoiceAttachment, Sticker, UserProfile } from '@/types/domain';
 import { readChatImageFile } from '@/utils/imageFile';
 import { useKeyboardScrollGuard } from '@/utils/keyboardScrollGuard';
-import { getVisualProfile, normalizeVisualProfile } from '@/utils/profile';
+import { normalizeVisualProfile } from '@/utils/profile';
 import { getSelectedImageModelOption } from '@/utils/settings';
 import { recommendStickers } from '@/utils/stickerRecommendations';
 import { isVoomNarrationMessage, mergeVoomLikeMessages } from '@/utils/voomMessages';
@@ -647,9 +647,10 @@ const conversationUser = computed(() => {
   const user = boundUser.value;
   if (!user) return null;
 
-  const profile = normalizeVisualProfile(character.value?.boundUserProfile ?? getVisualProfile(user) ?? user.profile, user);
+  const profile = normalizeVisualProfile(character.value?.boundUserProfile, user);
   return {
     ...user,
+    avatar: profile.avatar || user.avatar,
     nickname: profile.nickname || user.nickname,
     signature: profile.bio || user.signature,
     profile

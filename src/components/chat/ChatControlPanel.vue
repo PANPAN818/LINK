@@ -501,7 +501,7 @@ import { useAppStore } from '@/stores/appStore';
 import type { CharacterProfile, ChatAppearanceSettings, ConversationMemoryRecord, ConversationSettings } from '@/types/domain';
 import { readImageFileFromInput } from '@/utils/imageFile';
 import { estimateTokenCount, getConversationFloorCount, getEffectiveHiddenFloorRanges, getMemoryHiddenEndFloor, normalizeConversationSettings } from '@/utils/memory';
-import { defaultProfileAvatar, getVisualProfile } from '@/utils/profile';
+import { defaultProfileAvatar } from '@/utils/profile';
 import { normalizeChatModelOverrides } from '@/utils/settings';
 import { normalizeVoomFrequency, voomFrequencyOptions } from '@/utils/voom';
 
@@ -555,7 +555,7 @@ const mergeableMemories = computed(() => memories.value.filter((memory) => !memo
 const mergedMemories = computed(() => memories.value.filter((memory) => memory.isMergedSummary));
 const characterDraftNickname = computed(() => characterDraft.nickname || 'new.friend');
 const boundUser = computed(() => store.userById(props.character.boundUserId) ?? store.user ?? null);
-const boundUserVisualProfile = computed(() => props.character.boundUserProfile ?? getVisualProfile(boundUser.value));
+const boundUserVisualProfile = computed(() => props.character.boundUserProfile);
 const userAvatarPreview = computed(() => boundUserVisualProfile.value?.avatar || boundUser.value?.avatar || defaultProfileAvatar);
 const userAvatarAlt = computed(() => boundUserVisualProfile.value?.nickname || boundUser.value?.nickname || boundUser.value?.name || '我');
 const backgroundImageOptions = computed(() => draft.appearance.backgroundImages);

@@ -279,7 +279,6 @@ import VoomPostCard from '@/components/voom/VoomPostCard.vue';
 import { useAppStore } from '@/stores/appStore';
 import type { VoomPost, VoomPostVisibility } from '@/types/domain';
 import { getCharacterDisplayName, getCharacterVoomAuthorName } from '@/utils/character';
-import { getVisualProfile } from '@/utils/profile';
 import { getSelectedImageModelOption } from '@/utils/settings';
 
 const store = useAppStore();
@@ -306,9 +305,8 @@ const pendingDeletePostId = ref('');
 
 const publisherCharacters = computed(() => store.charactersForActiveUser);
 const canRegenerateVoomImage = computed(() => Boolean(getSelectedImageModelOption(store.settings, 'voom')));
-const activeUserProfile = computed(() => getVisualProfile(store.user));
 const activeUserDisplayName = computed(() => store.user?.nickname || store.user?.name || '账号');
-const activeUserAvatar = computed(() => activeUserProfile.value?.avatar || store.user?.avatar || '');
+const activeUserAvatar = computed(() => store.user?.avatar || '');
 const activeUserCharacterIds = computed(() => new Set(store.charactersForActiveUser.map((character) => character.id)));
 const voomLatestPostAtByCharacter = computed(() => {
   const latestByCharacter = new Map<string, number>();

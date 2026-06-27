@@ -127,7 +127,7 @@ import type { CharacterProfile, UserProfile } from '@/types/domain';
 import { getCharacterDisplayName } from '@/utils/character';
 import { createAccountId } from '@/utils/id';
 import { readImageFileFromInput } from '@/utils/imageFile';
-import { defaultProfileAvatar, normalizeUserProfile } from '@/utils/profile';
+import { createUserVisualProfile, defaultProfileAvatar, normalizeUserProfile } from '@/utils/profile';
 
 const props = defineProps<{
   accounts: UserProfile[];
@@ -229,34 +229,13 @@ function createAccount() {
     description: '在这里写这个账号希望被角色读到的用户设定。',
     signature: 'new signal online',
     boundCharacterIds: [],
-    profile: props.accounts[0]?.profile ?? {
+    profile: props.accounts[0]?.profile ?? createUserVisualProfile({
       nickname: 'new.account',
       handle: 'new.account',
+      name: 'New User',
       avatar: defaultProfileAvatar,
-      bio: 'new signal online',
-      backgroundImage: '',
-      location: 'Seoul / Shanghai',
-      mood: 'private signal',
-      archiveLabel: 'Daily Archive',
-      editLabel: '编辑',
-      editorTitle: '编辑个人资料',
-      messageLabel: 'message',
-      momentsLabel: 'Moments',
-      accentColor: '#f49ab5',
-      stats: {
-        posts: 128,
-        postsLabel: 'Posts',
-        followers: '8.6k',
-        followersLabel: 'Followers',
-        following: 216,
-        followingLabel: 'Following'
-      },
-      tags: ['daily', 'film', 'cafe'],
-      chips: ['private link'],
-      links: [],
-      highlights: [],
-      moments: []
-    }
+      signature: 'new signal online'
+    })
   });
 
   draftAccounts.unshift(draftAccount);

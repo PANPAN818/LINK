@@ -1,4 +1,4 @@
-import type { CharacterProfile, UserProfile, VisualProfile } from '@/types/domain';
+import type { CharacterProfile, UserProfile, UserVisualProfile, VisualProfile } from '@/types/domain';
 import momoAvatar from '@/assets/profile/momo-avatar.png';
 import momoHighlightCafe from '@/assets/profile/momo-highlight-cafe.png';
 import momoHighlightLook from '@/assets/profile/momo-highlight-look.png';
@@ -17,6 +17,7 @@ import momoMomentPov from '@/assets/profile/momo-moment-POV.png';
 export const profileAccentOptions = ['#f49ab5', '#b6d7a8', '#f7d66d', '#9bb8d9', '#b9a4cf', '#e6e6e6'];
 
 type VisualProfileOwner = Partial<Pick<UserProfile, 'id' | 'nickname' | 'name' | 'avatar' | 'signature'>>;
+type UserVisualProfileOwner = VisualProfileOwner & Partial<Pick<VisualProfile, 'handle'>>;
 
 const legacySeanAvatar = 'https://api.dicebear.com/9.x/thumbs/svg?seed=Sean&backgroundColor=06c755';
 const legacyMomoAvatar = 'https://api.dicebear.com/9.x/thumbs/svg?seed=momo&backgroundColor=f2f2f2';
@@ -170,6 +171,25 @@ export function createVisualProfile(user?: VisualProfileOwner): VisualProfile {
   };
 }
 
+function removeVisualProfileAvatar(profile: Partial<VisualProfile> | undefined) {
+  if (!profile) return undefined;
+  const { avatar, ...profileWithoutAvatar } = profile;
+  return profileWithoutAvatar;
+}
+
+export function toUserVisualProfile(profile: VisualProfile): UserVisualProfile {
+  const { avatar, ...profileWithoutAvatar } = profile;
+  return profileWithoutAvatar;
+}
+
+export function createUserVisualProfile(user?: UserVisualProfileOwner): UserVisualProfile {
+  const profile = createVisualProfile(user);
+  return toUserVisualProfile({
+    ...profile,
+    handle: user?.handle || profile.handle
+  });
+}
+
 function isLegacyDefaultUser(user: UserProfile) {
   return (
     user.id === '1008600001' &&
@@ -267,11 +287,11 @@ export function normalizeVisualProfile(profile?: Partial<VisualProfile>, user?: 
 }
 
 export function normalizeUserProfile(user: UserProfile): UserProfile {
+  const avatar = normalizeProfileAvatar(user.avatar) || defaultProfileAvatar;
+  const profileOwner = { ...user, avatar };
   const profile = isLegacyDefaultUser(user) && isLegacyDefaultVisualProfile(user.profile)
     ? createDefaultLinkerProfile()
-    : normalizeVisualProfile(user.profile, user);
-  const avatar = normalizeProfileAvatar(user.avatar) || normalizeProfileAvatar(profile.avatar);
-  const profileAvatar = normalizeProfileAvatar(profile.avatar) || avatar;
+    : normalizeVisualProfile(removeVisualProfileAvatar(user.profile as Partial<VisualProfile>), profileOwner);
 
   return {
     ...user,
@@ -280,9 +300,8 @@ export function normalizeUserProfile(user: UserProfile): UserProfile {
     signature: user.signature?.trim() || defaultProfileBio,
     boundCharacterIds: Array.isArray(user.boundCharacterIds) ? [...new Set(user.boundCharacterIds.filter(Boolean))] : [],
     profile: {
-      ...profile,
+      ...toUserVisualProfile(profile),
       nickname: user.nickname?.trim() || user.name,
-      avatar: profileAvatar,
       bio: user.signature?.trim() || profile.bio
     }
   };
@@ -290,7 +309,7 @@ export function normalizeUserProfile(user: UserProfile): UserProfile {
 
 export function getVisualProfile(user: UserProfile | null): VisualProfile | null {
   if (!user) return null;
-  return normalizeVisualProfile(user.profile, user);
+  return normalizeVisualProfile(removeVisualProfileAvatar(user.profile as Partial<VisualProfile>), user);
 }
 
 export function getCharacterVisualProfile(character: CharacterProfile | null): VisualProfile | null {

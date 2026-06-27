@@ -53,6 +53,8 @@ export interface VisualProfile {
   moments: VisualProfileMoment[];
 }
 
+export type UserVisualProfile = Omit<VisualProfile, 'avatar'>;
+
 export interface UserProfile {
   id: string;
   nickname: string;
@@ -61,7 +63,7 @@ export interface UserProfile {
   description: string;
   signature: string;
   boundCharacterIds: string[];
-  profile: VisualProfile;
+  profile: UserVisualProfile;
 }
 
 export interface CharacterMindState {

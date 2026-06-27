@@ -177,7 +177,7 @@ import { useAppStore } from '@/stores/appStore';
 import { getCharacterDisplayName } from '@/utils/character';
 import { formatChatTime } from '@/utils/time';
 import { defaultConversationSettings } from '@/utils/memory';
-import { defaultProfileAvatar, getVisualProfile } from '@/utils/profile';
+import { defaultProfileAvatar } from '@/utils/profile';
 import { normalizeTranslationText, shouldShowChineseTranslation } from '@/utils/translation';
 
 const props = withDefaults(defineProps<{
@@ -338,7 +338,7 @@ const userDisplayName = computed(() => {
 });
 const userAvatar = computed(() => {
   const currentUser = props.user ?? store.user;
-  return getVisualProfile(currentUser)?.avatar || currentUser?.avatar || defaultProfileAvatar;
+  return currentUser?.avatar || defaultProfileAvatar;
 });
 const showAvatarButton = computed(() => props.message.sender === 'char' || (props.message.sender === 'user' && props.appearance.showUserAvatar));
 const avatarSource = computed(() => (props.message.sender === 'user' ? userAvatar.value : props.character.avatar));
