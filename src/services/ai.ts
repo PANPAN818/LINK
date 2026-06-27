@@ -2,7 +2,7 @@ import { unzipSync } from 'fflate';
 import type { ApiVendor, AppSettings, CharacterProfile, ConversationTimeAwarenessSettings, GenerateReplyInput, ImageProviderType, MusicComment, MusicTrack, NovelAiModelOption, PollinationsModelOption, PromptContext, UserProfile, VoomComment, VoomFrequency, VoomPost } from '@/types/domain';
 import { createId } from '@/utils/id';
 import { getCharacterVoomAuthorName } from '@/utils/character';
-import { defaultNovelAiModels, defaultPollinationsModels, getImageGenerationSize, getImagePromptPresetForProvider, getResolvedApiConfig, getResolvedOpenAiImageConfig, getSelectedImageModelOption, novelAiOfficialApiUrl, novelAiProxyApiUrl } from '@/utils/settings';
+import { defaultNovelAiModels, defaultPollinationsModels, getResolvedApiConfig, getResolvedOpenAiImageConfig, novelAiOfficialApiUrl, novelAiProxyApiUrl } from '@/utils/settings';
 import { estimateTokenCount } from '@/utils/memory';
 import { renderTimeAwarenessPrompt } from '@/utils/timeAwareness';
 import { formatContentWithChineseTranslation, normalizeTranslationText } from '@/utils/translation';
@@ -10,7 +10,6 @@ import { getVoomFrequencyChance, stripVoomCommentReplyPrefix } from '@/utils/voo
 import { buildMomentPrompt, buildPrompt } from './prompt';
 
 const modelSelectionSeparator = '::';
-const imageModelSelectionSeparator = '::';
 const textProxyPath = '/__text-proxy';
 const imageDownloadProxyPath = '/__image-download';
 
@@ -729,22 +728,6 @@ function splitModelSelection(selection = '') {
   return {
     vendorId: vendorId.trim(),
     model: modelParts.join(modelSelectionSeparator).trim()
-  };
-}
-
-function splitImageModelSelection(selection = '') {
-  const trimmed = selection.trim();
-  if (!trimmed.includes(imageModelSelectionSeparator)) {
-    return {
-      vendorId: '',
-      model: trimmed
-    };
-  }
-
-  const [vendorId, ...modelParts] = trimmed.split(imageModelSelectionSeparator);
-  return {
-    vendorId: vendorId.trim(),
-    model: modelParts.join(imageModelSelectionSeparator).trim()
   };
 }
 
@@ -1554,23 +1537,6 @@ async function generateDistinctVoomPayload(context: PromptContext, settings?: Ap
   return latestPayload ?? parseVoomMomentPayload('', context);
 }
 
-function buildVoomImagePrompt(context: PromptContext, content: string, imageDescription: string) {
-  const recentMessages = context.messages
-    .slice(-6)
-    .map((message) => message.content.trim())
-    .filter(Boolean)
-    .join(' / ')
-    .slice(0, 280);
-
-  return [
-    'Square LINK VOOM social feed image, candid mobile photo style, realistic composition, natural light, no text overlay',
-    `image description: ${imageDescription}`,
-    `character: ${context.character.nickname}, ${context.character.description || context.character.signature}`,
-    `post text context: ${content}`,
-    recentMessages ? `recent chat context: ${recentMessages}` : ''
-  ].filter(Boolean).join(', ');
-}
-
 function normalizeVoomCommentReplies(input: unknown, fallbackAuthorName: string, post: VoomPost, blockedAuthorNames: string[] = []): VoomCommentReplyResult[] {
   const replySource = Array.isArray(input)
     ? input
@@ -2102,49 +2068,6 @@ export async function generateRoleplayReply(input: GenerateReplyInput): Promise<
 
 export async function generateVoomPost(context: PromptContext, settings?: AppSettings, modelOverride = ''): Promise<Omit<VoomPost, 'id' | 'createdAt'>> {
   const { content, contentTranslation, imageDescription, likes, comments } = await generateDistinctVoomPayload(context, settings, modelOverride);
-  const imagePrompt = buildVoomImagePrompt(context, content, imageDescription);
-  const selectedImageModel = getSelectedImageModelOption(settings, 'voom');
-  const imageProvider = selectedImageModel?.provider ?? null;
-  let imageResult: ImageGenerationResult | null = null;
-
-  if (settings && imageProvider && selectedImageModel) {
-    let imageSettings = settings;
-    const promptPreset = getImagePromptPresetForProvider(settings, imageProvider);
-    const imageSize = getImageGenerationSize(settings, imageProvider);
-    const imageOverrides: ImageGenerationOverrides = {
-      positivePrompt: [promptPreset.positivePrompt, imagePrompt].filter(Boolean).join(', '),
-      negativePrompt: promptPreset.negativePrompt,
-      size: imageSize.size,
-      width: imageSize.width,
-      height: imageSize.height,
-      model: selectedImageModel.model
-    };
-
-    if (imageProvider === 'openai') {
-      const selected = splitImageModelSelection(selectedImageModel.model);
-      if (selected.vendorId) {
-        imageSettings = {
-          ...settings,
-          imageOpenAi: {
-            ...settings.imageOpenAi,
-            activeVendorId: selected.vendorId
-          }
-        };
-      }
-      if (selected.model) imageOverrides.model = selected.model;
-    }
-
-    try {
-      imageResult = await generateImageByProvider(imageProvider, imageSettings, imageOverrides);
-    } catch {
-      imageResult = null;
-    }
-  }
-
-  const fallbackImage = settings && imageProvider && !imageResult ? '/load.jpg' : undefined;
-  const resolvedImage = imageResult?.imageUrl ?? fallbackImage;
-  const resolvedProvider = imageResult?.provider ?? (fallbackImage ? 'local' : 'mock');
-  const resolvedImageSize = settings && imageProvider ? getImageGenerationSize(settings, imageProvider).size : undefined;
   const resolvedComments = resolveInitialVoomComments(comments);
 
   return {
@@ -2154,12 +2077,7 @@ export async function generateVoomPost(context: PromptContext, settings?: AppSet
     authorAvatar: context.character.avatar,
     content,
     contentTranslation,
-    image: resolvedImage,
     imageDescription,
-    imageProvider: resolvedProvider,
-    imageCandidates: resolvedImage
-      ? [{ id: createId('voom-image'), image: resolvedImage, description: imageDescription, provider: resolvedProvider, model: selectedImageModel?.label, size: resolvedImageSize, createdAt: Date.now() }]
-      : undefined,
     likes,
     comments: resolvedComments
   };

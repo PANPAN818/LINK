@@ -3558,23 +3558,13 @@ export const useAppStore = defineStore('app', () => {
       }));
       voomPosts.value.unshift(post);
       await putEntity('voomPosts', post);
-      if (post.image && ['openai', 'novelai', 'pollinations'].includes(post.imageProvider ?? '')) {
-        const imageCandidate = post.imageCandidates?.find((candidate) => candidate.image === post.image);
-        await addGeneratedImage({
-          provider: post.imageProvider as ImageModuleId,
-          imageUrl: post.image,
-          title: `${post.authorName} 的 VOOM 配图`,
-          prompt: post.imageDescription || post.content,
-          negativePrompt: '',
-          model: imageCandidate?.model || '',
-          size: imageCandidate?.size || getVoomImageSizeLabel(post.imageProvider as ImageModuleId),
-          source: 'voom',
-          createdAt: post.createdAt
-        });
-      }
+      const generatedImagePost = post.imageDescription && getSelectedImageModelOption(settings.value, 'voom')
+        ? await regenerateVoomPostImage(post.id, post.imageDescription)
+        : null;
+      const resolvedPost = generatedImagePost ?? voomPosts.value.find((entry) => entry.id === post.id) ?? post;
       const latestConversation = conversationById(conversationId) ?? conversation;
-      await recordVoomPostEvents(post, latestConversation.activeMode);
-      return post;
+      await recordVoomPostEvents(resolvedPost, latestConversation.activeMode);
+      return resolvedPost;
     } finally {
       generatingMomentConversationIds.delete(conversationId);
     }
