@@ -2,7 +2,7 @@ import { unzipSync } from 'fflate';
 import type { ApiVendor, AppSettings, CharacterProfile, ConversationTimeAwarenessSettings, GenerateReplyInput, ImageProviderType, MusicComment, MusicTrack, NovelAiModelOption, PollinationsModelOption, PromptContext, UserProfile, VoomComment, VoomFrequency, VoomPost } from '@/types/domain';
 import { createId } from '@/utils/id';
 import { getCharacterVoomAuthorName } from '@/utils/character';
-import { defaultNovelAiModels, defaultPollinationsModels, getImageGenerationSize, getResolvedApiConfig, getResolvedOpenAiImageConfig, getSelectedImageModelOption, novelAiOfficialApiUrl, novelAiProxyApiUrl } from '@/utils/settings';
+import { defaultNovelAiModels, defaultPollinationsModels, getImageGenerationSize, getImagePromptPresetForProvider, getResolvedApiConfig, getResolvedOpenAiImageConfig, getSelectedImageModelOption, novelAiOfficialApiUrl, novelAiProxyApiUrl } from '@/utils/settings';
 import { estimateTokenCount } from '@/utils/memory';
 import { renderTimeAwarenessPrompt } from '@/utils/timeAwareness';
 import { formatContentWithChineseTranslation, normalizeTranslationText } from '@/utils/translation';
@@ -1325,7 +1325,7 @@ interface VoomMomentPayload {
   contentTranslation?: string;
   imageDescription: string;
   likes: string[];
-  comments: Array<Pick<VoomComment, 'authorName' | 'content' | 'contentTranslation' | 'parentId'>>;
+  comments: Array<Pick<VoomComment, 'authorName' | 'content' | 'contentTranslation' | 'parentId'> & { draftId?: string }>;
 }
 
 const voomDateTimeFormatter = new Intl.DateTimeFormat('zh-CN', {
@@ -1373,6 +1373,14 @@ function createFallbackVoomImageDescription(context: PromptContext, content: str
   return options[Math.abs(hash) % options.length];
 }
 
+function extractVoomCommentReplyTarget(content: string) {
+  const normalized = content.trim();
+  const replyMatch = normalized.match(/^回复\s+([^：:，,、\s][^：:，,、]{0,30})\s*[：:，,、-]/u);
+  if (replyMatch?.[1]) return replyMatch[1].trim();
+  const mentionMatch = normalized.match(/^@([^：:，,、\s][^：:，,、\s]{0,30})\s*[：:，,、-]?/u);
+  return mentionMatch?.[1]?.trim() ?? '';
+}
+
 function normalizeVoomMomentComments(input: unknown): VoomMomentPayload['comments'] {
   if (!Array.isArray(input)) return [];
   const comments: VoomMomentPayload['comments'] = [];
@@ -1380,18 +1388,47 @@ function normalizeVoomMomentComments(input: unknown): VoomMomentPayload['comment
     if (!comment || typeof comment !== 'object') continue;
     const entry = comment as Record<string, unknown>;
     const authorName = String(entry.authorName ?? '').trim();
-    const content = stripVoomCommentReplyPrefix(String(entry.content ?? ''));
+    const rawContent = String(entry.content ?? '');
+    const replyTargetName = String(entry.replyToAuthorName ?? entry.replyToName ?? entry.targetAuthorName ?? '').trim() || extractVoomCommentReplyTarget(rawContent);
+    const content = stripVoomCommentReplyPrefix(rawContent, replyTargetName);
     const contentTranslation = normalizeTranslationText(entry.contentTranslation ?? entry.translation ?? entry.translationZh ?? entry.chineseTranslation);
-    const parentId = String(entry.parentId ?? '').trim();
+    const draftId = String(entry.id ?? entry.draftId ?? entry.tempId ?? '').trim();
+    const parentId = String(entry.parentId ?? entry.replyToId ?? entry.replyTo ?? entry.parent ?? '').trim() || replyTargetName;
     if (!authorName || !content) continue;
     comments.push({
       authorName,
       content,
       ...(contentTranslation ? { contentTranslation } : {}),
+      ...(draftId ? { draftId } : {}),
       parentId
     });
   }
   return comments;
+}
+
+function resolveInitialVoomComments(comments: VoomMomentPayload['comments']) {
+  const generatedComments: VoomComment[] = [];
+  const idByDraftId = new Map<string, string>();
+
+  for (const comment of comments) {
+    const id = createId('comment');
+    const rawParentId = comment.parentId?.trim() ?? '';
+    const parentByDraftId = idByDraftId.get(rawParentId) ?? '';
+    const parentByAuthor = rawParentId
+      ? [...generatedComments].reverse().find((entry) => entry.authorName === rawParentId)?.id ?? ''
+      : '';
+    const parentId = parentByDraftId || parentByAuthor;
+    generatedComments.push({
+      id,
+      authorName: comment.authorName,
+      content: stripVoomCommentReplyPrefix(comment.content, rawParentId),
+      contentTranslation: comment.contentTranslation ? stripVoomCommentReplyPrefix(comment.contentTranslation, rawParentId) : comment.contentTranslation,
+      parentId: parentId || undefined
+    });
+    if (comment.draftId) idByDraftId.set(comment.draftId, id);
+  }
+
+  return generatedComments;
 }
 
 function parseVoomMomentPayload(rawContent: string, context: PromptContext): VoomMomentPayload {
@@ -2065,7 +2102,6 @@ export async function generateRoleplayReply(input: GenerateReplyInput): Promise<
 
 export async function generateVoomPost(context: PromptContext, settings?: AppSettings, modelOverride = ''): Promise<Omit<VoomPost, 'id' | 'createdAt'>> {
   const { content, contentTranslation, imageDescription, likes, comments } = await generateDistinctVoomPayload(context, settings, modelOverride);
-  await new Promise((resolve) => window.setTimeout(resolve, 500));
   const imagePrompt = buildVoomImagePrompt(context, content, imageDescription);
   const selectedImageModel = getSelectedImageModelOption(settings, 'voom');
   const imageProvider = selectedImageModel?.provider ?? null;
@@ -2073,9 +2109,11 @@ export async function generateVoomPost(context: PromptContext, settings?: AppSet
 
   if (settings && imageProvider && selectedImageModel) {
     let imageSettings = settings;
+    const promptPreset = getImagePromptPresetForProvider(settings, imageProvider);
     const imageSize = getImageGenerationSize(settings, imageProvider);
     const imageOverrides: ImageGenerationOverrides = {
-      positivePrompt: imagePrompt,
+      positivePrompt: [promptPreset.positivePrompt, imagePrompt].filter(Boolean).join(', '),
+      negativePrompt: promptPreset.negativePrompt,
       size: imageSize.size,
       width: imageSize.width,
       height: imageSize.height,
@@ -2107,6 +2145,7 @@ export async function generateVoomPost(context: PromptContext, settings?: AppSet
   const resolvedImage = imageResult?.imageUrl ?? fallbackImage;
   const resolvedProvider = imageResult?.provider ?? (fallbackImage ? 'local' : 'mock');
   const resolvedImageSize = settings && imageProvider ? getImageGenerationSize(settings, imageProvider).size : undefined;
+  const resolvedComments = resolveInitialVoomComments(comments);
 
   return {
     charId: context.character.id,
@@ -2122,13 +2161,7 @@ export async function generateVoomPost(context: PromptContext, settings?: AppSet
       ? [{ id: createId('voom-image'), image: resolvedImage, description: imageDescription, provider: resolvedProvider, model: selectedImageModel?.label, size: resolvedImageSize, createdAt: Date.now() }]
       : undefined,
     likes,
-    comments: comments.map((comment) => ({
-      id: createId('comment'),
-      authorName: comment.authorName,
-      content: comment.content,
-      contentTranslation: comment.contentTranslation,
-      parentId: comment.parentId || undefined
-    }))
+    comments: resolvedComments
   };
 }
 

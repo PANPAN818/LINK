@@ -4,15 +4,14 @@
       <h1 class="top-title">LINK VOOM</h1>
       <div class="icon-row">
         <button class="icon-button" type="button" aria-label="切换用户账号" @click="showAccountSwitcher = true">
-          <UsersRound :size="20" />
+          <UserCog :size="20" />
         </button>
-        <button class="icon-button" type="button" aria-label="用户发布 VOOM" @click="openUserVoomPublisher">
+        <button class="icon-button" type="button" aria-label="角色发布 VOOM" @click="openVoomPublisher">
           <Plus :size="20" />
         </button>
-        <button class="icon-button" type="button" aria-label="发布 VOOM" @click="openVoomPublisher">
+        <button class="icon-button" type="button" aria-label="用户发布 VOOM" @click="openUserVoomPublisher">
           <SquarePen :size="20" />
         </button>
-        <ImageModelPickerButton :icon-size="20" />
       </div>
     </header>
 
@@ -157,30 +156,6 @@
 
     <AppModal v-model="showUserVoomPublisher" title="发布 VOOM" variant="ins">
       <form class="user-voom-publisher" @submit.prevent="confirmCreateUserVoomPost">
-        <section class="manual-section">
-          <div class="publisher-copy">
-            <strong>选择账号</strong>
-            <span>以这个用户身份发布到可见角色的 VOOM 与对话里。</span>
-          </div>
-          <div class="account-list">
-            <button
-              v-for="account in store.accounts"
-              :key="account.id"
-              class="account-option"
-              :class="{ active: selectedUserVoomAccountId === account.id }"
-              type="button"
-              :disabled="creatingUserVoomPost"
-              @click="selectUserVoomAccount(account.id)"
-            >
-              <img :src="account.avatar" :alt="account.nickname || account.name" />
-              <span>
-                <strong>{{ account.nickname || account.name }}</strong>
-                <small>{{ account.id }}</small>
-              </span>
-            </button>
-          </div>
-        </section>
-
         <label class="manual-field">
           <span>正文</span>
           <textarea v-model="userVoomContent" maxlength="500" placeholder="写点什么" :disabled="creatingUserVoomPost"></textarea>
@@ -272,9 +247,8 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue';
-import { FileText, Globe2, Image as ImageIcon, LoaderCircle, Plus, Shuffle, SquarePen, Upload, UserRound, UsersRound, X } from 'lucide-vue-next';
+import { FileText, Globe2, Image as ImageIcon, LoaderCircle, Plus, Shuffle, SquarePen, Upload, UserCog, UserRound, X } from 'lucide-vue-next';
 import AppModal from '@/components/common/AppModal.vue';
-import ImageModelPickerButton from '@/components/settings/ImageModelPickerButton.vue';
 import VoomPostCard from '@/components/voom/VoomPostCard.vue';
 import { useAppStore } from '@/stores/appStore';
 import type { VoomPost, VoomPostVisibility } from '@/types/domain';
@@ -494,13 +468,6 @@ function openUserVoomPublisher() {
   showUserVoomPublisher.value = true;
 }
 
-function selectUserVoomAccount(accountId: string) {
-  selectedUserVoomAccountId.value = accountId;
-  selectedUserVoomCharacterIds.value = store.characters
-    .filter((character) => character.boundUserId === accountId)
-    .map((character) => character.id);
-}
-
 function setUserVoomMediaMode(mode: 'none' | 'image' | 'card') {
   userVoomMediaMode.value = mode;
   if (mode === 'none') {
@@ -594,29 +561,6 @@ async function confirmCreateUserVoomPost() {
   --top-icon-gap: 1px;
   padding-bottom: calc(var(--tab-height) + var(--safe-bottom) + 24px);
   scroll-padding-bottom: calc(var(--tab-height) + var(--safe-bottom) + 24px);
-}
-
-.voom-page :deep(.image-model-button) {
-  display: grid;
-  place-items: center;
-  flex: 0 0 var(--top-icon-button-width);
-  width: var(--top-icon-button-width);
-  height: var(--top-icon-button-height);
-  min-height: var(--top-icon-button-height);
-  padding: 0;
-  border-radius: 8px;
-  background: transparent;
-  color: #141414;
-  box-shadow: none;
-}
-
-.voom-page :deep(.image-model-button:active) {
-  background: var(--soft);
-}
-
-.voom-page :deep(.image-model-button svg) {
-  width: var(--top-icon-size);
-  height: var(--top-icon-size);
 }
 
 .story-strip {

@@ -26,7 +26,7 @@
       </div>
     </header>
     <p>{{ postDisplayContent }}</p>
-    <figure class="post-visual" :class="{ mock: !post.image || isBrokenImageSource(post.image) }" :style="visualStyle" @click="openVisualModal">
+    <figure v-if="hasVisualContent" class="post-visual" :class="{ mock: !post.image || isBrokenImageSource(post.image) }" :style="visualStyle" @click="openVisualModal">
       <img v-if="post.image && !isBrokenImageSource(post.image)" :src="post.image" :alt="post.imageDescription || post.content" @error="markBrokenImageSource(post.image)" />
       <figcaption v-else>{{ visualDescription }}</figcaption>
     </figure>
@@ -162,6 +162,7 @@ const likedByMe = computed(() => Boolean(props.currentUserName && props.post.lik
 const replyTarget = computed(() => props.post.comments.find((comment) => comment.id === replyParentId.value));
 const commentPlaceholder = computed(() => replyTarget.value ? `回复 ${replyTarget.value.authorName}` : '评论这条 VOOM');
 const visualDescription = computed(() => props.post.imageDescription || '配图描述暂未保存。');
+const hasVisualContent = computed(() => Boolean(props.post.image || props.post.imageDescription?.trim()));
 const visualCandidates = computed(() => {
   const candidates = [...(props.post.imageCandidates ?? [])].filter((candidate) => candidate.image && candidate.image !== '/load.jpg' && !isBrokenImageSource(candidate.image));
   if (props.post.image && props.post.image !== '/load.jpg' && !candidates.some((candidate) => candidate.image === props.post.image)) {

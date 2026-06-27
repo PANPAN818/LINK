@@ -3202,12 +3202,21 @@ export const useAppStore = defineStore('app', () => {
 
       void maybeAutoSummarizeConversation(conversationId);
 
-      const shouldGenerate = options?.generateMoment || (chatSettings.autoGenerateVoom && shouldAutoGenerateMoment(chatSettings.voomFrequency));
-      if (shouldGenerate) {
+      const shouldGenerateMoment = options?.generateMoment || (chatSettings.autoGenerateVoom && shouldAutoGenerateMoment(chatSettings.voomFrequency));
+      if (shouldGenerateMoment) {
         finishConversationReply(conversationId);
-        void createMomentFromConversation(conversationId).catch((error) => {
-          console.error(error);
-        });
+        if (options?.generateMoment || Math.random() < 0.5) {
+          void createMomentFromConversation(conversationId).catch((error) => {
+            console.error(error);
+          });
+        } else {
+          void autoReplyToVoomComments(conversationId).then((replied) => {
+            if (replied) return;
+            return createMomentFromConversation(conversationId);
+          }).catch((error) => {
+            console.error(error);
+          });
+        }
       }
     } catch (error) {
       if (options?.proactive) {
@@ -3749,7 +3758,8 @@ export const useAppStore = defineStore('app', () => {
 
     try {
       const result = await generateImageByProvider(provider, imageSettings, imageOverrides);
-      if (!hasVoomPost(normalizedPostId)) return null;
+      const latestPost = voomPosts.value.find((entry) => entry.id === normalizedPostId);
+      if (!latestPost) return null;
       const nextCandidate = createVoomImageCandidate({
         image: result.imageUrl,
         description: imageDescription,
@@ -3758,17 +3768,17 @@ export const useAppStore = defineStore('app', () => {
         size: getVoomImageSizeLabel(result.provider)
       });
       const nextPost = {
-        ...post,
+        ...latestPost,
         image: result.imageUrl,
         imageDescription,
         imageProvider: result.provider,
-        imageCandidates: [...(post.imageCandidates ?? []), nextCandidate]
+        imageCandidates: [...(latestPost.imageCandidates ?? []), nextCandidate]
       };
       await saveVoomPost(nextPost);
       await addGeneratedImage({
         provider: result.provider,
         imageUrl: result.imageUrl,
-        title: `${voomAuthorNameForPost(post)} 的 VOOM 配图`,
+        title: `${voomAuthorNameForPost(latestPost)} 的 VOOM 配图`,
         prompt: positivePrompt,
         negativePrompt: promptPreset.negativePrompt,
         model: selectedModel.label,
@@ -3777,10 +3787,11 @@ export const useAppStore = defineStore('app', () => {
       });
       return nextPost;
     } catch (error) {
-      if (!hasVoomPost(normalizedPostId)) return null;
-      if (!post.image) {
+      const latestPost = voomPosts.value.find((entry) => entry.id === normalizedPostId);
+      if (!latestPost) return null;
+      if (!latestPost.image) {
         await saveVoomPost({
-          ...post,
+          ...latestPost,
           image: '/load.jpg',
           imageDescription,
           imageProvider: 'local'
@@ -3906,14 +3917,48 @@ export const useAppStore = defineStore('app', () => {
     }
   }
 
-  async function replyToVoomComments(postId: string) {
+  function voomPostCanBeRepliedByConversation(post: VoomPost, conversation: Conversation, character: CharacterProfile) {
+    if (isReplyingVoomComments(post.id)) return false;
+    if (post.conversationId === conversation.id || post.conversationIds?.includes(conversation.id)) return true;
+    if (post.authorType === 'user') return post.visibleCharacterIds?.includes(character.id) ?? false;
+    const postAuthor = post.charId ? characterById(post.charId) : null;
+    if (postAuthor?.boundUserId === character.boundUserId) return true;
+    return post.charId === character.id;
+  }
+
+  function pickAutoVoomCommentPost(conversationId: string) {
+    const conversation = conversationById(conversationId);
+    const character = conversation ? characterById(conversation.charId) : null;
+    if (!conversation || !character) return null;
+
+    const candidates = sortedVoomPosts.value
+      .filter((post) => voomPostCanBeRepliedByConversation(post, conversation, character))
+      .filter((post) => post.comments.length < 80)
+      .slice(0, 12);
+    if (!candidates.length) return null;
+
+    const userCommentPosts = candidates.filter((post) => post.comments.some((comment) => comment.authorId === character.boundUserId));
+    const pool = userCommentPosts.length ? userCommentPosts : candidates;
+    return pool[Math.floor(Math.random() * pool.length)] ?? null;
+  }
+
+  async function autoReplyToVoomComments(conversationId: string) {
+    const post = pickAutoVoomCommentPost(conversationId);
+    if (!post) return false;
+    return replyToVoomComments(post.id, { actorConversationId: conversationId, silent: true });
+  }
+
+  async function replyToVoomComments(postId: string, options: { actorConversationId?: string; silent?: boolean } = {}) {
     if (isReplyingVoomComments(postId)) return;
 
     const post = voomPosts.value.find((entry) => entry.id === postId);
     if (!post) return;
 
     const targetConversations = conversationsForVoomPost(post);
-    const conversation = targetConversations[0];
+    const actorConversation = options.actorConversationId
+      ? targetConversations.find((entry) => entry.id === options.actorConversationId) ?? conversationById(options.actorConversationId)
+      : null;
+    const conversation = actorConversation && actorConversation.charId ? actorConversation : targetConversations[0];
     if (!conversation) return;
 
     const character = characterById(conversation.charId);
@@ -3924,8 +3969,8 @@ export const useAppStore = defineStore('app', () => {
     const chatSettings = settingsForConversation(conversation.id);
     const modelOverride = getConversationTextModelOverride(chatSettings, 'voom', conversation.activeMode);
     if (!hasConfiguredTextModel(modelOverride)) {
-      showConfigAlert('请先配置 VOOM 或当前聊天模式的 API 模型，再让角色回复评论区。', '需要配置 API 模型');
-      return;
+      if (!options.silent) showConfigAlert('请先配置 VOOM 或当前聊天模式的 API 模型，再让角色回复评论区。', '需要配置 API 模型');
+      return false;
     }
 
     replyingVoomCommentPostIds.value = [...replyingVoomCommentPostIds.value, postId];
@@ -3953,8 +3998,9 @@ export const useAppStore = defineStore('app', () => {
       });
 
       const createdAt = Date.now();
-      if (!hasVoomPost(postId)) return;
-      const existingCommentIds = new Set(post.comments.map((comment) => comment.id));
+  const latestPost = voomPosts.value.find((entry) => entry.id === postId);
+  if (!latestPost) return false;
+  const existingCommentIds = new Set(latestPost.comments.map((comment) => comment.id));
       const generatedIds = replies.map(() => createId('comment'));
       const generatedIdByDraftId = new Map(replies.flatMap((reply, index) => reply.draftId ? [[reply.draftId, generatedIds[index]]] : []));
       const characterVoomAuthorName = getCharacterVoomAuthorName(character);
@@ -3966,7 +4012,7 @@ export const useAppStore = defineStore('app', () => {
         return characterAuthorAliases.has(authorName.toLocaleLowerCase()) ? characterVoomAuthorName : authorName;
       };
       const replyParentName = (parentId: string) => {
-        const existingComment = post.comments.find((comment) => comment.id === parentId);
+        const existingComment = latestPost.comments.find((comment) => comment.id === parentId);
         if (existingComment) return existingComment.authorName;
         const generatedIndex = generatedIds.indexOf(parentId);
         return generatedIndex >= 0 ? replyAuthorNameForIndex(generatedIndex) : '';
@@ -3987,12 +4033,13 @@ export const useAppStore = defineStore('app', () => {
           createdAt: createdAt + index
         };
       });
+      if (!nextComments.length) return false;
 
       const nextPost = {
-        ...post,
-        conversationId: post.conversationId || conversation.id,
+        ...latestPost,
+        conversationId: latestPost.conversationId || conversation.id,
         conversationIds: targetConversations.map((targetConversation) => targetConversation.id),
-        comments: [...post.comments, ...nextComments]
+        comments: [...latestPost.comments, ...nextComments]
       };
       await saveVoomPost(nextPost);
       await Promise.all(targetConversations.flatMap((targetConversation) => nextComments.map((comment) => appendConversationEvent(
@@ -4000,8 +4047,11 @@ export const useAppStore = defineStore('app', () => {
         formatVoomCommentEvent(comment, nextPost.comments),
         { mode: targetConversation.activeMode, voomPostId: post.id, voomCommentId: comment.id, voomEventType: 'reply', createdAt: comment.createdAt }
       ))));
+      return true;
     } catch (error) {
-      showConfigAlert(error instanceof Error ? error.message : '评论区回复生成失败。', '无法回复评论');
+      if (options.silent) console.warn('Auto VOOM comment reply failed.', error);
+      else showConfigAlert(error instanceof Error ? error.message : '评论区回复生成失败。', '无法回复评论');
+      return false;
     } finally {
       replyingVoomCommentPostIds.value = replyingVoomCommentPostIds.value.filter((id) => id !== postId);
     }
