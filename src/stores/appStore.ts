@@ -9,7 +9,7 @@ import { normalizeUserProfile, normalizeVisualProfile } from '@/utils/profile';
 import { getImageGenerationSize, getImagePromptPresetForProvider, getSelectedImageModelOption, mergeVendorModels, normalizeAppSettings, normalizeChatModelOverrides } from '@/utils/settings';
 import { normalizeWorldBookEntry, normalizeWorldBooks } from '@/utils/worldBook';
 import { RECENT_STICKER_GROUP_NAME, createStickerFromDraft, createStickerGroup, isLegacyGanadiSticker, isLegacyGanadiStickerGroup, isRecentStickerGroupId, localizeStickerImageUrl, normalizeSticker, normalizeStickerGroup, shouldLocalizeStickerImageUrl, sortRecentStickers, type StickerImportDraft } from '@/utils/stickers';
-import { ageMemoryKind, createMemoryRecord, getConversationFloorCount, getHiddenMessageIds, getMemoryContext, getMemoryHiddenEndFloor, getMessageFloorMap, getMessagesInFloorRange, getNextSummaryRange, getVisibleMessages, normalizeConversationSettings, renderCharacterMemoryPrompt, shouldCompressMemory } from '@/utils/memory';
+import { ageMemoryKind, createMemoryRecord, estimateTokenCount, getConversationFloorCount, getHiddenMessageIds, getMemoryContext, getMemoryHiddenEndFloor, getMessageFloorMap, getMessagesInFloorRange, getNextSummaryRange, getVisibleMessages, normalizeConversationSettings, renderCharacterMemoryPrompt, shouldCompressMemory } from '@/utils/memory';
 import { formatContentWithChineseTranslation, normalizeTranslationText } from '@/utils/translation';
 import { estimateRoleplayReplyInputTokens, fetchVendorModels, generateConversationSummary, generateEmbeddingVector, generateImageByProvider, generateRoleplayReply, generateUserVoomComments, generateVoomCommentReplies, generateVoomPost, hasTextGenerationConfig, shouldAutoGenerateMoment, type RoleplayReplyResult, type RoleplayReplySegment } from '@/services/ai';
 import { GitHubBackupError, downloadGitHubBackup, downloadGitHubBackupVersion, ensureGitHubBackupRepository, formatGitHubBackupError, listGitHubBackupHistory, uploadGitHubBackup } from '@/services/githubBackup';
@@ -2613,12 +2613,7 @@ export const useAppStore = defineStore('app', () => {
       tokenCount: Math.max(0, Math.round(nextMemory.tokenCount)),
       vector: Array.isArray(nextMemory.vector) ? [...nextMemory.vector] : [],
       sourceMessageIds: Array.isArray(nextMemory.sourceMessageIds) ? [...nextMemory.sourceMessageIds] : [],
-      mergedFrom: nextMemory.mergedFrom?.map((memory) => ({
-        ...memory,
-        vector: Array.isArray(memory.vector) ? [...memory.vector] : [],
-        sourceMessageIds: Array.isArray(memory.sourceMessageIds) ? [...memory.sourceMessageIds] : [],
-        mergedFrom: undefined
-      })),
+      mergedFrom: nextMemory.mergedFrom?.map((memory) => cloneMemoryRecordForMerge(memory)),
       updatedAt: Date.now()
     };
     const duplicateIds = new Set(
@@ -2669,11 +2664,29 @@ export const useAppStore = defineStore('app', () => {
     });
   }
 
+  function cloneMemoryRecordForMerge(memory: ConversationMemoryRecord): ConversationMemoryRecord {
+    return {
+      ...memory,
+      vector: Array.isArray(memory.vector) ? [...memory.vector] : [],
+      sourceMessageIds: Array.isArray(memory.sourceMessageIds) ? [...memory.sourceMessageIds] : [],
+      mergedFrom: memory.mergedFrom?.map((childMemory) => cloneMemoryRecordForMerge(childMemory))
+    };
+  }
+
+  function compareMemoryRecordsByRange(leftMemory: ConversationMemoryRecord, rightMemory: ConversationMemoryRecord) {
+    if (leftMemory.startFloor !== rightMemory.startFloor) return leftMemory.startFloor - rightMemory.startFloor;
+    if (leftMemory.endFloor !== rightMemory.endFloor) return leftMemory.endFloor - rightMemory.endFloor;
+    if (leftMemory.createdAt !== rightMemory.createdAt) return leftMemory.createdAt - rightMemory.createdAt;
+    return leftMemory.id.localeCompare(rightMemory.id);
+  }
+
   async function mergeConversationMemories(conversationId: string, memoryIds?: string[]) {
     const conversation = conversationById(conversationId);
     if (!conversation) return null;
-    const selectedIds = new Set(memoryIds ?? []);
-    const memories = memoriesForConversation(conversationId).filter((memory) => !memory.isMergedSummary && (!selectedIds.size || selectedIds.has(memory.id)));
+    const selectedIds = new Set((memoryIds ?? []).map((memoryId) => memoryId.trim()).filter(Boolean));
+    const memories = memoriesForConversation(conversationId)
+      .filter((memory) => !selectedIds.size || selectedIds.has(memory.id))
+      .sort(compareMemoryRecordsByRange);
     if (memories.length <= 1) return null;
 
     const chatSettings = settingsForConversation(conversationId);
@@ -2697,31 +2710,30 @@ export const useAppStore = defineStore('app', () => {
           modelOverride
         })
       : [];
+    const hiddenStartFloor = memories.reduce((min, memory) => memory.hiddenStartFloor ? Math.min(min, memory.hiddenStartFloor) : min, Number.POSITIVE_INFINITY);
+    const sourceMessageIds = [...new Set(memories.flatMap((memory) => memory.sourceMessageIds))];
+    const now = Date.now();
     const mergedRecord: ConversationMemoryRecord = {
       id: createId('memory'),
       conversationId,
       mode: conversation.activeMode,
       kind: 'long-term',
-      startFloor: memories[0].startFloor,
-      endFloor: memories[memories.length - 1].endFloor,
-      hiddenStartFloor: memories.reduce((min, memory) => memory.hiddenStartFloor ? Math.min(min, memory.hiddenStartFloor) : min, Number.POSITIVE_INFINITY),
+      startFloor: memories.reduce((min, memory) => Math.min(min, memory.startFloor), Number.POSITIVE_INFINITY),
+      endFloor: memories.reduce((max, memory) => Math.max(max, memory.endFloor), 0),
+      hiddenStartFloor,
       hiddenEndFloor: memories.reduce((max, memory) => Math.max(max, memory.hiddenEndFloor), 0),
       summary,
-      tokenCount: Math.max(0, Math.round(summary.length / 2)),
+      tokenCount: estimateTokenCount(summary),
       vector,
-      sourceMessageIds: memories.flatMap((memory) => memory.sourceMessageIds),
+      sourceMessageIds,
       model: modelOverride || settings.value?.model || '',
       isMergedSummary: true,
-      mergedFrom: memories.map((memory) => ({
-        ...memory,
-        vector: Array.isArray(memory.vector) ? [...memory.vector] : [],
-        sourceMessageIds: Array.isArray(memory.sourceMessageIds) ? [...memory.sourceMessageIds] : [],
-        mergedFrom: undefined
-      })),
-      createdAt: Date.now(),
-      updatedAt: Date.now()
+      mergedFrom: memories.map((memory) => cloneMemoryRecordForMerge(memory)),
+      createdAt: now,
+      updatedAt: now
     };
     if (!Number.isFinite(mergedRecord.hiddenStartFloor)) mergedRecord.hiddenStartFloor = 0;
+    if (!Number.isFinite(mergedRecord.startFloor)) mergedRecord.startFloor = memories[0].startFloor;
 
     conversationMemories.value = conversationMemories.value.filter((memory) => memory.conversationId !== conversationId || !memories.some((item) => item.id === memory.id));
     conversationMemories.value.push(mergedRecord);
@@ -2736,11 +2748,7 @@ export const useAppStore = defineStore('app', () => {
     const mergedMemory = memoriesForConversation(conversationId).find((memory) => memory.isMergedSummary && memory.mergedFrom?.length && (!memoryId || memory.id === memoryId));
     if (!mergedMemory?.mergedFrom?.length) return;
 
-    const restoredMemories = mergedMemory.mergedFrom.map((memory) => ({
-      ...memory,
-      vector: Array.isArray(memory.vector) ? [...memory.vector] : [],
-      sourceMessageIds: Array.isArray(memory.sourceMessageIds) ? [...memory.sourceMessageIds] : []
-    }));
+    const restoredMemories = mergedMemory.mergedFrom.map((memory) => cloneMemoryRecordForMerge(memory));
     conversationMemories.value = [
       ...conversationMemories.value.filter((memory) => memory.id !== mergedMemory.id),
       ...restoredMemories

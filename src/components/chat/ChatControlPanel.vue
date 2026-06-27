@@ -105,21 +105,66 @@
             </div>
             <em>{{ memories.length }} 条</em>
           </header>
-          <div class="merge-actions">
-            <button class="secondary-action" type="button" :disabled="summarizing || mergeDisabled" @click="showMergePicker = !showMergePicker">合并大总结</button>
-            <button class="secondary-action" type="button" :disabled="summarizing || !hasMergedSummary" @click="showUnmergePicker = !showUnmergePicker">取消合并大总结</button>
+          <div v-if="memories.length" class="memory-merge-dashboard">
+            <span>
+              <strong>{{ mergeableMemories.length }}</strong>
+              <small>可合并</small>
+            </span>
+            <span>
+              <strong>{{ mergedMemories.length }}</strong>
+              <small>大总结</small>
+            </span>
+            <span>
+              <strong>{{ mergeDepthPeak }}</strong>
+              <small>最高层级</small>
+            </span>
           </div>
-          <section v-if="showMergePicker" class="merge-picker">
-            <label v-for="memory in mergeableMemories" :key="memory.id" class="merge-row switch-card compact-switch">
+          <div class="merge-actions">
+            <button class="secondary-action icon-action" type="button" :disabled="summarizing || mergeDisabled" @click="toggleMergePicker">
+              <GitMerge :size="15" stroke-width="2.6" aria-hidden="true" />
+              <span>{{ showMergePicker ? '收起合并' : '合并大总结' }}</span>
+            </button>
+            <button class="secondary-action icon-action" type="button" :disabled="summarizing || !hasMergedSummary" @click="toggleUnmergePicker">
+              <RotateCcw :size="15" stroke-width="2.6" aria-hidden="true" />
+              <span>{{ showUnmergePicker ? '收起取消' : '取消合并大总结' }}</span>
+            </button>
+          </div>
+          <section v-if="showMergePicker" class="merge-picker merge-picker-panel">
+            <header class="merge-picker-head">
+              <div>
+                <strong>合并队列</strong>
+                <span>{{ mergeSelectionHint }}</span>
+              </div>
+              <button class="tiny-action" type="button" :disabled="!mergeableMemories.length" @click="toggleAllMergeMemories">
+                {{ allMergeIdsSelected ? '清空' : '全选' }}
+              </button>
+            </header>
+            <label v-for="memory in mergeableMemories" :key="memory.id" class="merge-row switch-card compact-switch" :class="{ selected: selectedMergeIds.includes(memory.id) }">
               <input v-model="selectedMergeIds" :value="memory.id" type="checkbox" />
               <span class="switch-track"></span>
-              <span>{{ memory.startFloor }}-{{ memory.endFloor }}楼</span>
+              <span class="merge-row-copy">
+                <strong>{{ memoryRangeLabel(memory) }}</strong>
+                <small>{{ memoryMergeBadge(memory) }} · {{ memory.tokenCount }} tokens</small>
+              </span>
             </label>
-            <button class="summary-submit" type="button" :disabled="summarizing || selectedMergeIds.length <= 1" @click="mergeMemories">确认合并</button>
+            <button class="summary-submit icon-action" type="button" :disabled="summarizing || selectedMergeIds.length <= 1" @click="requestMergeMemories">
+              <GitMerge :size="15" stroke-width="2.6" aria-hidden="true" />
+              <span>确认合并</span>
+            </button>
           </section>
-          <section v-if="showUnmergePicker" class="merge-picker">
-            <button v-for="memory in mergedMemories" :key="memory.id" class="merge-row button-row" type="button" @click="unmergeMemories(memory.id)">
-              撤回 {{ memory.startFloor }}-{{ memory.endFloor }}楼大总结
+          <section v-if="showUnmergePicker" class="merge-picker merge-picker-panel">
+            <header class="merge-picker-head">
+              <div>
+                <strong>可撤回的大总结</strong>
+                <span>每次只撤回一层，保留继续逐层回退的空间。</span>
+              </div>
+            </header>
+            <button v-for="memory in mergedMemories" :key="memory.id" class="merge-row button-row" type="button" @click="requestUnmergeMemories(memory)">
+              <RotateCcw :size="15" stroke-width="2.5" aria-hidden="true" />
+              <span class="merge-row-copy">
+                <strong>{{ memoryRangeLabel(memory) }}</strong>
+                <small>恢复 {{ directMergeChildCount(memory) }} 条上一层记忆 · {{ memoryMergeBadge(memory) }}</small>
+              </span>
             </button>
           </section>
           <article v-for="memory in memories" :key="memory.id" class="memory-card">
@@ -130,10 +175,21 @@
               </div>
               <em>{{ memory.isMergedSummary ? '合并大总结' : '片段记忆' }}</em>
             </div>
+            <div class="memory-card-meta">
+              <span>{{ memoryMergeBadge(memory) }}</span>
+              <span>{{ memory.tokenCount }} tokens</span>
+              <span>隐藏 {{ hiddenRangeLabel(memory) }}</span>
+            </div>
             <textarea :value="memory.summary" @change="updateMemorySummary(memory, $event)"></textarea>
             <div class="memory-actions">
-              <button class="secondary-action" type="button" :disabled="summarizing" @click="confirmResummarize(memory.id)">重新总结</button>
-              <button class="danger-action" type="button" @click="confirmDeleteMemory(memory.id)">删除总结</button>
+              <button class="secondary-action icon-action" type="button" :disabled="summarizing" @click="requestResummarizeMemory(memory.id)">
+                <RefreshCw :size="14" stroke-width="2.6" aria-hidden="true" />
+                <span>重新总结</span>
+              </button>
+              <button class="danger-action icon-action" type="button" @click="requestDeleteMemory(memory.id)">
+                <Trash2 :size="14" stroke-width="2.6" aria-hidden="true" />
+                <span>删除总结</span>
+              </button>
             </div>
           </article>
           <div v-if="!memories.length" class="empty-note memory-empty-note">记忆空间暂时空着。达到楼层或点击手动总结后，新的书页会收进这里。</div>
@@ -490,12 +546,29 @@
       </section>
 
       <AvatarCropperModal v-model="showAvatarEditor" :src="avatarEditorSource" @confirm="applyEditedAvatar" />
+      <AppModal :model-value="confirmDialog.open" :title="confirmDialog.title" :show-header="false" variant="ins" @update:model-value="updateConfirmDialogOpen">
+        <section class="memory-confirm-card" :class="`memory-confirm-card-${confirmDialog.tone}`">
+          <span>{{ confirmDialog.eyebrow }}</span>
+          <h2>{{ confirmDialog.title }}</h2>
+          <p>{{ confirmDialog.message }}</p>
+          <ul v-if="confirmDialog.details.length">
+            <li v-for="detail in confirmDialog.details" :key="detail">{{ detail }}</li>
+          </ul>
+          <div class="memory-confirm-actions">
+            <button class="secondary-action" type="button" :disabled="confirmDialog.running" @click="closeConfirmDialog">取消</button>
+            <button class="summary-submit" :class="{ 'danger-confirm': confirmDialog.tone === 'danger' }" type="button" :disabled="confirmDialog.running" @click="confirmPendingAction">
+              {{ confirmDialog.running ? confirmDialog.runningText : confirmDialog.confirmText }}
+            </button>
+          </div>
+        </section>
+      </AppModal>
   </section>
 </template>
 
 <script setup lang="ts">
-import { ChevronDown, Plus } from 'lucide-vue-next';
+import { ChevronDown, GitMerge, Plus, RefreshCw, RotateCcw, Trash2 } from 'lucide-vue-next';
 import { computed, reactive, ref, watch } from 'vue';
+import AppModal from '@/components/common/AppModal.vue';
 import AvatarCropperModal from '@/components/image/AvatarCropperModal.vue';
 import { useAppStore } from '@/stores/appStore';
 import type { CharacterProfile, ChatAppearanceSettings, ConversationMemoryRecord, ConversationSettings } from '@/types/domain';
@@ -508,6 +581,21 @@ import { normalizeVoomFrequency, voomFrequencyOptions } from '@/utils/voom';
 type ColorField = 'userBubbleColor' | 'userTextColor' | 'characterBubbleColor' | 'characterTextColor' | 'narrationBubbleColor' | 'narrationTextColor';
 type RgbChannel = 'red' | 'green' | 'blue';
 type RgbParts = Record<RgbChannel, number>;
+type ConfirmTone = 'primary' | 'danger';
+type ConfirmAction = () => Promise<void> | void;
+
+interface ConfirmDialogState {
+  open: boolean;
+  eyebrow: string;
+  title: string;
+  message: string;
+  details: string[];
+  confirmText: string;
+  runningText: string;
+  tone: ConfirmTone;
+  running: boolean;
+  action: ConfirmAction | null;
+}
 
 const props = defineProps<{
   conversationId: string;
@@ -530,6 +618,18 @@ const backgroundImageUrlDraft = ref('');
 const selectedMergeIds = ref<string[]>([]);
 const draft = reactive<ConversationSettings>(normalizeConversationSettings(null, props.conversationId));
 const characterDraft = reactive<CharacterProfile>({ ...props.character, localWorldBookIds: [...props.character.localWorldBookIds] });
+const confirmDialog = reactive<ConfirmDialogState>({
+  open: false,
+  eyebrow: '',
+  title: '',
+  message: '',
+  details: [],
+  confirmText: '确认',
+  runningText: '处理中',
+  tone: 'primary',
+  running: false,
+  action: null
+});
 const manualSummary = reactive({
   startFloor: 1,
   endFloor: 1,
@@ -550,9 +650,33 @@ const hiddenFloorStatus = computed(() => {
   return `当前对话共 ${messageCount.value} 楼，已隐藏 ${hiddenRanges.join('、')}。`;
 });
 const hasMergedSummary = computed(() => memories.value.some((memory) => memory.isMergedSummary));
-const mergeDisabled = computed(() => hasMergedSummary.value || memories.value.filter((memory) => !memory.isMergedSummary).length <= 1);
-const mergeableMemories = computed(() => memories.value.filter((memory) => !memory.isMergedSummary));
-const mergedMemories = computed(() => memories.value.filter((memory) => memory.isMergedSummary));
+const mergeableMemories = computed(() => [...memories.value].sort(compareMemoryRecordsByRange));
+const mergedMemories = computed(() => memories.value.filter((memory) => memory.isMergedSummary).sort(compareMemoryRecordsByRange));
+const mergeDisabled = computed(() => mergeableMemories.value.length <= 1);
+const selectedMergeMemories = computed(() => {
+  const selectedIds = new Set(selectedMergeIds.value);
+  return mergeableMemories.value.filter((memory) => selectedIds.has(memory.id));
+});
+const selectedMergeStats = computed(() => {
+  const selectedMemories = selectedMergeMemories.value;
+  return {
+    count: selectedMemories.length,
+    mergedCount: selectedMemories.filter((memory) => memory.isMergedSummary).length,
+    sourceCount: selectedMemories.reduce((total, memory) => total + leafMemoryCount(memory), 0),
+    tokenCount: selectedMemories.reduce((total, memory) => total + memory.tokenCount, 0),
+    startFloor: selectedMemories.reduce((min, memory) => Math.min(min, memory.startFloor), Number.POSITIVE_INFINITY),
+    endFloor: selectedMemories.reduce((max, memory) => Math.max(max, memory.endFloor), 0)
+  };
+});
+const mergeSelectionHint = computed(() => {
+  const stats = selectedMergeStats.value;
+  if (stats.count <= 1) return '至少选择 2 条记忆，可包含已有大总结。';
+  const rangeText = `${stats.startFloor}-${stats.endFloor}楼`;
+  const mergedText = stats.mergedCount ? `，其中 ${stats.mergedCount} 条是大总结` : '';
+  return `将 ${stats.count} 条记忆${mergedText}合并为 ${rangeText} 的新大总结。`;
+});
+const allMergeIdsSelected = computed(() => mergeableMemories.value.length > 0 && mergeableMemories.value.every((memory) => selectedMergeIds.value.includes(memory.id)));
+const mergeDepthPeak = computed(() => memories.value.reduce((max, memory) => Math.max(max, memoryMergeDepth(memory)), 0));
 const characterDraftNickname = computed(() => characterDraft.nickname || 'new.friend');
 const boundUser = computed(() => store.userById(props.character.boundUserId) ?? store.user ?? null);
 const boundUserVisualProfile = computed(() => props.character.boundUserProfile);
@@ -621,9 +745,20 @@ watch(
   () => {
     Object.assign(draft, normalizeConversationSettings(currentConversationSettings.value, props.conversationId));
     showStickerGroupPicker.value = false;
+    showMergePicker.value = false;
+    showUnmergePicker.value = false;
+    selectedMergeIds.value = [];
     fillLatestRange();
   },
   { immediate: true }
+);
+
+watch(
+  mergeableMemories,
+  (nextMemories) => {
+    const availableIds = new Set(nextMemories.map((memory) => memory.id));
+    selectedMergeIds.value = selectedMergeIds.value.filter((memoryId) => availableIds.has(memoryId));
+  }
 );
 
 watch(
@@ -771,6 +906,121 @@ function fillLatestRange() {
   manualSummary.hiddenEndFloor = hiddenEndFloor >= startFloor ? hiddenEndFloor : 0;
 }
 
+function compareMemoryRecordsByRange(leftMemory: ConversationMemoryRecord, rightMemory: ConversationMemoryRecord) {
+  if (leftMemory.startFloor !== rightMemory.startFloor) return leftMemory.startFloor - rightMemory.startFloor;
+  if (leftMemory.endFloor !== rightMemory.endFloor) return leftMemory.endFloor - rightMemory.endFloor;
+  if (leftMemory.createdAt !== rightMemory.createdAt) return leftMemory.createdAt - rightMemory.createdAt;
+  return leftMemory.id.localeCompare(rightMemory.id);
+}
+
+function memoryRangeLabel(memory: ConversationMemoryRecord) {
+  return `${memory.startFloor}-${memory.endFloor}楼`;
+}
+
+function directMergeChildCount(memory: ConversationMemoryRecord) {
+  return memory.mergedFrom?.length ?? 0;
+}
+
+function leafMemoryCount(memory: ConversationMemoryRecord): number {
+  if (!memory.mergedFrom?.length) return 1;
+  return memory.mergedFrom.reduce((total, childMemory) => total + leafMemoryCount(childMemory), 0);
+}
+
+function memoryMergeDepth(memory: ConversationMemoryRecord): number {
+  if (!memory.isMergedSummary) return 0;
+  const childDepth = memory.mergedFrom?.reduce((max, childMemory) => Math.max(max, memoryMergeDepth(childMemory)), 0) ?? 0;
+  return childDepth + 1;
+}
+
+function memoryMergeBadge(memory: ConversationMemoryRecord) {
+  if (!memory.isMergedSummary) return '片段记忆';
+  return `第 ${memoryMergeDepth(memory)} 层大总结 · ${leafMemoryCount(memory)} 个来源`;
+}
+
+function toggleMergePicker() {
+  const nextOpen = !showMergePicker.value;
+  showMergePicker.value = nextOpen;
+  if (!nextOpen) return;
+  showUnmergePicker.value = false;
+  const availableIds = mergeableMemories.value.map((memory) => memory.id);
+  selectedMergeIds.value = selectedMergeIds.value.filter((memoryId) => availableIds.includes(memoryId));
+  if (selectedMergeIds.value.length <= 1) selectedMergeIds.value = availableIds;
+}
+
+function toggleUnmergePicker() {
+  showUnmergePicker.value = !showUnmergePicker.value;
+  if (showUnmergePicker.value) showMergePicker.value = false;
+}
+
+function toggleAllMergeMemories() {
+  selectedMergeIds.value = allMergeIdsSelected.value ? [] : mergeableMemories.value.map((memory) => memory.id);
+}
+
+function resetConfirmDialog() {
+  Object.assign(confirmDialog, {
+    open: false,
+    eyebrow: '',
+    title: '',
+    message: '',
+    details: [],
+    confirmText: '确认',
+    runningText: '处理中',
+    tone: 'primary',
+    running: false,
+    action: null
+  } satisfies ConfirmDialogState);
+}
+
+function openConfirmDialog(options: {
+  eyebrow: string;
+  title: string;
+  message: string;
+  details?: string[];
+  confirmText: string;
+  runningText: string;
+  tone?: ConfirmTone;
+  action: ConfirmAction;
+}) {
+  Object.assign(confirmDialog, {
+    open: true,
+    eyebrow: options.eyebrow,
+    title: options.title,
+    message: options.message,
+    details: options.details ?? [],
+    confirmText: options.confirmText,
+    runningText: options.runningText,
+    tone: options.tone ?? 'primary',
+    running: false,
+    action: options.action
+  } satisfies ConfirmDialogState);
+}
+
+function closeConfirmDialog() {
+  if (confirmDialog.running) return;
+  resetConfirmDialog();
+}
+
+function updateConfirmDialogOpen(open: boolean) {
+  if (open) {
+    confirmDialog.open = true;
+    return;
+  }
+  closeConfirmDialog();
+}
+
+async function confirmPendingAction() {
+  const pendingAction = confirmDialog.action;
+  if (!pendingAction || confirmDialog.running) return;
+  confirmDialog.running = true;
+  try {
+    await pendingAction();
+    resetConfirmDialog();
+  } catch (error) {
+    resetConfirmDialog();
+    store.showConfigAlert(error instanceof Error ? error.message : '操作失败，请稍后再试。', '操作失败');
+  }
+}
+
 async function resummarize(memoryId: string) {
   summarizing.value = true;
   try {
@@ -785,21 +1035,74 @@ async function resummarize(memoryId: string) {
   }
 }
 
-async function confirmResummarize(memoryId: string) {
-  if (!window.confirm('确认重新调用 API 总结这条记录吗？')) return;
-  await resummarize(memoryId);
+function requestResummarizeMemory(memoryId: string) {
+  const memory = memories.value.find((entry) => entry.id === memoryId);
+  if (!memory) return;
+  openConfirmDialog({
+    eyebrow: 'Regenerate memory',
+    title: '重新总结这条记忆？',
+    message: `会重新调用总结模型，覆盖 ${memoryRangeLabel(memory)} 的当前文本。`,
+    details: [
+      `当前类型：${memoryMergeBadge(memory)}`,
+      `隐藏范围：${hiddenRangeLabel(memory)}`
+    ],
+    confirmText: '重新总结',
+    runningText: '总结中',
+    action: () => resummarize(memoryId)
+  });
 }
 
-async function mergeMemories() {
-  if (selectedMergeIds.value.length <= 1) return;
+function requestMergeMemories() {
+  const memoryIds = [...selectedMergeIds.value];
+  const stats = selectedMergeStats.value;
+  if (memoryIds.length <= 1 || stats.count <= 1) return;
+  const rangeText = `${stats.startFloor}-${stats.endFloor}楼`;
+  openConfirmDialog({
+    eyebrow: 'Merge memory',
+    title: '合并这些记忆？',
+    message: `会调用总结模型，把选中的 ${stats.count} 条记忆压缩成 ${rangeText} 的新大总结。原条目会作为上一层来源保存在新大总结里。`,
+    details: [
+      `包含来源：${stats.sourceCount} 个片段${stats.mergedCount ? `，其中 ${stats.mergedCount} 条已经是大总结` : ''}`,
+      `原始 token 合计：${stats.tokenCount}`,
+      '取消合并时会先恢复这一层的直接来源，可继续逐层取消。'
+    ],
+    confirmText: '开始合并',
+    runningText: '合并中',
+    action: () => mergeMemories(memoryIds)
+  });
+}
+
+async function mergeMemories(memoryIds: string[]) {
+  if (memoryIds.length <= 1) return;
   summarizing.value = true;
   try {
-    await store.mergeConversationMemories(props.conversationId, selectedMergeIds.value);
+    const result = await store.mergeConversationMemories(props.conversationId, memoryIds);
+    if (!result) {
+      store.showConfigAlert('至少需要选择两条仍存在的记忆，才能生成新的大总结。', '无法合并');
+      return;
+    }
     selectedMergeIds.value = [];
     showMergePicker.value = false;
+    showUnmergePicker.value = false;
   } finally {
     summarizing.value = false;
   }
+}
+
+function requestUnmergeMemories(memory: ConversationMemoryRecord) {
+  openConfirmDialog({
+    eyebrow: 'Restore layer',
+    title: '取消这一层大总结？',
+    message: `会撤回 ${memoryRangeLabel(memory)} 的当前大总结，恢复它保存的 ${directMergeChildCount(memory)} 条上一层记忆。`,
+    details: [
+      `当前层级：${memoryMergeBadge(memory)}`,
+      '如果恢复出的条目里还有大总结，可以继续取消合并。',
+      '当前大总结文本会被移除，上一层来源会回到记忆空间。'
+    ],
+    confirmText: '取消合并',
+    runningText: '恢复中',
+    action: () => unmergeMemories(memory.id)
+  });
 }
 
 async function unmergeMemories(memoryId: string) {
@@ -812,9 +1115,24 @@ async function unmergeMemories(memoryId: string) {
   }
 }
 
-async function confirmDeleteMemory(memoryId: string) {
-  if (!window.confirm('确认删除这条总结吗？')) return;
-  await store.deleteMemoryRecord(memoryId);
+function requestDeleteMemory(memoryId: string) {
+  const memory = memories.value.find((entry) => entry.id === memoryId);
+  if (!memory) return;
+  openConfirmDialog({
+    eyebrow: 'Delete memory',
+    title: '删除这条总结？',
+    message: `会永久删除 ${memoryRangeLabel(memory)} 的${memory.isMergedSummary ? '大总结' : '总结'}。`,
+    details: memory.isMergedSummary
+      ? [
+          `当前层级：${memoryMergeBadge(memory)}`,
+          '删除不会恢复被合并的来源；需要恢复来源时请先取消合并。'
+        ]
+      : ['删除后不会保留这条片段记忆。'],
+    confirmText: '确认删除',
+    runningText: '删除中',
+    tone: 'danger',
+    action: () => store.deleteMemoryRecord(memoryId)
+  });
 }
 
 function updateMemorySummary(memory: ConversationMemoryRecord, event: Event) {
@@ -3550,6 +3868,220 @@ function applyEditedAvatar(value: string) {
 .beauty-panel .background-thumb-actions button {
   min-height: 34px;
   border-radius: 12px;
+}
+
+.memory-merge-dashboard {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.memory-merge-dashboard span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding: 10px;
+  border-radius: 16px;
+  background: rgba(248, 251, 249, 0.92);
+  box-shadow: inset 0 0 0 1px rgba(31, 107, 58, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.92);
+}
+
+.memory-merge-dashboard strong {
+  color: #17241d;
+  font-size: 17px;
+  font-weight: 950;
+  line-height: 1;
+}
+
+.memory-merge-dashboard small,
+.merge-row-copy small,
+.memory-card-meta span {
+  min-width: 0;
+  overflow: hidden;
+  color: #738079;
+  font-size: 11px;
+  font-weight: 850;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.icon-action {
+  gap: 6px;
+}
+
+.icon-action svg {
+  flex: 0 0 auto;
+}
+
+.memory-records .merge-picker-panel {
+  gap: 9px;
+  padding: 10px;
+  border-radius: 18px;
+  background: rgba(248, 251, 249, 0.94);
+}
+
+.merge-picker-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.merge-picker-head div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.merge-picker-head strong {
+  color: #17241d;
+  font-size: 13px;
+  font-weight: 950;
+}
+
+.merge-picker-head span {
+  min-width: 0;
+  overflow: hidden;
+  color: #718078;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.45;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tiny-action {
+  min-height: 30px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(31, 107, 58, 0.08);
+  color: #1f6b3a;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.tiny-action:disabled {
+  color: #9aa39f;
+  background: rgba(239, 242, 240, 0.78);
+}
+
+.memory-records .merge-row {
+  min-height: 48px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.82);
+  box-shadow: inset 0 0 0 1px rgba(31, 107, 58, 0.06);
+}
+
+.memory-records .merge-row.selected {
+  background: rgba(232, 250, 239, 0.94);
+  box-shadow: inset 0 0 0 1px rgba(6, 199, 85, 0.18), 0 8px 18px rgba(6, 199, 85, 0.08);
+}
+
+.merge-row-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.merge-row-copy strong {
+  min-width: 0;
+  overflow: hidden;
+  color: #1d2922;
+  font-size: 13px;
+  font-weight: 950;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.memory-records .button-row {
+  justify-content: flex-start;
+  min-height: 52px;
+  padding: 9px 10px;
+  text-align: left;
+}
+
+.memory-card-meta {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.memory-card-meta span {
+  padding: 7px 8px;
+  border-radius: 999px;
+  background: rgba(248, 251, 249, 0.9);
+  text-align: center;
+}
+
+.memory-confirm-card {
+  display: grid;
+  gap: 12px;
+  padding: 4px;
+}
+
+.memory-confirm-card > span {
+  color: #1f6b3a;
+  font-size: 11px;
+  font-weight: 950;
+  text-transform: uppercase;
+}
+
+.memory-confirm-card h2,
+.memory-confirm-card p {
+  margin: 0;
+}
+
+.memory-confirm-card h2 {
+  color: #17211c;
+  font-size: 18px;
+  font-weight: 950;
+}
+
+.memory-confirm-card p,
+.memory-confirm-card li {
+  color: #59645f;
+  font-size: 13px;
+  font-weight: 750;
+  line-height: 1.55;
+}
+
+.memory-confirm-card ul {
+  display: grid;
+  gap: 7px;
+  margin: 0;
+  padding: 10px 12px 10px 26px;
+  border-radius: 16px;
+  background: rgba(248, 251, 249, 0.92);
+}
+
+.memory-confirm-card-danger > span {
+  color: #d73850;
+}
+
+.memory-confirm-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px;
+}
+
+.memory-confirm-actions .danger-confirm {
+  border-color: rgba(239, 68, 90, 0.14);
+  background: rgba(239, 68, 90, 0.11);
+  color: #d73850;
+  box-shadow: inset 0 0 0 1px rgba(239, 68, 90, 0.08);
+}
+
+@media (max-width: 360px) {
+  .memory-merge-dashboard,
+  .memory-card-meta {
+    grid-template-columns: 1fr;
+  }
+
+  .merge-picker-head {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 360px) {
