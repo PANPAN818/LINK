@@ -2187,6 +2187,8 @@ export async function generateVoomCommentReplies(input: {
 }): Promise<VoomCommentReplyResult[]> {
   requireTextGenerationConfig(input.settings, input.modelOverride, 'VOOM 评论回复');
   const fallbackAuthorName = input.context.character.nickname;
+  const postAuthorName = input.post.authorName || fallbackAuthorName;
+  const postBelongsToUser = input.post.authorType === 'user';
   const targetComments = input.userComments.length ? input.userComments : input.post.comments.slice(-2);
   const includeTimeContext = shouldIncludeVoomTimeContext(input.context.timeAwareness);
   const blockedAuthorNames = [input.context.boundUser.nickname, input.context.boundUser.name, input.context.user.nickname, input.context.user.name]
@@ -2195,6 +2197,11 @@ export async function generateVoomCommentReplies(input: {
   const prompt = [
     buildPrompt(input.context),
     '现在你要模拟这条 VOOM 的真实评论区继续发展。只输出 JSON，不要输出 JSON 以外的任何文字。',
+    `当前执行角色：${fallbackAuthorName}（角色ID：${input.context.character.id}）`,
+    `VOOM 作者：${postAuthorName}${postBelongsToUser ? '（当前用户）' : ''}`,
+    postBelongsToUser
+      ? '社交圈边界：这是用户发布的 VOOM。除当前执行角色本人外，不要新增任何NPC作者；不要替用户发言。'
+      : '社交圈边界：新增NPC只能来自这条 VOOM 作者所属角色自己的社交圈。禁止把其他角色设定里的朋友、同事、家人、同学、粉丝、熟人、NPC网名或评论区常客借到这里；不确定归属时就不生成该NPC。',
     `VOOM 正文：\n${formatVoomPostPromptContent(input.post, includeTimeContext)}`,
     `评论区：\n${input.post.comments.map((comment) => formatVoomCommentPromptLine(comment, includeTimeContext)).join('\n') || '暂无评论。'}`,
     `优先关注这些评论：\n${targetComments.map((comment) => formatVoomCommentPromptLine(comment, includeTimeContext)).join('\n') || '没有指定评论，可根据正文补一条自然评论。'}`,
@@ -2206,7 +2213,7 @@ export async function generateVoomCommentReplies(input: {
     { "id": "r2", "authorName": "NPC网名", "content": "自然评论或回复", "contentTranslation": "如 content 不是普通话，则给普通话译文；否则留空", "parentId": "已有评论ID或本次前面输出的id，可留空" }
   ]
 }`,
-    '要求：1. 输出 0-6 条；2. authorName 可以是角色昵称，也可以是角色社交圈里真实感的 NPC 网名；3. 角色可以回复用户或其他人的评论，NPC 也可以发新评论、回复角色或互相回复；4. parentId 留空表示新评论，填写已有评论 ID 或本次前面输出的 id 表示回复；5. 不要代替用户发言，不要使用“NPC”“路人”“朋友A”这类占位名；6. 内容像真实社交软件评论区，短、自然、有上下文，不要解释设定；7. contentTranslation 规则：外语、粤语、方言、繁体中文、文言/古风表达都要翻译成简体普通话；不要加“翻译：”前缀。'
+    '要求：1. 输出 0-6 条；2. authorName 可以是当前执行角色昵称，也可以是符合社交圈边界的真实感 NPC 网名；3. 角色可以回复用户或其他人的评论，NPC 也可以发新评论、回复角色或互相回复；4. parentId 留空表示新评论，填写已有评论 ID 或本次前面输出的 id 表示回复；5. 不要代替用户发言，不要使用“NPC”“路人”“朋友A”这类占位名；6. 内容像真实社交软件评论区，短、自然、有上下文，不要解释设定；7. contentTranslation 规则：外语、粤语、方言、繁体中文、文言/古风表达都要翻译成简体普通话；不要加“翻译：”前缀。'
   ].join('\n\n');
 
   const apiReply = await callTextApi(input.settings, prompt, input.modelOverride);

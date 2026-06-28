@@ -4035,13 +4035,19 @@ export const useAppStore = defineStore('app', () => {
     return post.charId === character.id;
   }
 
+  function voomPostCanBeAutoRepliedByConversation(post: VoomPost, conversation: Conversation, character: CharacterProfile) {
+    if (isReplyingVoomComments(post.id)) return false;
+    if (post.authorType === 'user') return post.visibleCharacterIds?.includes(character.id) ?? false;
+    return post.charId === character.id || post.conversationId === conversation.id || post.conversationIds?.includes(conversation.id) === true;
+  }
+
   function pickAutoVoomCommentPost(conversationId: string) {
     const conversation = conversationById(conversationId);
     const character = conversation ? characterById(conversation.charId) : null;
     if (!conversation || !character) return null;
 
     const candidates = sortedVoomPosts.value
-      .filter((post) => voomPostCanBeRepliedByConversation(post, conversation, character))
+      .filter((post) => voomPostCanBeAutoRepliedByConversation(post, conversation, character))
       .filter((post) => post.comments.length < 80)
       .slice(0, 12);
     if (!candidates.length) return null;
