@@ -19,14 +19,15 @@ import { BookMarked, Gamepad2, Palette, Smile } from 'lucide-vue-next';
 const props = defineProps<{
   openStickers: () => void;
   openWorldBooks: () => void;
+  openThemes: () => void;
   openAll: () => void;
 }>();
 
-const { openStickers, openWorldBooks, openAll } = props;
+const { openStickers, openWorldBooks, openThemes, openAll } = props;
 
 const services = [
   { label: 'Stickers', icon: Smile, action: openStickers },
-  { label: 'Themes', icon: Palette },
+  { label: 'Themes', icon: Palette, action: openThemes },
   { label: 'World Book', icon: BookMarked, action: openWorldBooks },
   { label: 'LINK GAME', icon: Gamepad2 }
 ];

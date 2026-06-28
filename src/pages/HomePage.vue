@@ -27,7 +27,7 @@
         <ScanLine :size="21" />
       </label>
 
-      <ServiceGrid :open-stickers="openStickers" :open-world-books="openWorldBookPage" :open-all="openServicesPage" />
+      <ServiceGrid :open-stickers="openStickers" :open-world-books="openWorldBookPage" :open-themes="openThemesPage" :open-all="openServicesPage" />
 
       <section>
         <div class="section-heading">
@@ -108,6 +108,10 @@ function openStickers() {
 
 function openWorldBookPage() {
   void router.push({ name: 'world-book' });
+}
+
+function openThemesPage() {
+  void router.push({ name: 'themes' });
 }
 
 function openFavoritesPage() {

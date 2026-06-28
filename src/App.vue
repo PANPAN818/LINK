@@ -18,11 +18,14 @@ import FirstRunDisclaimer from '@/components/common/FirstRunDisclaimer.vue';
 import GlobalVoomNotice from '@/components/common/GlobalVoomNotice.vue';
 import { useAppStore } from '@/stores/appStore';
 import { useMusicPlayerStore } from '@/stores/musicPlayerStore';
+import type { ThemeFontEntry } from '@/types/domain';
 
 const store = useAppStore();
 const musicPlayer = useMusicPlayerStore();
 const musicAudioRef = ref<HTMLAudioElement | null>(null);
 let githubAutoBackupTimer: number | undefined;
+const themeFontStyleId = 'link-theme-fonts';
+const systemFontStack = '-apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif';
 
 const showDisclaimer = computed(() => store.ready && !store.settings?.disclaimerAccepted);
 const githubBackupScheduleKey = computed(() => {
@@ -30,6 +33,63 @@ const githubBackupScheduleKey = computed(() => {
   if (!store.ready || !backup?.enabled || !backup.token || !backup.owner || !backup.repo) return '';
   return [backup.owner, backup.repo, backup.branch, backup.path, backup.intervalMinutes].join('|');
 });
+const themeFontSettings = computed(() => store.settings?.themeSettings.fonts ?? { activeFontId: '', entries: [] as ThemeFontEntry[] });
+
+function sanitizeCssText(value: string) {
+  return value.replace(/[{};]/g, '').replace(/\s+/g, ' ').trim();
+}
+
+function escapeCssString(value: string) {
+  return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, ' ');
+}
+
+function getThemeFontFamilyStack(entry: ThemeFontEntry | null) {
+  const family = sanitizeCssText(entry?.family ?? '');
+  if (!family) return '';
+  return family.includes(',') ? family : `"${escapeCssString(family)}", ${systemFontStack}`;
+}
+
+function isStylesheetFontUrl(url: string) {
+  const normalizedUrl = url.trim().toLowerCase();
+  return normalizedUrl.endsWith('.css') || normalizedUrl.includes('fonts.googleapis.com/css') || normalizedUrl.includes('fontsapi.zeoseven.com');
+}
+
+function getThemeFontStyleElement() {
+  let styleElement = document.getElementById(themeFontStyleId) as HTMLStyleElement | null;
+  if (!styleElement) {
+    styleElement = document.createElement('style');
+    styleElement.id = themeFontStyleId;
+    document.head.appendChild(styleElement);
+  }
+  return styleElement;
+}
+
+function applyThemeFonts() {
+  if (typeof document === 'undefined') return;
+
+  const enabledFontEntries = themeFontSettings.value.entries.filter((entry) => entry.enabled && entry.family.trim());
+  const activeFontEntry = enabledFontEntries.find((entry) => entry.id === themeFontSettings.value.activeFontId) ?? null;
+  const stylesheetImports: string[] = [];
+  const fontFaces: string[] = [];
+
+  enabledFontEntries
+    .filter((entry) => entry.source !== 'family' && entry.url.trim())
+    .forEach((entry) => {
+      const escapedUrl = escapeCssString(entry.url.trim());
+      if (entry.source === 'url' && isStylesheetFontUrl(entry.url)) {
+        stylesheetImports.push(`@import url("${escapedUrl}");`);
+        return;
+      }
+
+      fontFaces.push(`@font-face { font-family: "${escapeCssString(sanitizeCssText(entry.family))}"; src: url("${escapedUrl}"); font-weight: 100 900; font-style: normal; font-display: swap; }`);
+    });
+
+  getThemeFontStyleElement().textContent = [...stylesheetImports, ...fontFaces].join('\n');
+
+  const fontFamilyStack = getThemeFontFamilyStack(activeFontEntry);
+  if (fontFamilyStack) document.documentElement.style.setProperty('--app-font-family', fontFamilyStack);
+  else document.documentElement.style.removeProperty('--app-font-family');
+}
 
 function clearGitHubAutoBackupTimer() {
   if (!githubAutoBackupTimer) return;
@@ -70,12 +130,16 @@ watch(
   { immediate: true }
 );
 
+watch(themeFontSettings, applyThemeFonts, { immediate: true, deep: true });
+
 onMounted(() => {
   musicPlayer.setAudioElement(musicAudioRef.value);
 });
 
 onBeforeUnmount(() => {
   clearGitHubAutoBackupTimer();
+  document.documentElement.style.removeProperty('--app-font-family');
+  document.getElementById(themeFontStyleId)?.remove();
   musicPlayer.setAudioElement(null);
 });
 

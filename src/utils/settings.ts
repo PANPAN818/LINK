@@ -1,4 +1,4 @@
-import type { ApiVendor, ApiVendorModel, AppRingtoneSettings, AppSettings, ChatModelOverrides, CharacterRingtoneSettings, GitHubBackupSettings, ImageModelScope, ImageModelSelection, ImagePromptPreset, ImageProviderType, MinimaxTtsAudioFormat, MinimaxTtsSettings, NovelAiImageSettings, OpenAiImageSettings, OpenAiTtsAudioFormat, OpenAiTtsSettings, PollinationsImageSettings, RingtoneAsset, RingtoneEventType, TtsProviderType } from '@/types/domain';
+import type { ApiVendor, ApiVendorModel, AppRingtoneSettings, AppSettings, AppThemeSettings, ChatModelOverrides, CharacterRingtoneSettings, GitHubBackupSettings, ImageModelScope, ImageModelSelection, ImagePromptPreset, ImageProviderType, MinimaxTtsAudioFormat, MinimaxTtsSettings, NovelAiImageSettings, OpenAiImageSettings, OpenAiTtsAudioFormat, OpenAiTtsSettings, PollinationsImageSettings, RingtoneAsset, RingtoneEventType, ThemeFontEntry, ThemeFontSource, TtsProviderType } from '@/types/domain';
 import { createId } from './id';
 
 export const novelAiOfficialApiUrl = 'https://image.novelai.net';
@@ -132,6 +132,18 @@ export function createDefaultRingtoneSettings(): AppRingtoneSettings {
   };
 }
 
+export function createDefaultThemeSettings(): AppThemeSettings {
+  return {
+    fonts: {
+      activeFontId: '',
+      entries: []
+    },
+    global: {},
+    online: {},
+    offline: {}
+  };
+}
+
 export const defaultAppSettings: AppSettings = {
   activeUserId: '',
   apiEndpoint: '',
@@ -240,6 +252,7 @@ export const defaultAppSettings: AppSettings = {
   voomImageModel: '',
   voomReadAtByUser: {},
   ringtoneSettings: createDefaultRingtoneSettings(),
+  themeSettings: createDefaultThemeSettings(),
   imagePrivateOnly: true,
   imageGenerationEnabled: true,
   githubBackup: {
@@ -369,6 +382,74 @@ export function normalizeRingtoneSettings(settings: Partial<AppRingtoneSettings>
   }
 
   return { global, characters };
+}
+
+function normalizeThemeFontSource(source: string | null | undefined): ThemeFontSource {
+  if (source === 'file') return 'file';
+  if (source === 'family') return 'family';
+  return 'url';
+}
+
+function normalizeThemeFontFamily(family: string | null | undefined) {
+  return String(family ?? '')
+    .replace(/[{};]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function getThemeFontNameFromUrl(url: string, index: number) {
+  try {
+    const parsedUrl = new URL(url);
+    const fileName = decodeURIComponent(parsedUrl.pathname.split('/').pop() ?? '').replace(/\.[a-z0-9]+$/i, '').trim();
+    return fileName || parsedUrl.hostname || `字体 ${index + 1}`;
+  } catch {
+    const fileName = url.split('/').pop()?.split('?')[0]?.replace(/\.[a-z0-9]+$/i, '').trim();
+    return fileName || `字体 ${index + 1}`;
+  }
+}
+
+function normalizeThemeFontEntry(entry: Partial<ThemeFontEntry> | null | undefined, index: number): ThemeFontEntry | null {
+  const source = normalizeThemeFontSource(entry?.source);
+  const url = String(entry?.url ?? '').trim();
+  if (source !== 'family' && !url) return null;
+
+  const family = normalizeThemeFontFamily(entry?.family) || String(entry?.name ?? '').trim() || (source === 'url' ? getThemeFontNameFromUrl(url, index) : '');
+  if (!family) return null;
+
+  const name = String(entry?.name ?? '').trim() || family;
+  const now = Date.now();
+
+  return {
+    id: String(entry?.id ?? '').trim() || createId('theme-font'),
+    name,
+    family,
+    source,
+    url: source === 'family' ? '' : url,
+    mimeType: String(entry?.mimeType ?? '').trim(),
+    size: Math.max(0, Math.round(Number(entry?.size ?? 0) || 0)),
+    enabled: entry?.enabled !== false,
+    createdAt: Math.max(0, Number(entry?.createdAt ?? now) || now),
+    updatedAt: Math.max(0, Number(entry?.updatedAt ?? now) || now)
+  };
+}
+
+export function normalizeThemeSettings(settings: Partial<AppThemeSettings> | null | undefined): AppThemeSettings {
+  const entries = Array.isArray(settings?.fonts?.entries)
+    ? settings.fonts.entries
+        .map((entry, index) => normalizeThemeFontEntry(entry, index))
+        .filter((entry): entry is ThemeFontEntry => Boolean(entry))
+    : [];
+  const activeFontId = String(settings?.fonts?.activeFontId ?? '').trim();
+
+  return {
+    fonts: {
+      activeFontId: entries.some((entry) => entry.id === activeFontId && entry.enabled) ? activeFontId : '',
+      entries
+    },
+    global: {},
+    online: {},
+    offline: {}
+  };
 }
 
 function normalizeMinimaxTtsSettings(settings: Partial<MinimaxTtsSettings> | null | undefined, legacy: { enabled?: boolean; voiceId?: string } = {}): MinimaxTtsSettings {
@@ -1165,6 +1246,7 @@ export function normalizeAppSettings(settings?: Partial<AppSettings> | null): Ap
     }),
     voomReadAtByUser: normalizeVoomReadAtByUser(settings?.voomReadAtByUser),
     ringtoneSettings: normalizeRingtoneSettings(settings?.ringtoneSettings),
+    themeSettings: normalizeThemeSettings(settings?.themeSettings),
     githubBackup: normalizeGitHubBackupSettings(settings?.githubBackup)
   };
 

@@ -736,6 +736,33 @@ export interface AppRingtoneSettings {
   characters: Record<string, CharacterRingtoneSettings>;
 }
 
+export type ThemeFontSource = 'url' | 'file' | 'family';
+
+export interface ThemeFontEntry {
+  id: string;
+  name: string;
+  family: string;
+  source: ThemeFontSource;
+  url: string;
+  mimeType: string;
+  size: number;
+  enabled: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface ThemeFontSettings {
+  activeFontId: string;
+  entries: ThemeFontEntry[];
+}
+
+export interface AppThemeSettings {
+  fonts: ThemeFontSettings;
+  global: Record<string, never>;
+  online: Record<string, never>;
+  offline: Record<string, never>;
+}
+
 export interface AppSettings {
   activeUserId: string;
   apiEndpoint: string;
@@ -762,6 +789,7 @@ export interface AppSettings {
   voomImageModel: string;
   voomReadAtByUser: Record<string, Record<string, number>>;
   ringtoneSettings: AppRingtoneSettings;
+  themeSettings: AppThemeSettings;
   imagePrivateOnly: boolean;
   imageGenerationEnabled: boolean;
   githubBackup: GitHubBackupSettings;
