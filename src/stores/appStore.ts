@@ -466,8 +466,29 @@ export const useAppStore = defineStore('app', () => {
       .sort((a, b) => a.startFloor - b.startFloor);
   }
 
+  function sourceMessageIdsAreRecallable(conversationId: string, sourceMessageIds: string[]) {
+    if (!sourceMessageIds.length) return true;
+    const messagesById = new Map(messagesForConversation(conversationId).map((message) => [message.id, message]));
+    return sourceMessageIds.every((messageId) => {
+      const sourceMessage = messagesById.get(messageId);
+      return Boolean(sourceMessage && sourceMessage.replyVariantState !== 'inactive');
+    });
+  }
+
+  function filterRecallableMemories(conversationId: string, memories: ConversationMemoryRecord[], excludeSourceMessageIds: string[] = []) {
+    const excludedIds = new Set(excludeSourceMessageIds.map((id) => id.trim()).filter(Boolean));
+    return memories.filter((memory) => sourceMessageIdsAreRecallable(conversationId, memory.sourceMessageIds)
+      && !memory.sourceMessageIds.some((messageId) => excludedIds.has(messageId)));
+  }
+
+  function filterRecallableMemoryAtoms(conversationId: string, atoms: ConversationMemoryAtom[], excludeSourceMessageIds: string[] = []) {
+    const excludedIds = new Set(excludeSourceMessageIds.map((id) => id.trim()).filter(Boolean));
+    return atoms.filter((atom) => sourceMessageIdsAreRecallable(conversationId, atom.sourceMessageIds)
+      && !atom.sourceMessageIds.some((messageId) => excludedIds.has(messageId)));
+  }
+
   function memoryAtomsForConversation(id: string) {
-    return conversationMemoryAtoms.value
+    return filterRecallableMemoryAtoms(id, conversationMemoryAtoms.value)
       .filter((atom) => atom.conversationId === id)
       .sort((a, b) => b.updatedAt - a.updatedAt);
   }
@@ -476,13 +497,14 @@ export const useAppStore = defineStore('app', () => {
     return memoryDebugTraces.value[id] ?? null;
   }
 
-  function previewMemoryRecallForConversation(id: string, queryText = '', options: { includeResolved?: boolean; maxTokens?: number; maxEntries?: number } = {}) {
-    return buildMemoryAtomContext(conversationMemoryAtoms.value, {
+  function previewMemoryRecallForConversation(id: string, queryText = '', options: { includeResolved?: boolean; maxTokens?: number; maxEntries?: number; excludeSourceMessageIds?: string[] } = {}) {
+    return buildMemoryAtomContext(filterRecallableMemoryAtoms(id, conversationMemoryAtoms.value, options.excludeSourceMessageIds), {
       conversationId: id,
       queryText,
       maxEntries: options.maxEntries ?? (queryText.trim() ? 18 : 28),
       maxTokens: options.maxTokens ?? (queryText.trim() ? 1200 : 1600),
-      includeResolved: options.includeResolved
+      includeResolved: options.includeResolved,
+      excludeSourceMessageIds: options.excludeSourceMessageIds
     }).debug;
   }
 
@@ -523,20 +545,22 @@ export const useAppStore = defineStore('app', () => {
     return getHiddenMessageIds(messagesForConversation(id), memoriesForConversation(id), settingsForConversation(id));
   }
 
-  function memoryContextForConversation(id: string, queryText = '', options: { includeResolved?: boolean; maxTokens?: number; maxEntries?: number; storeDebug?: boolean } = {}) {
-    const { text, debug } = buildMemoryAtomContext(conversationMemoryAtoms.value, {
+  function memoryContextForConversation(id: string, queryText = '', options: { includeResolved?: boolean; maxTokens?: number; maxEntries?: number; storeDebug?: boolean; excludeSourceMessageIds?: string[] } = {}) {
+    const { text, debug } = buildMemoryAtomContext(filterRecallableMemoryAtoms(id, conversationMemoryAtoms.value, options.excludeSourceMessageIds), {
       conversationId: id,
       queryText,
       maxEntries: options.maxEntries ?? (queryText.trim() ? 18 : 28),
       maxTokens: options.maxTokens ?? (queryText.trim() ? 1200 : 1600),
-      includeResolved: options.includeResolved
+      includeResolved: options.includeResolved,
+      excludeSourceMessageIds: options.excludeSourceMessageIds
     });
     if (options.storeDebug !== false) memoryDebugTraces.value = { ...memoryDebugTraces.value, [id]: debug };
     if (text.trim()) return text;
-    return getMemoryContext(memoriesForConversation(id), {
+    return getMemoryContext(filterRecallableMemories(id, memoriesForConversation(id), options.excludeSourceMessageIds), {
       queryText,
       maxEntries: options.maxEntries ?? (queryText.trim() ? 18 : 28),
-      includeResolved: options.includeResolved
+      includeResolved: options.includeResolved,
+      excludeSourceMessageIds: options.excludeSourceMessageIds
     });
   }
 
@@ -553,22 +577,24 @@ export const useAppStore = defineStore('app', () => {
     });
   }
 
-  async function memoryContextForConversationAsync(id: string, queryText = '', options: { includeResolved?: boolean; maxTokens?: number; maxEntries?: number; storeDebug?: boolean; modelOverride?: string; queryVector?: number[] } = {}) {
+  async function memoryContextForConversationAsync(id: string, queryText = '', options: { includeResolved?: boolean; maxTokens?: number; maxEntries?: number; storeDebug?: boolean; modelOverride?: string; queryVector?: number[]; excludeSourceMessageIds?: string[] } = {}) {
     const queryVector = options.queryVector ?? await memoryQueryVectorForConversation(id, queryText, options.modelOverride);
-    const { text, debug } = buildMemoryAtomContext(conversationMemoryAtoms.value, {
+    const { text, debug } = buildMemoryAtomContext(filterRecallableMemoryAtoms(id, conversationMemoryAtoms.value, options.excludeSourceMessageIds), {
       conversationId: id,
       queryText,
       queryVector,
       maxEntries: options.maxEntries ?? (queryText.trim() ? 18 : 28),
       maxTokens: options.maxTokens ?? (queryText.trim() ? 1200 : 1600),
-      includeResolved: options.includeResolved
+      includeResolved: options.includeResolved,
+      excludeSourceMessageIds: options.excludeSourceMessageIds
     });
     if (options.storeDebug !== false) memoryDebugTraces.value = { ...memoryDebugTraces.value, [id]: debug };
     if (text.trim()) return text;
-    return getMemoryContext(memoriesForConversation(id), {
+    return getMemoryContext(filterRecallableMemories(id, memoriesForConversation(id), options.excludeSourceMessageIds), {
       queryText,
       maxEntries: options.maxEntries ?? (queryText.trim() ? 18 : 28),
-      includeResolved: options.includeResolved
+      includeResolved: options.includeResolved,
+      excludeSourceMessageIds: options.excludeSourceMessageIds
     });
   }
 
@@ -3416,7 +3442,8 @@ export const useAppStore = defineStore('app', () => {
   }
 
   function selectMemoryAtomsForAudit(conversationId: string, queryText: string, queryVector: number[]) {
-    const { debug } = buildMemoryAtomContext(conversationMemoryAtoms.value, {
+    const recallableAtoms = filterRecallableMemoryAtoms(conversationId, conversationMemoryAtoms.value);
+    const { debug } = buildMemoryAtomContext(recallableAtoms, {
       conversationId,
       queryText,
       queryVector,
@@ -3425,7 +3452,7 @@ export const useAppStore = defineStore('app', () => {
       maxTokens: 1800
     });
     const selectedIds = new Set(debug.selectedAtoms.map((atom) => atom.id));
-    return conversationMemoryAtoms.value
+    return recallableAtoms
       .filter((atom) => selectedIds.has(atom.id) && atom.conversationId === conversationId && !atom.archivedAt)
       .sort((left, right) => Number(right.pinned) - Number(left.pinned) || right.importance - left.importance || right.updatedAt - left.updatedAt);
   }
@@ -3490,6 +3517,7 @@ export const useAppStore = defineStore('app', () => {
     try {
       const floorMap = getMessageFloorMap(messagesForConversation(conversationId).filter((message) => message.replyVariantState !== 'inactive'));
       const exchangeText = usefulMessages.map((message) => messageReadableContent(message)).join('\n');
+      const sourceMessageIds = usefulMessages.map((message) => message.id);
       const queryVector = await memoryQueryVectorForConversation(conversationId, exchangeText, modelOverride);
       const summary = await generateConversationSummary({
         messages: usefulMessages.map((message) => {
@@ -3505,8 +3533,8 @@ export const useAppStore = defineStore('app', () => {
         modelOverride,
         promptOverride: renderCharacterMemoryPrompt(chatSettings.memory.summaryPrompt, characterName)
       });
+      if (!sourceMessageIdsAreRecallable(conversationId, sourceMessageIds)) return;
       const now = Date.now();
-      const sourceMessageIds = usefulMessages.map((message) => message.id);
       const floors = usefulMessages.map((message) => floorMap.get(message.id) ?? 1);
       const tempRecord: ConversationMemoryRecord = {
         id: createId('turn_memory'),
@@ -3555,7 +3583,7 @@ export const useAppStore = defineStore('app', () => {
     }
   }
 
-  async function requestRoleplayReply(conversationId: string, options?: { generateMoment?: boolean; proactive?: boolean; replyInstruction?: string; replyVariantGroupId?: string; replyVariantIndex?: number }) {
+  async function requestRoleplayReply(conversationId: string, options?: { generateMoment?: boolean; proactive?: boolean; replyInstruction?: string; replyVariantGroupId?: string; replyVariantIndex?: number; excludeSourceMessageIds?: string[] }) {
     const conversation = conversationById(conversationId);
     if (!conversation || isConversationReplying(conversationId)) return;
     const character = characterById(conversation.charId);
@@ -3586,7 +3614,8 @@ export const useAppStore = defineStore('app', () => {
       }
       const availableCharacterStickers = stickersForGroups(chatSettings.characterStickerGroupIds);
       const memorySummary = await memoryContextForConversationAsync(conversationId, userMessageText, {
-        modelOverride: getConversationTextModelOverride(chatSettings, 'summary', conversation.activeMode)
+        modelOverride: getConversationTextModelOverride(chatSettings, 'summary', conversation.activeMode),
+        excludeSourceMessageIds: options?.excludeSourceMessageIds
       });
       const replyPayload = await generateRoleplayReply({
         user: boundUser,
@@ -4126,9 +4155,10 @@ export const useAppStore = defineStore('app', () => {
     }
 
     await rollbackCharacterMoodForOnlineRegeneration(conversation, messagesToRemove);
+    const removedMessageIds = messagesToRemove.map((message) => message.id);
     await deleteMessages(messagesToRemove.map((message) => message.id));
 
-    await requestRoleplayReply(conversationId);
+    await requestRoleplayReply(conversationId, { excludeSourceMessageIds: removedMessageIds });
     return true;
   }
 

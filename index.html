@@ -14,18 +14,32 @@
     <style>
       :root {
         color: #111111;
-        background: #ffffff;
+        background: #f6f4f5;
       }
 
       html,
       body {
         width: 100%;
         height: 100%;
+        min-height: 100vh;
+        min-height: 100svh;
         margin: 0;
       }
 
+      html {
+        overflow: hidden;
+      }
+
       body {
-        background: #ffffff;
+        background: #f6f4f5;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+        overflow: hidden;
+      }
+
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
       }
 
       #boot-loader {
@@ -34,8 +48,14 @@
         z-index: 9999;
         display: grid;
         place-items: center;
-        padding: max(20px, env(safe-area-inset-top)) max(18px, env(safe-area-inset-right)) max(34px, env(safe-area-inset-bottom)) max(18px, env(safe-area-inset-left));
-        background: #fffdfa;
+        min-height: 100vh;
+        min-height: 100svh;
+        min-height: 100dvh;
+        padding: max(14px, env(safe-area-inset-top)) max(14px, env(safe-area-inset-right)) max(18px, env(safe-area-inset-bottom)) max(14px, env(safe-area-inset-left));
+        overflow: hidden;
+        background:
+          radial-gradient(circle at 50% 7%, rgba(239, 68, 90, 0.14), transparent 30%),
+          linear-gradient(180deg, #fff8fa 0%, #f6f4f5 42%, #f4f5f6 100%);
         transition: opacity 320ms ease, visibility 320ms ease;
       }
 
@@ -46,37 +66,310 @@
       }
 
       .boot-loader__inner {
+        position: relative;
         display: grid;
-        justify-items: center;
-        gap: 18px;
-        width: min(100%, 780px);
+        grid-template-rows: auto 1fr auto;
+        gap: 16px;
+        width: min(100%, 390px);
+        height: min(100%, 760px);
+        min-height: 540px;
+        max-height: 100%;
+        padding: 10px 14px 18px;
+        overflow: hidden;
+        border: 1px solid rgba(17, 17, 17, 0.08);
+        border-radius: 34px;
+        background: #ffffff;
+        box-shadow: 0 24px 60px rgba(17, 17, 17, 0.12);
       }
 
-      .boot-loader__image {
+      .boot-loader__inner::before {
+        content: "";
+        position: absolute;
+        top: 9px;
+        left: 50%;
+        z-index: 2;
+        width: 76px;
+        height: 5px;
+        border-radius: 999px;
+        background: #111111;
+        transform: translateX(-50%);
+      }
+
+      .boot-loader__status {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        min-height: 26px;
+        padding: 10px 8px 0;
+        color: #111111;
+        font-size: 11px;
+        line-height: 1;
+        font-weight: 800;
+      }
+
+      .boot-loader__signals {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+      }
+
+      .boot-loader__battery {
         display: block;
-        width: min(100%, 760px);
-        max-height: min(72dvh, 620px);
-        object-fit: contain;
+      }
+
+      .boot-loader__battery {
+        position: relative;
+        width: 22px;
+        height: 11px;
+        border: 1.8px solid #111111;
+        border-radius: 3px;
+      }
+
+      .boot-loader__battery::before {
+        content: "";
+        position: absolute;
+        inset: 2px 6px 2px 2px;
+        border-radius: 1px;
+        background: #06c755;
+      }
+
+      .boot-loader__battery::after {
+        content: "";
+        position: absolute;
+        top: 2px;
+        right: -4px;
+        width: 2px;
+        height: 5px;
+        border-radius: 0 2px 2px 0;
+        background: #111111;
+      }
+
+      .boot-loader__screen {
+        position: relative;
+        display: grid;
+        align-content: center;
+        gap: 18px;
+        min-height: 0;
+        padding: 12px 2px 8px;
+      }
+
+      .boot-loader__brand {
+        display: grid;
+        justify-items: center;
+        gap: 6px;
+        text-align: center;
+      }
+
+      .boot-loader__eyebrow,
+      .boot-loader__title,
+      .boot-loader__subtitle,
+      .boot-loader__match-title,
+      .boot-loader__match-copy {
+        margin: 0;
+      }
+
+      .boot-loader__eyebrow {
+        color: #ef445a;
+        font-size: 11px;
+        line-height: 1.2;
+        font-weight: 800;
+        letter-spacing: 0;
+      }
+
+      .boot-loader__title {
+        color: #111111;
+        font-size: 32px;
+        line-height: 1;
+        font-weight: 900;
+        letter-spacing: 0;
+      }
+
+      .boot-loader__subtitle {
+        color: #686c72;
+        font-size: 13px;
+        line-height: 1.45;
+      }
+
+      .boot-loader__fate {
+        position: relative;
+        display: grid;
+        align-items: center;
+        width: 100%;
+        min-height: 58px;
+        padding: 14px;
+        border: 1px solid transparent;
+        border-radius: 24px;
+        background:
+          linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(255, 246, 248, 0.92)),
+          radial-gradient(circle at 50% 0%, rgba(239, 68, 90, 0.14), transparent 48%);
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.86), 0 12px 34px rgba(239, 68, 90, 0.08);
+      }
+
+      .boot-loader__route {
+        display: grid;
+        grid-template-columns: minmax(30px, auto) minmax(0, 1fr) minmax(30px, auto);
+        align-items: center;
+        gap: 7px;
+        min-width: 0;
+        width: 100%;
+        padding: 0;
+      }
+
+      .boot-loader__route-label {
+        display: block;
+        min-width: 30px;
+        color: #9e2238;
+        font-size: 10px;
+        line-height: 1;
+        font-weight: 900;
+      }
+
+      .boot-loader__route-label:first-child {
+        text-align: left;
+      }
+
+      .boot-loader__route-label:last-child {
+        text-align: right;
+      }
+
+      .boot-loader__route-track {
+        position: relative;
+        height: 5px;
+        isolation: isolate;
+        overflow: hidden;
+        border-radius: 999px;
+        background: linear-gradient(90deg, rgba(239, 68, 90, 0.26), #ef445a 48%, rgba(255, 143, 161, 0.42) 100%);
+        box-shadow: 0 0 0 1px rgba(239, 68, 90, 0.06), 0 6px 16px rgba(239, 68, 90, 0.12);
+      }
+
+      .boot-loader__route-track::before {
+        content: "";
+        position: absolute;
+        inset: 0 auto 0 0;
+        z-index: 1;
+        width: 42%;
+        border-radius: inherit;
+        background: linear-gradient(90deg, rgba(255, 255, 255, 0), rgba(255, 244, 247, 0.95), rgba(255, 255, 255, 0));
+        transform: translateX(-105%);
+        animation: boot-loader-route 1.8s ease-in-out infinite alternate;
+      }
+
+      @keyframes boot-loader-route {
+        0% {
+          transform: translateX(-105%);
+        }
+
+        100% {
+          transform: translateX(255%);
+        }
+      }
+
+      .boot-loader__match {
+        display: grid;
+        justify-items: center;
+        gap: 4px;
+        text-align: center;
+      }
+
+      .boot-loader__match-title {
+        color: #111111;
+        font-size: 17px;
+        line-height: 1.2;
+        font-weight: 900;
+      }
+
+      .boot-loader__match-copy {
+        max-width: 260px;
+        color: #686c72;
+        font-size: 12px;
+        line-height: 1.45;
+        font-weight: 650;
+      }
+
+      .boot-loader__scene {
+        display: grid;
+        gap: 9px;
+        width: 100%;
+        padding: 12px;
+        border: 1px solid #eceff1;
+        border-radius: 18px;
+        background: #ffffff;
+      }
+
+      .boot-loader__thread {
+        display: grid;
+        gap: 8px;
+      }
+
+      .boot-loader__message {
+        width: fit-content;
+        max-width: 88%;
+        padding: 8px 11px;
+        border-radius: 14px;
+        color: #30343a;
+        font-size: 12px;
+        line-height: 1.35;
+        font-weight: 650;
+      }
+
+      .boot-loader__message--incoming {
+        background: #f3f4f5;
+        border-top-left-radius: 5px;
+      }
+
+      .boot-loader__message--outgoing {
+        justify-self: end;
+        background: #fee4ea;
+        color: #9e2238;
+        border-top-right-radius: 5px;
+      }
+
+      .boot-loader__typing {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        width: fit-content;
+        padding: 10px 12px;
+        border-radius: 14px;
+        border-top-left-radius: 5px;
+        background: #f3f4f5;
+      }
+
+      .boot-loader__typing span {
+        width: 5px;
+        height: 5px;
+        border-radius: 50%;
+        background: #ef445a;
+        animation: boot-loader-typing 1.15s ease-in-out infinite;
+      }
+
+      .boot-loader__typing span:nth-child(2) {
+        animation-delay: 140ms;
+      }
+
+      .boot-loader__typing span:nth-child(3) {
+        animation-delay: 280ms;
       }
 
       .boot-loader__progress {
         display: grid;
         gap: 8px;
-        width: min(68vw, 280px);
+        width: 100%;
+        padding: 0 4px;
       }
 
       .boot-loader__track {
         height: 6px;
         overflow: hidden;
         border-radius: 999px;
-        background: rgba(225, 74, 92, 0.14);
+        background: #eceff1;
       }
 
       .boot-loader__bar {
         width: 0%;
         height: 100%;
         border-radius: inherit;
-        background: linear-gradient(90deg, #ef6374, #5ba6bd);
+        background: linear-gradient(90deg, #06c755, #ef445a);
         transition: width 180ms ease-out;
       }
 
@@ -84,31 +377,84 @@
         display: flex;
         justify-content: space-between;
         align-items: center;
-        color: #c84f63;
-        font: 600 12px/1.2 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        color: #60646a;
+        font: 600 12px/1.2 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", sans-serif;
       }
 
       .boot-loader__label {
         letter-spacing: 0;
       }
 
+      .boot-loader__value {
+        color: #ef445a;
+        font-weight: 800;
+      }
+
+      @keyframes boot-loader-typing {
+        0%,
+        72%,
+        100% {
+          opacity: 0.32;
+          transform: translateY(0);
+        }
+
+        36% {
+          opacity: 1;
+          transform: translateY(-3px);
+        }
+      }
+
       @media (max-width: 520px) {
+        #boot-loader {
+          padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+        }
+
         .boot-loader__inner {
-          gap: 14px;
+          width: 100%;
+          height: 100%;
+          min-height: 100%;
+          border-radius: 0;
+          border: 0;
+          box-shadow: none;
+        }
+      }
+
+      @media (max-height: 620px) {
+        .boot-loader__inner {
+          gap: 10px;
+          min-height: 100%;
+          padding-bottom: 12px;
         }
 
-        .boot-loader__image {
-          max-height: 68dvh;
+        .boot-loader__screen {
+          gap: 10px;
         }
 
-        .boot-loader__progress {
-          width: min(76vw, 280px);
+        .boot-loader__title {
+          font-size: 28px;
+        }
+
+        .boot-loader__fate {
+          min-height: 50px;
+          padding: 10px;
+        }
+
+        .boot-loader__scene {
+          padding: 10px;
+        }
+
+        .boot-loader__message {
+          padding: 7px 10px;
+          font-size: 11px;
         }
       }
 
       @media (prefers-reduced-motion: reduce) {
         #boot-loader,
-        .boot-loader__bar {
+        .boot-loader__bar,
+        .boot-loader__typing span,
+        .boot-loader__route-track::before {
+          animation: none;
           transition: none;
         }
       }
@@ -118,13 +464,43 @@
   <body>
     <div id="boot-loader" aria-live="polite" aria-label="正在加载 Link">
       <div class="boot-loader__inner">
-        <img class="boot-loader__image" src="%BASE_URL%loading.png" alt="" decoding="async" />
+        <div class="boot-loader__status" aria-hidden="true">
+          <span>13:14</span>
+          <span class="boot-loader__signals">
+            <span class="boot-loader__battery"></span>
+          </span>
+        </div>
+        <div class="boot-loader__screen">
+          <div class="boot-loader__brand">
+            <p class="boot-loader__eyebrow">LINK LOVE ROUTE</p>
+            <h1 class="boot-loader__title">Link</h1>
+            <p class="boot-loader__subtitle">正在牵引这段会话</p>
+          </div>
+          <div class="boot-loader__fate" aria-hidden="true">
+            <div class="boot-loader__route">
+              <span class="boot-loader__route-label">user</span>
+              <span class="boot-loader__route-track"></span>
+              <span class="boot-loader__route-label">char</span>
+            </div>
+          </div>
+          <div class="boot-loader__match">
+            <p class="boot-loader__match-title">次元校准中</p>
+            <p class="boot-loader__match-copy">同步世界书、记忆与未读心动信号</p>
+          </div>
+          <div class="boot-loader__scene" aria-hidden="true">
+            <div class="boot-loader__thread">
+              <span class="boot-loader__message boot-loader__message--incoming">心动信号已接入 char 的手机</span>
+              <span class="boot-loader__message boot-loader__message--outgoing">正在载入剧情...</span>
+              <span class="boot-loader__typing"><span></span><span></span><span></span></span>
+            </div>
+          </div>
+        </div>
         <div class="boot-loader__progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
           <div class="boot-loader__track">
             <div class="boot-loader__bar"></div>
           </div>
           <div class="boot-loader__meta">
-            <span class="boot-loader__label">Loading</span>
+            <span class="boot-loader__label">载入心动现场</span>
             <span class="boot-loader__value">0%</span>
           </div>
         </div>

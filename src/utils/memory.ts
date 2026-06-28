@@ -817,8 +817,19 @@ function memoryContextSection(title: string, entries: ConversationMemoryEntry[])
   return `【${title}】\n${entries.map(formatMemoryEntry).join('\n')}`;
 }
 
-export function getMemoryContext(memories: ConversationMemoryRecord[], options: { queryText?: string; maxEntries?: number; includeResolved?: boolean } = {}) {
-  const sorted = [...memories].sort((a, b) => a.startFloor - b.startFloor);
+function hasExcludedSourceMessage(sourceMessageIds: string[], excludedSourceMessageIds?: Set<string>) {
+  return Boolean(excludedSourceMessageIds?.size && sourceMessageIds.some((id) => excludedSourceMessageIds.has(id)));
+}
+
+function normalizeExcludedSourceMessageIds(ids: string[] | undefined) {
+  return new Set((ids ?? []).map((id) => String(id).trim()).filter(Boolean));
+}
+
+export function getMemoryContext(memories: ConversationMemoryRecord[], options: { queryText?: string; maxEntries?: number; includeResolved?: boolean; excludeSourceMessageIds?: string[] } = {}) {
+  const excludedSourceMessageIds = normalizeExcludedSourceMessageIds(options.excludeSourceMessageIds);
+  const sorted = [...memories]
+    .filter((memory) => !hasExcludedSourceMessage(memory.sourceMessageIds, excludedSourceMessageIds))
+    .sort((a, b) => a.startFloor - b.startFloor);
   if (!sorted.length) return '';
   const latestFloor = sorted.reduce((max, memory) => Math.max(max, memory.endFloor), 0);
   const queryTokens = tokenizeMemoryText(options.queryText ?? '');
@@ -855,9 +866,11 @@ export function getMemoryContext(memories: ConversationMemoryRecord[], options: 
   ].filter(Boolean).join('\n\n');
 }
 
-export function buildMemoryAtomContext(atoms: ConversationMemoryAtom[], options: { conversationId: string; queryText?: string; queryVector?: number[]; maxEntries?: number; maxTokens?: number; includeResolved?: boolean } ): { text: string; debug: ConversationMemoryDebugTrace } {
+export function buildMemoryAtomContext(atoms: ConversationMemoryAtom[], options: { conversationId: string; queryText?: string; queryVector?: number[]; maxEntries?: number; maxTokens?: number; includeResolved?: boolean; excludeSourceMessageIds?: string[] } ): { text: string; debug: ConversationMemoryDebugTrace } {
+  const excludedSourceMessageIds = normalizeExcludedSourceMessageIds(options.excludeSourceMessageIds);
   const conversationAtoms = mergeMemoryAtoms(atoms)
     .filter((atom) => atom.conversationId === options.conversationId)
+    .filter((atom) => !hasExcludedSourceMessage(atom.sourceMessageIds, excludedSourceMessageIds))
     .filter((atom) => options.includeResolved || (!['superseded', 'cancelled'].includes(atom.status) && !atom.archivedAt));
   const latestFloor = conversationAtoms.reduce((max, atom) => Math.max(max, atom.lastTouchedFloor), 0);
   const queryText = options.queryText ?? '';
