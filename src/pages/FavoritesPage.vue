@@ -2,25 +2,25 @@
   <section class="screen no-tabs favorites-page">
     <header class="top-bar favorites-topbar">
       <button class="favorites-title-button" type="button" aria-label="返回首页" @click="goBack">
-        <ChevronLeft :size="21" />
-        <h1 class="top-title">收藏</h1>
+        <h1 class="top-title">Favorites</h1>
       </button>
       <span class="favorite-count">{{ favoriteItems.length }}</span>
     </header>
 
     <main class="favorites-main">
-      <section v-if="!store.ready" class="empty-favorites-card">
-        <LoaderCircle :size="18" class="spin" />
-        <p>正在整理收藏...</p>
-      </section>
+      <section class="favorites-panel" :class="{ 'favorites-panel--empty': !store.ready || !favoriteItems.length }">
+        <section v-if="!store.ready" class="empty-favorites-card">
+          <LoaderCircle :size="18" class="spin" />
+          <p>正在整理收藏...</p>
+        </section>
 
-      <section v-else-if="!favoriteItems.length" class="empty-favorites-card">
-        <Bookmark :size="22" />
-        <h2>还没有收藏</h2>
-        <p>在聊天里长按消息气泡、图片、Stickers、转账或定位，点收藏后会出现在这里。</p>
-      </section>
+        <section v-else-if="!favoriteItems.length" class="empty-favorites-card">
+          <Bookmark :size="22" />
+          <h2>还没有收藏</h2>
+          <p>在聊天里长按消息气泡、图片、Stickers、转账或定位，点收藏后会出现在这里。</p>
+        </section>
 
-      <section v-else class="favorite-timeline" aria-label="收藏时间线">
+        <section v-else class="favorite-timeline" aria-label="收藏时间线">
         <article v-for="item in favoriteItems" :key="item.id" class="favorite-card" :class="`favorite-card--${item.kind}`">
           <header class="favorite-card-head">
             <img v-if="item.authorAvatar" class="favorite-avatar" :src="item.authorAvatar" :alt="item.authorName" />
@@ -77,6 +77,7 @@
             <button type="button" @click="openConversation(item)">查看聊天</button>
           </footer>
         </article>
+        </section>
       </section>
     </main>
   </section>
@@ -85,7 +86,7 @@
 <script setup lang="ts">
 import { computed, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
-import { Bookmark, ChevronLeft, LoaderCircle, MapPin, Mic2, Trash2 } from 'lucide-vue-next';
+import { Bookmark, LoaderCircle, MapPin, Mic2, Trash2 } from 'lucide-vue-next';
 import { useAppStore } from '@/stores/appStore';
 import type { FavoriteMessageRecord } from '@/types/domain';
 
@@ -144,48 +145,120 @@ function openConversation(item: FavoriteMessageRecord) {
 
 <style scoped>
 .favorites-page {
-  background: #f7f5f2;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding-bottom: 0;
+  overflow-x: hidden;
+  background:
+    radial-gradient(circle at 8% 0%, rgba(255, 218, 227, 0.54), transparent 30%),
+    radial-gradient(circle at 94% 10%, rgba(6, 199, 85, 0.14), transparent 28%),
+    linear-gradient(180deg, #fbfcfb 0%, #f5f7f6 52%, #edf3f1 100%);
 }
 
 .favorites-topbar {
-  background: rgba(247, 245, 242, 0.92);
+  align-items: center;
+  justify-content: flex-start;
+  gap: 12px;
+  min-width: 0;
+  background: rgba(251, 252, 251, 0.9);
+  backdrop-filter: blur(18px);
 }
 
 .favorites-title-button {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  flex: 0 1 auto;
   min-width: 0;
+  margin-right: auto;
+  padding: 0;
+  color: inherit;
+}
+
+.favorites-title-button .top-title {
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .favorite-count {
-  display: inline-grid;
-  place-items: center;
-  min-width: 26px;
-  height: 26px;
-  padding: 0 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  min-width: 34px;
+  min-height: 34px;
+  padding: 0 11px;
   border-radius: 999px;
-  background: #111111;
-  color: #ffffff;
-  font-size: 12px;
-  font-weight: 800;
+  background:
+    radial-gradient(circle at top right, rgba(255, 221, 232, 0.72), transparent 44%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(238, 248, 241, 0.94));
+  color: #138046;
+  font-size: 13px;
+  font-weight: 900;
+  line-height: 1;
+  box-shadow:
+    inset 0 0 0 1px rgba(17, 17, 17, 0.05),
+    0 12px 28px rgba(16, 24, 20, 0.08);
 }
 
 .favorites-main {
-  padding: 12px 14px 26px;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  width: 100%;
+  max-width: 760px;
+  margin: 0 auto;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  padding: 10px calc(16px + var(--safe-right)) calc(22px + var(--safe-bottom)) calc(16px + var(--safe-left));
+}
+
+.favorites-panel {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid rgba(17, 17, 17, 0.04);
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 14px 32px rgba(16, 24, 20, 0.06);
+  container-type: inline-size;
+}
+
+.favorites-panel--empty {
+  min-height: 330px;
+  align-content: center;
 }
 
 .empty-favorites-card {
   display: grid;
   justify-items: center;
-  gap: 8px;
-  margin-top: 90px;
-  padding: 26px 22px;
-  border: 1px solid rgba(22, 22, 22, 0.06);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.78);
-  color: #85806f;
+  align-content: center;
+  gap: 10px;
+  min-height: 260px;
+  min-width: 0;
+  padding: 24px 18px;
+  border-radius: 26px;
+  background:
+    radial-gradient(circle at top right, rgba(255, 221, 232, 0.9), transparent 30%),
+    linear-gradient(135deg, #fff8fb, #f1f6fb 56%, #eef8f1);
+  color: #767d86;
   text-align: center;
+  overflow: hidden;
+}
+
+.empty-favorites-card > svg {
+  width: 42px;
+  height: 42px;
+  padding: 10px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.82);
+  color: #64736a;
+  box-shadow: inset 0 0 0 1px rgba(17, 17, 17, 0.05);
 }
 
 .empty-favorites-card h2,
@@ -194,50 +267,62 @@ function openConversation(item: FavoriteMessageRecord) {
 }
 
 .empty-favorites-card h2 {
-  color: #151515;
-  font-size: 18px;
+  color: #191b1f;
+  font-size: 20px;
+  font-weight: 900;
+  line-height: 1.16;
 }
 
 .empty-favorites-card p {
-  max-width: 260px;
-  font-size: 13px;
+  max-width: 270px;
+  color: #767d86;
+  font-size: 12px;
+  font-weight: 720;
   line-height: 1.55;
+  overflow-wrap: anywhere;
 }
 
 .favorite-timeline {
   display: grid;
   gap: 14px;
+  min-width: 0;
 }
 
 .favorite-card {
   overflow: hidden;
-  border: 1px solid rgba(24, 22, 18, 0.07);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.94);
-  box-shadow: 0 10px 24px rgba(34, 29, 20, 0.07);
+  min-width: 0;
+  border: 1px solid rgba(17, 17, 17, 0.04);
+  border-radius: 24px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(248, 249, 252, 0.96));
+  box-shadow: 0 12px 30px rgba(26, 30, 38, 0.05);
 }
 
 .favorite-card-head {
   display: grid;
-  grid-template-columns: 38px minmax(0, 1fr) 32px;
+  grid-template-columns: 42px minmax(0, 1fr) 34px;
   align-items: center;
-  gap: 9px;
-  padding: 10px 11px;
+  gap: 10px;
+  min-width: 0;
+  padding: 14px;
 }
 
 .favorite-avatar {
-  width: 38px;
-  height: 38px;
-  border-radius: 50%;
+  width: 42px;
+  height: 42px;
+  border-radius: 16px;
   object-fit: cover;
-  background: #ece8e1;
+  background: var(--soft);
 }
 
 .favorite-avatar--empty {
   display: grid;
   place-items: center;
-  color: #6f6a5d;
+  color: #64736a;
   font-weight: 900;
+}
+
+.favorite-card-head > div {
+  min-width: 0;
 }
 
 .favorite-card-head strong,
@@ -249,34 +334,40 @@ function openConversation(item: FavoriteMessageRecord) {
 }
 
 .favorite-card-head strong {
-  color: #161616;
+  color: #191b1f;
   font-size: 14px;
+  font-weight: 900;
 }
 
 .favorite-card-head span {
-  margin-top: 2px;
-  color: #8c887e;
+  margin-top: 3px;
+  color: #767d86;
   font-size: 12px;
+  font-weight: 720;
 }
 
 .favorite-delete-button {
   display: grid;
   place-items: center;
-  width: 32px;
-  height: 32px;
-  border-radius: 8px;
-  color: #9b9589;
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.68);
+  color: #8b929b;
+  box-shadow: inset 0 0 0 1px rgba(17, 17, 17, 0.05);
 }
 
 .favorite-delete-button:active {
-  background: #f0ede7;
+  background: #fff1f4;
   color: #ef445a;
 }
 
 .favorite-image-card,
 .favorite-sticker-card {
-  margin: 0;
-  background: #f1eee8;
+  overflow: hidden;
+  margin: 0 14px 4px;
+  border-radius: 20px;
+  background: rgba(244, 246, 248, 0.82);
 }
 
 .favorite-image-card img,
@@ -290,7 +381,7 @@ function openConversation(item: FavoriteMessageRecord) {
 .favorite-sticker-card {
   display: grid;
   justify-items: center;
-  padding: 20px 14px 12px;
+  padding: 20px 14px 0;
 }
 
 .favorite-sticker-card img {
@@ -301,20 +392,22 @@ function openConversation(item: FavoriteMessageRecord) {
 
 .favorite-image-card figcaption,
 .favorite-sticker-card figcaption {
-  padding: 10px 12px 0;
-  color: #4f4b43;
-  font-size: 13px;
+  padding: 10px 12px 12px;
+  color: #505862;
+  font-size: 12px;
+  font-weight: 720;
   line-height: 1.5;
+  overflow-wrap: anywhere;
 }
 
 .favorite-location-card,
 .favorite-transfer-card,
 .favorite-voice-card,
 .favorite-text {
-  margin: 0 11px 4px;
-  border-radius: 8px;
-  background: #f4f1ec;
-  color: #201f1d;
+  margin: 0 14px 4px;
+  border-radius: 20px;
+  background: rgba(244, 246, 248, 0.82);
+  color: #191b1f;
 }
 
 .favorite-location-card,
@@ -324,7 +417,8 @@ function openConversation(item: FavoriteMessageRecord) {
   grid-template-columns: 38px minmax(0, 1fr);
   align-items: center;
   gap: 10px;
-  padding: 13px;
+  min-width: 0;
+  padding: 14px;
 }
 
 .favorite-location-card strong,
@@ -341,9 +435,22 @@ function openConversation(item: FavoriteMessageRecord) {
 .favorite-transfer-card small,
 .favorite-transfer-card em {
   margin-top: 4px;
-  color: #7c776d;
+  color: #767d86;
   font-size: 12px;
+  font-weight: 720;
   font-style: normal;
+}
+
+.favorite-location-card > div,
+.favorite-transfer-card > div,
+.favorite-voice-card > div {
+  min-width: 0;
+}
+
+.favorite-location-card strong,
+.favorite-transfer-card strong,
+.favorite-voice-card strong {
+  overflow-wrap: anywhere;
 }
 
 .favorite-transfer-card > span {
@@ -352,30 +459,35 @@ function openConversation(item: FavoriteMessageRecord) {
   width: 38px;
   height: 38px;
   border-radius: 50%;
-  background: #111111;
+  background: linear-gradient(180deg, #111111, #2c2f39);
   color: #ffffff;
   font-weight: 900;
 }
 
 .favorite-transfer-card strong {
   font-size: 22px;
+  line-height: 1.12;
 }
 
 .favorite-voice-card p {
   margin: 4px 0 0;
-  color: #555047;
+  color: #505862;
+  font-size: 12px;
+  font-weight: 720;
   line-height: 1.5;
+  overflow-wrap: anywhere;
 }
 
 .favorite-text {
-  padding: 13px;
+  padding: 14px;
   font-size: 14px;
   line-height: 1.65;
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .favorite-text.narration {
-  color: #706a60;
+  color: #707781;
   font-style: italic;
 }
 
@@ -384,19 +496,36 @@ function openConversation(item: FavoriteMessageRecord) {
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  padding: 9px 11px 11px;
-  color: #928d82;
+  min-width: 0;
+  padding: 10px 14px 14px;
+  color: #767d86;
   font-size: 12px;
+  font-weight: 720;
+}
+
+.favorite-card-foot span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .favorite-card-foot button {
-  min-height: 30px;
-  padding: 0 10px;
-  border-radius: 8px;
-  background: #111111;
-  color: #ffffff;
+  flex: 0 0 auto;
+  min-height: 36px;
+  padding: 0 14px;
+  border-radius: 999px;
+  background: rgba(231, 248, 236, 0.96);
+  color: #138046;
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 900;
+  box-shadow:
+    inset 0 0 0 1px rgba(19, 128, 70, 0.08),
+    0 10px 24px rgba(16, 24, 20, 0.06);
+}
+
+.favorite-card-foot button:active {
+  background: #dff4e6;
 }
 
 .spin {
@@ -405,5 +534,72 @@ function openConversation(item: FavoriteMessageRecord) {
 
 @keyframes spin {
   to { transform: rotate(360deg); }
+}
+
+@container (max-width: 360px) {
+  .favorites-panel {
+    gap: 12px;
+    padding: 12px;
+    border-radius: 18px;
+  }
+
+  .favorites-panel--empty {
+    min-height: 300px;
+  }
+
+  .empty-favorites-card {
+    min-height: 240px;
+    padding: 22px 14px;
+    border-radius: 22px;
+  }
+
+  .favorite-card {
+    border-radius: 20px;
+  }
+
+  .favorite-card-head {
+    grid-template-columns: 38px minmax(0, 1fr) 32px;
+    gap: 9px;
+    padding: 11px;
+  }
+
+  .favorite-avatar {
+    width: 38px;
+    height: 38px;
+    border-radius: 14px;
+  }
+
+  .favorite-delete-button {
+    width: 32px;
+    height: 32px;
+  }
+
+  .favorite-image-card,
+  .favorite-sticker-card,
+  .favorite-location-card,
+  .favorite-transfer-card,
+  .favorite-voice-card,
+  .favorite-text {
+    margin-right: 11px;
+    margin-left: 11px;
+  }
+
+  .favorite-location-card,
+  .favorite-transfer-card,
+  .favorite-voice-card,
+  .favorite-text {
+    padding: 12px;
+    border-radius: 18px;
+  }
+
+  .favorite-card-foot {
+    padding: 9px 11px 11px;
+  }
+}
+
+@media (max-width: 420px) {
+  .favorites-main {
+    padding: 8px max(10px, var(--safe-right)) calc(18px + var(--safe-bottom)) max(10px, var(--safe-left));
+  }
 }
 </style>
