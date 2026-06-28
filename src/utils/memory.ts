@@ -256,10 +256,7 @@ export function normalizeConversationSettings(settings: Partial<ConversationSett
   ].map((image) => String(image ?? '').trim()).filter(Boolean);
   const voomFrequency = normalizeVoomFrequency(settings?.voomFrequency, defaultConversationSettings.voomFrequency);
   const proactiveReply = settings?.proactiveReply ?? defaultConversationSettings.proactiveReply;
-  const rawSummarizeEvery = Math.max(10, Math.round(Number(memory.summarizeEvery) || defaultChatMemorySettings.summarizeEvery));
-  const summarizeEvery = rawSummarizeEvery === 100 && String(memory.summaryPrompt ?? defaultChatMemorySettings.summaryPrompt).trim() === defaultChatMemorySettings.summaryPrompt
-    ? defaultChatMemorySettings.summarizeEvery
-    : rawSummarizeEvery;
+  const summarizeEvery = Math.max(1, Math.round(Number(memory.summarizeEvery) || defaultChatMemorySettings.summarizeEvery));
 
   return {
     conversationId,

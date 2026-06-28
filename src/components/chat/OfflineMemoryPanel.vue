@@ -78,8 +78,8 @@
               </label>
               <label class="offline-field compact">
                 <span>每多少楼总结</span>
-                <input v-model.number="draft.memory.summarizeEvery" min="10" step="10" type="number" @change="saveDraft" />
-                <small>默认 50，剧情密集可 30-40。</small>
+                <input :value="memoryNumberDraft.summarizeEvery" inputmode="numeric" min="1" step="1" type="number" @input="updateMemoryNumberDraft('summarizeEvery', $event)" @change="commitMemoryNumberDraft('summarizeEvery', $event)" @blur="commitMemoryNumberDraft('summarizeEvery', $event)" @keydown.enter.prevent="commitMemoryNumberDraft('summarizeEvery', $event)" />
+                <small>默认 50，可按需要填写任意正整数。</small>
               </label>
               <label class="toggle-tile strategy-wide-control">
                 <input v-model="draft.memory.hideSummarizedMessages" type="checkbox" @change="saveDraft" />
@@ -108,7 +108,7 @@
               </label>
               <label class="offline-field compact strategy-wide-control">
                 <span>每几次回复写入</span>
-                <input v-model.number="draft.memory.atomWriterEvery" min="1" max="10" type="number" @change="saveDraft" />
+                <input :value="memoryNumberDraft.atomWriterEvery" inputmode="numeric" min="1" max="10" type="number" @input="updateMemoryNumberDraft('atomWriterEvery', $event)" @change="commitMemoryNumberDraft('atomWriterEvery', $event)" @blur="commitMemoryNumberDraft('atomWriterEvery', $event)" @keydown.enter.prevent="commitMemoryNumberDraft('atomWriterEvery', $event)" />
                 <small>1 最稳，2 更省调用。</small>
               </label>
             </div>
@@ -128,12 +128,12 @@
               </label>
               <label class="offline-field compact">
                 <span>达到几条触发</span>
-                <input v-model.number="draft.memory.autoMergeThreshold" min="3" max="30" type="number" @change="saveDraft" />
+                <input :value="memoryNumberDraft.autoMergeThreshold" inputmode="numeric" min="3" max="30" type="number" @input="updateMemoryNumberDraft('autoMergeThreshold', $event)" @change="commitMemoryNumberDraft('autoMergeThreshold', $event)" @blur="commitMemoryNumberDraft('autoMergeThreshold', $event)" @keydown.enter.prevent="commitMemoryNumberDraft('autoMergeThreshold', $event)" />
                 <small>默认 8。</small>
               </label>
               <label class="offline-field compact">
                 <span>每批合并条数</span>
-                <input v-model.number="draft.memory.autoMergeBatchSize" min="2" max="20" type="number" @change="saveDraft" />
+                <input :value="memoryNumberDraft.autoMergeBatchSize" inputmode="numeric" min="2" max="20" type="number" @input="updateMemoryNumberDraft('autoMergeBatchSize', $event)" @change="commitMemoryNumberDraft('autoMergeBatchSize', $event)" @blur="commitMemoryNumberDraft('autoMergeBatchSize', $event)" @keydown.enter.prevent="commitMemoryNumberDraft('autoMergeBatchSize', $event)" />
                 <small>默认 6，保留回滚层级。</small>
               </label>
               <button class="soft-pill memory-text-action strategy-wide-control" type="button" :disabled="summarizing || mergeDisabled" @click="runAutoMergeNow">立即整理记忆</button>
@@ -312,6 +312,7 @@ import { normalizeChatModelOverrides } from '@/utils/settings';
 
 type ConfirmTone = 'primary' | 'danger';
 type ConfirmAction = () => Promise<void> | void;
+type MemoryNumberField = 'summarizeEvery' | 'atomWriterEvery' | 'autoMergeThreshold' | 'autoMergeBatchSize';
 const memoryAtomStatusOptions: Array<{ value: ConversationMemoryEntryStatus; label: string }> = [
   { value: 'active', label: '有效' },
   { value: 'open', label: '待处理' },
@@ -349,6 +350,12 @@ const showMergePicker = ref(false);
 const showUnmergePicker = ref(false);
 const selectedMergeIds = ref<string[]>([]);
 const draft = reactive<ConversationSettings>(normalizeConversationSettings(null, props.conversationId));
+const memoryNumberDraft = reactive<Record<MemoryNumberField, string>>({
+  summarizeEvery: String(draft.memory.summarizeEvery),
+  atomWriterEvery: String(draft.memory.atomWriterEvery),
+  autoMergeThreshold: String(draft.memory.autoMergeThreshold),
+  autoMergeBatchSize: String(draft.memory.autoMergeBatchSize)
+});
 const confirmDialog = reactive<ConfirmDialogState>({
   open: false,
   eyebrow: '',
@@ -445,6 +452,7 @@ watch(
   () => [props.conversationId, currentConversationSettings.value] as const,
   () => {
     Object.assign(draft, normalizeConversationSettings(currentConversationSettings.value, props.conversationId));
+    syncMemoryNumberDraft();
     showMergePicker.value = false;
     showUnmergePicker.value = false;
     selectedMergeIds.value = [];
@@ -460,6 +468,37 @@ watch(mergeableMemories, (nextMemories) => {
 
 function saveDraft() {
   void store.saveConversationSettings({ ...draft, conversationId: props.conversationId });
+}
+
+function syncMemoryNumberDraft() {
+  memoryNumberDraft.summarizeEvery = String(draft.memory.summarizeEvery);
+  memoryNumberDraft.atomWriterEvery = String(draft.memory.atomWriterEvery);
+  memoryNumberDraft.autoMergeThreshold = String(draft.memory.autoMergeThreshold);
+  memoryNumberDraft.autoMergeBatchSize = String(draft.memory.autoMergeBatchSize);
+}
+
+function updateMemoryNumberDraft(field: MemoryNumberField, event: Event) {
+  memoryNumberDraft[field] = (event.target as HTMLInputElement).value;
+}
+
+function memoryNumberLimits(field: MemoryNumberField) {
+  return {
+    summarizeEvery: { min: 1, max: Number.MAX_SAFE_INTEGER, fallback: draft.memory.summarizeEvery },
+    atomWriterEvery: { min: 1, max: 10, fallback: draft.memory.atomWriterEvery },
+    autoMergeThreshold: { min: 3, max: 30, fallback: draft.memory.autoMergeThreshold },
+    autoMergeBatchSize: { min: 2, max: 20, fallback: draft.memory.autoMergeBatchSize }
+  }[field];
+}
+
+function commitMemoryNumberDraft(field: MemoryNumberField, event?: Event) {
+  if (event?.target instanceof HTMLInputElement) memoryNumberDraft[field] = event.target.value;
+  const limits = memoryNumberLimits(field);
+  const numericValue = Number(memoryNumberDraft[field]);
+  const nextValue = Math.min(limits.max, Math.max(limits.min, Math.round(Number.isFinite(numericValue) ? numericValue : limits.fallback)));
+  memoryNumberDraft[field] = String(nextValue);
+  if (draft.memory[field] === nextValue) return;
+  draft.memory[field] = nextValue;
+  saveDraft();
 }
 
 function updateSummaryModel(event: Event) {
@@ -1060,8 +1099,8 @@ function updateMemorySummary(memory: ConversationMemoryRecord, event: Event) {
 }
 
 .strategy-model-group {
-  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
-  align-items: center;
+  grid-template-columns: 1fr;
+  align-items: stretch;
 }
 
 .memory-dashboard {
