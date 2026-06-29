@@ -36,7 +36,7 @@
         @click="selectCharacterVoomFeed(character.id)"
       >
         <span class="story-avatar">
-          <img :src="character.avatar" alt="" aria-hidden="true" />
+          <img :src="voomCharacterAvatar(character)" alt="" aria-hidden="true" />
           <i v-if="hasUnreadVoomForCharacter(character.id)" class="story-unread" aria-hidden="true"></i>
         </span>
         <span class="story-name">{{ getCharacterVoomDisplayName(character) }}</span>
@@ -55,8 +55,10 @@
       :key="post.id"
       :post="post"
       :author-name="voomAuthorNameForPost(post)"
+      :author-avatar="voomAuthorAvatarForPost(post)"
       :character-display-names="characterVoomDisplayNames"
       :character-author-aliases="characterVoomAuthorAliases"
+      :current-user-id="store.user?.id"
       :current-user-name="store.user?.nickname"
       :can-regenerate-image="canRegenerateVoomImage"
       :regenerating-image="regeneratingImagePostIds.includes(post.id)"
@@ -133,7 +135,7 @@
             :disabled="creatingVoomPost"
             @click="selectedPublisherId = character.id"
           >
-            <img :src="character.avatar" :alt="getCharacterDisplayName(character)" />
+            <img :src="voomCharacterAvatar(character)" :alt="getCharacterDisplayName(character)" />
             <span>
               <strong>{{ getCharacterDisplayName(character) }}</strong>
               <small>{{ character.name }}</small>
@@ -220,7 +222,7 @@
           <div v-if="userVoomVisibility === 'selected' && userVoomAccountCharacters.length" class="target-list">
             <label v-for="character in userVoomAccountCharacters" :key="character.id" class="target-option">
               <input type="checkbox" :checked="selectedUserVoomCharacterIds.includes(character.id)" :disabled="creatingUserVoomPost" @change="toggleUserVoomCharacter(character.id)" />
-              <img :src="character.avatar" :alt="getCharacterDisplayName(character)" />
+              <img :src="voomCharacterAvatar(character)" :alt="getCharacterDisplayName(character)" />
               <span>
                 <strong>{{ getCharacterDisplayName(character) }}</strong>
                 <small>{{ character.name }}</small>
@@ -253,9 +255,10 @@ import { FileText, Globe2, Image as ImageIcon, LoaderCircle, Plus, Shuffle, Squa
 import AppModal from '@/components/common/AppModal.vue';
 import VoomPostCard from '@/components/voom/VoomPostCard.vue';
 import { useAppStore } from '@/stores/appStore';
-import type { VoomPost, VoomPostVisibility } from '@/types/domain';
+import type { CharacterProfile, VoomPost, VoomPostVisibility } from '@/types/domain';
 import { getCharacterDisplayName, getCharacterVoomAuthorName, getCharacterVoomDisplayName } from '@/utils/character';
 import { readChatImageFile } from '@/utils/imageFile';
+import { getCharacterVisualProfile } from '@/utils/profile';
 import { getSelectedImageModelOption } from '@/utils/settings';
 
 const store = useAppStore();
@@ -372,6 +375,16 @@ const canSubmitUserVoomPost = computed(() => {
 function voomAuthorNameForPost(post: VoomPost) {
   const character = store.characterById(post.charId);
   return character ? getCharacterVoomDisplayName(character) : post.authorName;
+}
+
+function voomCharacterAvatar(character: CharacterProfile) {
+  return getCharacterVisualProfile(character)?.avatar || character.avatar;
+}
+
+function voomAuthorAvatarForPost(post: VoomPost) {
+  if (post.authorType === 'user') return post.authorAvatar;
+  const character = store.characterById(post.charId);
+  return character ? voomCharacterAvatar(character) : post.authorAvatar;
 }
 
 function voomReadAtForCharacter(characterId: string) {

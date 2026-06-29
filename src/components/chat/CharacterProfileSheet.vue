@@ -235,7 +235,7 @@ const flipGestureMoveThreshold = 10;
 let timelineTouchY: number | null = null;
 
 const recentPosts = computed(() => props.posts
-  .filter((post) => post.charId === props.character.id || post.visibleCharacterIds?.includes(props.character.id))
+  .filter((post) => post.authorType !== 'user' && post.charId === props.character.id)
   .slice(0, 3));
 const visualProfile = computed(() => getCharacterVisualProfile(props.character) ?? createVisualProfile(props.character));
 

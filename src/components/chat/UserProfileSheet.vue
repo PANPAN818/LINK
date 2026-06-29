@@ -106,7 +106,7 @@
         </div>
 
         <div class="gallery-grid">
-          <article v-for="tile in galleryTiles" :key="tile.id" class="gallery-card" :class="{ mock: !tile.image, empty: tile.empty }">
+          <article v-for="tile in galleryTiles" :key="tile.id" class="gallery-card" :class="{ mock: !tile.image, empty: tile.empty, text: tile.textOnly }">
             <img v-if="tile.image" :src="tile.image" :alt="tile.caption || 'Voom image'" />
             <div v-if="!tile.image && tile.caption" class="gallery-copy">
               <span>{{ tile.caption }}</span>
@@ -182,8 +182,9 @@ const galleryTiles = computed(() => {
     const post = recentPosts.value[index];
     return {
       id: post?.id ?? `empty-voom-${index + 1}`,
-      caption: post?.imageDescription || post?.content || '',
+      caption: post ? post.image ? post.imageDescription || post.content : post.content : '',
       image: post?.image ?? '',
+      textOnly: Boolean(post && !post.image && post.content.trim()),
       empty: !post
     };
   });
@@ -610,6 +611,12 @@ function saveEditor() {
   opacity: 0.72;
 }
 
+.gallery-card.text {
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.04)),
+    linear-gradient(180deg, rgba(36, 40, 49, 0.98), rgba(10, 12, 18, 0.98));
+}
+
 .gallery-copy {
   position: absolute;
   bottom: 10px;
@@ -626,6 +633,18 @@ function saveEditor() {
   position: static;
   padding: 10px;
   text-align: center;
+}
+
+.gallery-card.text .gallery-copy {
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+}
+
+.gallery-card.text .gallery-copy span {
+  font-weight: 700;
+  opacity: 0.86;
 }
 
 .gallery-copy span {

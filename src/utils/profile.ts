@@ -83,8 +83,15 @@ function normalizeStats(stats: Partial<VisualProfile['stats']> | undefined, fall
     mergedStats.followersLabel === legacyDefaultStats.followersLabel &&
     mergedStats.following === legacyDefaultStats.following &&
     mergedStats.followingLabel === legacyDefaultStats.followingLabel;
+  const isPreviousDefaultStats =
+    mergedStats.posts === 520 &&
+    mergedStats.postsLabel === 'Posts' &&
+    mergedStats.followers === '1.3k' &&
+    mergedStats.followersLabel === 'Followers' &&
+    mergedStats.following === 1400 &&
+    mergedStats.followingLabel === 'Following';
 
-  return isLegacyStats ? { ...fallbackStats } : mergedStats;
+  return isLegacyStats || isPreviousDefaultStats ? { ...fallbackStats } : mergedStats;
 }
 
 function isBundledProfileImage(image: string, assetName: string) {
@@ -144,7 +151,7 @@ export function createVisualProfile(user?: VisualProfileOwner): VisualProfile {
       postsLabel: 'Posts',
       followers: '1.3k',
       followersLabel: 'Followers',
-      following: 1400,
+      following: '1.4k',
       followingLabel: 'Following'
     },
     tags: ['daily', 'film', 'cafe'],
@@ -226,7 +233,7 @@ function isLegacyDefaultVisualProfile(profile: Partial<VisualProfile> | undefine
       profile.stats.postsLabel === 'Posts' &&
       profile.stats.followers === '1.3k' &&
       profile.stats.followersLabel === 'Followers' &&
-      profile.stats.following === 1400 &&
+      (profile.stats.following === 1400 || profile.stats.following === '1.4k') &&
       profile.stats.followingLabel === 'Following');
   const linksAreDefault = !profile.links || ['link.app/momo,OOTD,playlist', 'link.app/linker'].includes(profile.links.map((link) => link.label).join(','));
   const highlightsAreDefault = !profile.highlights || profile.highlights.map((highlight) => highlight.title).join(',') === 'cafe,look,diary';

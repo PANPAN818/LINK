@@ -2,7 +2,7 @@
   <article class="voom-post">
     <header>
       <div class="author-row">
-        <img class="avatar" :src="post.authorAvatar" :alt="resolvedAuthorName" />
+        <img class="avatar" :src="resolvedAuthorAvatar" :alt="resolvedAuthorName" />
         <div>
           <strong>{{ resolvedAuthorName }}</strong>
           <time>{{ formatRelativeDate(post.createdAt) }}</time>
@@ -43,22 +43,45 @@
         </button>
       </div>
     </footer>
-    <div v-if="post.comments.length" class="comments">
-      <p v-for="comment in post.comments" :key="comment.id">
-        <button class="comment-line" type="button" @click="openCommentComposer(comment.id)">
-          <strong>{{ displayAuthorName(comment.authorName, comment.authorId) }}</strong>
-          <template v-if="replyTargetName(comment.parentId)">
-            <em>回复</em>
-            <strong>{{ replyTargetName(comment.parentId) }}</strong>
-          </template>
-          <span>{{ commentDisplayContent(comment) }}</span>
-        </button>
-      </p>
-    </div>
-    <form v-if="showComposer" ref="composerRef" class="comment-composer" @submit.prevent="submitComment">
+    <form v-if="isComposerFor('')" class="comment-composer" @submit.prevent="submitComment">
       <input v-model="commentDraft" :placeholder="commentPlaceholder" />
       <button type="submit" :disabled="!commentDraft.trim()">发送</button>
     </form>
+    <div v-if="post.comments.length" class="comments">
+      <article v-for="thread in commentThreads" :key="thread.comment.id" class="comment-thread">
+        <button class="comment-line comment-main" type="button" @click="openCommentComposer(thread.comment.id)">
+          <span class="comment-meta">
+            <strong>{{ displayAuthorName(thread.comment.authorName, thread.comment.authorId) }}</strong>
+            <span v-if="isCurrentUserComment(thread.comment)" class="comment-user-tag">我</span>
+            <span v-if="isCharacterComment(thread.comment)" class="comment-role-tag">角色</span>
+          </span>
+          <span class="comment-text">{{ commentDisplayContent(thread.comment) }}</span>
+          <time class="comment-inline-time" :datetime="commentDateTime(thread.comment)">{{ commentTime(thread.comment) }}</time>
+        </button>
+        <form v-if="isComposerFor(thread.comment.id)" class="comment-composer comment-composer-inline" @submit.prevent="submitComment">
+          <input v-model="commentDraft" :placeholder="commentPlaceholder" />
+          <button type="submit" :disabled="!commentDraft.trim()">发送</button>
+        </form>
+        <div v-if="thread.replies.length" class="comment-replies">
+          <template v-for="reply in thread.replies" :key="reply.id">
+            <button class="comment-line comment-reply" type="button" @click="openCommentComposer(reply.id)">
+              <span class="comment-meta">
+                <strong>{{ displayAuthorName(reply.authorName, reply.authorId) }}</strong>
+                <span v-if="isCurrentUserComment(reply)" class="comment-user-tag">我</span>
+                <span v-if="isCharacterComment(reply)" class="comment-role-tag">角色</span>
+                <em v-if="replyTargetName(reply.parentId)">回复 {{ replyTargetName(reply.parentId) }}</em>
+                <time :datetime="commentDateTime(reply)">{{ commentTime(reply) }}</time>
+              </span>
+              <span class="comment-text">{{ commentDisplayContent(reply) }}</span>
+            </button>
+            <form v-if="isComposerFor(reply.id)" class="comment-composer comment-composer-inline" @submit.prevent="submitComment">
+              <input v-model="commentDraft" :placeholder="commentPlaceholder" />
+              <button type="submit" :disabled="!commentDraft.trim()">发送</button>
+            </form>
+          </template>
+        </div>
+      </article>
+    </div>
 
     <AppModal v-model="showVisualModal" title="VOOM 配图" variant="ins">
       <section class="visual-viewer" :class="{ flipped: visualFlipped }" :style="visualStyle">
@@ -124,6 +147,8 @@ import { stripVoomCommentReplyPrefix } from '@/utils/voom';
 const props = defineProps<{
   post: VoomPost;
   authorName?: string;
+  authorAvatar?: string;
+  currentUserId?: string;
   currentUserName?: string;
   characterDisplayNames?: Record<string, string>;
   characterAuthorAliases?: Record<string, string>;
@@ -152,7 +177,6 @@ const selectedCandidateId = ref('');
 const brokenImageSources = ref<string[]>([]);
 const lastCandidateCount = ref(0);
 const busyReminderShown = ref(false);
-const composerRef = ref<HTMLElement | null>(null);
 const likeSummaryRef = ref<HTMLElement | null>(null);
 const likeMeasureRef = ref<HTMLElement | null>(null);
 const compactLikeSummary = ref(false);
@@ -160,6 +184,7 @@ let likeResizeObserver: ResizeObserver | undefined;
 let likeMeasureFrame = 0;
 
 const resolvedAuthorName = computed(() => props.authorName || props.post.authorName);
+const resolvedAuthorAvatar = computed(() => props.authorAvatar || props.post.authorAvatar);
 const likedByMe = computed(() => Boolean(props.currentUserName && props.post.likes.includes(props.currentUserName)));
 const replyTarget = computed(() => props.post.comments.find((comment) => comment.id === replyParentId.value));
 const commentPlaceholder = computed(() => replyTarget.value ? `回复 ${displayAuthorName(replyTarget.value.authorName, replyTarget.value.authorId)}` : '评论这条 VOOM');
@@ -197,6 +222,35 @@ const shortLikeSummary = computed(() => {
   return displayLikeNames.value.length > 1 ? `${firstLike} 等${displayLikeNames.value.length}人赞过` : `${firstLike} 赞过`;
 });
 const displayedLikeSummary = computed(() => compactLikeSummary.value ? shortLikeSummary.value : fullLikeSummary.value);
+const commentIndexById = computed(() => new Map(props.post.comments.map((comment, index) => [comment.id, index])));
+const commentThreads = computed(() => {
+  const commentById = new Map(props.post.comments.map((comment) => [comment.id, comment]));
+  const threads = new Map<string, { comment: VoomPost['comments'][number]; replies: VoomPost['comments'] }>();
+
+  function rootCommentFor(comment: VoomPost['comments'][number]) {
+    let current = comment;
+    const seenCommentIds = new Set<string>();
+    while (current.parentId) {
+      const parent = commentById.get(current.parentId);
+      if (!parent || seenCommentIds.has(parent.id)) break;
+      seenCommentIds.add(parent.id);
+      current = parent;
+    }
+    return current;
+  }
+
+  for (const comment of props.post.comments) {
+    const rootComment = rootCommentFor(comment);
+    if (!threads.has(rootComment.id)) {
+      threads.set(rootComment.id, { comment: rootComment, replies: [] });
+    }
+    if (rootComment.id !== comment.id) {
+      threads.get(rootComment.id)?.replies.push(comment);
+    }
+  }
+
+  return [...threads.values()];
+});
 
 function commentDisplayContent(comment: VoomPost['comments'][number]) {
   const targetName = replyTargetName(comment.parentId);
@@ -221,12 +275,39 @@ function displayAuthorName(authorName = '', authorId = '') {
   return props.characterAuthorAliases?.[normalizeAuthorKey(authorName)] || authorName;
 }
 
+function isCharacterComment(comment: VoomPost['comments'][number]) {
+  if (isCurrentUserComment(comment)) return false;
+  if (comment.authorId && props.characterDisplayNames?.[comment.authorId]) return true;
+  return Boolean(props.characterAuthorAliases?.[normalizeAuthorKey(comment.authorName)]);
+}
+
+function isCurrentUserComment(comment: VoomPost['comments'][number]) {
+  if (props.currentUserId && comment.authorId === props.currentUserId) return true;
+  return Boolean(props.currentUserName && normalizeAuthorKey(comment.authorName) === normalizeAuthorKey(props.currentUserName));
+}
+
+function commentTimestamp(comment: VoomPost['comments'][number]) {
+  return comment.createdAt ?? props.post.createdAt + (commentIndexById.value.get(comment.id) ?? 0) + 1;
+}
+
+function commentTime(comment: VoomPost['comments'][number]) {
+  return formatRelativeDate(commentTimestamp(comment));
+}
+
+function commentDateTime(comment: VoomPost['comments'][number]) {
+  return new Date(commentTimestamp(comment)).toISOString();
+}
+
 function openCommentComposer(parentId = '') {
   replyParentId.value = parentId;
   showComposer.value = true;
   window.setTimeout(() => {
     document.addEventListener('pointerdown', handleOutsidePointerDown);
   });
+}
+
+function isComposerFor(parentId = '') {
+  return showComposer.value && replyParentId.value === parentId;
 }
 
 function openVisualModal() {
@@ -311,7 +392,7 @@ function closeCommentComposer() {
 
 function handleOutsidePointerDown(event: PointerEvent) {
   const target = event.target;
-  if (target instanceof Node && composerRef.value?.contains(target)) return;
+  if (target instanceof HTMLElement && target.closest('.comment-composer')) return;
   closeCommentComposer();
 }
 
@@ -695,36 +776,123 @@ footer {
 
 .comments {
   display: grid;
-  gap: 3px;
+  gap: 7px;
   margin-top: 8px;
   padding: 8px;
   border-radius: 8px;
   background: var(--soft);
 }
 
-.comments p {
-  margin: 0;
-  color: #4b4f55;
-  font-size: 12px;
-  line-height: 1.45;
+.comment-thread {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
 }
 
 .comment-line {
-  display: inline;
-  padding: 0;
-  color: inherit;
+  display: grid;
+  gap: 2px;
+  width: 100%;
+  min-width: 0;
+  padding: 2px 0;
+  border-radius: 0;
+  background: transparent;
+  color: #4b4f55;
+  font-size: 12px;
+  line-height: 1.45;
   text-align: left;
 }
 
-.comment-line strong {
-  margin-right: 4px;
-  color: #30343a;
+.comment-line:active {
+  color: #171717;
 }
 
-.comment-line em {
+.comment-main {
+  display: block;
+}
+
+.comment-main .comment-meta {
+  display: inline-flex;
   margin-right: 4px;
-  color: #7b8087;
+  vertical-align: baseline;
+}
+
+.comment-main .comment-text {
+  display: inline;
+}
+
+.comment-main .comment-inline-time {
+  margin-left: 6px;
+  color: #a0a5ab;
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.comment-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  min-width: 0;
+}
+
+.comment-meta strong {
+  color: #30343a;
+  font-weight: 800;
+}
+
+.comment-meta em {
+  color: #8c9299;
   font-style: normal;
+}
+
+.comment-meta time {
+  margin-left: auto;
+  color: #9aa0a7;
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.comment-role-tag {
+  display: inline-grid;
+  place-items: center;
+  min-height: 15px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: rgba(6, 199, 85, 0.1);
+  color: #08a54f;
+  font-size: 9px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.comment-user-tag {
+  display: inline-grid;
+  place-items: center;
+  min-height: 15px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: rgba(23, 23, 23, 0.08);
+  color: #555b62;
+  font-size: 9px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.comment-text {
+  color: #3f444b;
+  white-space: pre-wrap;
+}
+
+.comment-replies {
+  display: grid;
+  gap: 3px;
+  margin: 1px 0 0 14px;
+  padding-left: 10px;
+}
+
+.comment-reply {
+  color: #555b62;
 }
 
 .comment-composer {
@@ -732,21 +900,28 @@ footer {
   align-items: center;
   gap: 8px;
   margin-top: 8px;
+  padding: 6px;
+  border-radius: 12px;
+  background: #f7f8f9;
+}
+
+.comment-composer-inline {
+  margin: 4px 0 3px;
 }
 
 .comment-composer input {
-  height: 34px;
+  height: 32px;
   padding: 0 11px;
-  border-radius: 8px;
-  background: var(--soft);
+  border-radius: 999px;
+  background: #ffffff;
   color: #222222;
 }
 
 .comment-composer button {
   flex: 0 0 auto;
-  height: 34px;
-  padding: 0 12px;
-  border-radius: 8px;
+  height: 32px;
+  padding: 0 13px;
+  border-radius: 999px;
   background: var(--link-green);
   color: #ffffff;
   font-size: 12px;
