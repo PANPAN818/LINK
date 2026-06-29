@@ -2537,8 +2537,8 @@ export const useAppStore = defineStore('app', () => {
 
   async function saveSettings(nextSettings: AppSettings) {
     const normalizedSettings = normalizeAppSettings(nextSettings);
-    settings.value = normalizedSettings;
     await putEntity('settings', normalizedSettings, 'main');
+    settings.value = normalizedSettings;
     void refreshEnabledVendorModels();
   }
 

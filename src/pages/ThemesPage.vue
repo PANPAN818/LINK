@@ -305,9 +305,27 @@ async function saveThemeSettings(nextThemeSettings: AppThemeSettings) {
   });
 }
 
+function getThemeSaveErrorMessage(error: unknown) {
+  if (error instanceof DOMException && ['QuotaExceededError', 'UnknownError'].includes(error.name)) {
+    return '字体文件没有写入本机存储，可能是浏览器空间不足或字体文件过大。请删除一些本地数据后重试，或改用字体链接导入。';
+  }
+  return error instanceof Error && error.message ? error.message : '字体设置没有写入本机存储，请重试。';
+}
+
+async function trySaveThemeSettings(nextThemeSettings: AppThemeSettings) {
+  try {
+    await saveThemeSettings(nextThemeSettings);
+    return true;
+  } catch (error) {
+    importError.value = getThemeSaveErrorMessage(error);
+    return false;
+  }
+}
+
 function openImporter() {
   activeImportTab.value = 'link';
   importError.value = '';
+  feedbackMessage.value = '';
   showImporter.value = true;
 }
 
@@ -365,7 +383,7 @@ async function importFontLinks() {
   });
 
   nextThemeSettings.fonts.entries = [...newEntries, ...nextThemeSettings.fonts.entries];
-  await saveThemeSettings(nextThemeSettings);
+  if (!await trySaveThemeSettings(nextThemeSettings)) return;
   resetImporterDraft();
   feedbackMessage.value = `已导入 ${newEntries.length} 个字体链接。`;
 }
@@ -399,7 +417,7 @@ async function importFontFiles() {
   }
 
   nextThemeSettings.fonts.entries = [...newEntries, ...nextThemeSettings.fonts.entries];
-  await saveThemeSettings(nextThemeSettings);
+  if (!await trySaveThemeSettings(nextThemeSettings)) return;
   resetImporterDraft();
   feedbackMessage.value = `已导入 ${newEntries.length} 个字体文件。`;
 }
