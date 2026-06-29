@@ -804,7 +804,7 @@ export interface MinimaxTtsSettings {
   channel: 1 | 2;
 }
 
-export type RingtoneEventType = 'voom' | 'message';
+export type RingtoneEventType = 'voom' | 'message' | 'theater';
 
 export type RingtoneSourceType = 'default' | 'imported';
 
@@ -822,9 +822,11 @@ export interface CharacterRingtoneSettings {
   characterId: string;
   voom?: RingtoneAsset;
   message?: RingtoneAsset;
+  theater?: RingtoneAsset;
 }
 
 export interface AppRingtoneSettings {
+  enabled: boolean;
   global: Record<RingtoneEventType, RingtoneAsset>;
   characters: Record<string, CharacterRingtoneSettings>;
 }

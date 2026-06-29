@@ -68,6 +68,7 @@ export async function playRingtone(settings: AppSettings | null | undefined, eve
   if (!audio) return false;
 
   const ringtoneSettings = normalizeRingtoneSettings(settings.ringtoneSettings);
+  if (!ringtoneSettings.enabled) return false;
   const characterAsset = characterId ? ringtoneSettings.characters[characterId]?.[eventType] : null;
   const asset = characterAsset ?? ringtoneSettings.global[eventType];
   const audioUrl = asset?.url.trim();

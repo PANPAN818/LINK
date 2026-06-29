@@ -47,7 +47,7 @@ const defaultOpenAiPromptPresetId = 'openai_default';
 const defaultNovelAiPromptPresetId = 'novelai_default';
 const defaultPollinationsPromptPresetId = 'pollinations_default';
 
-export const ringtoneEventTypes: RingtoneEventType[] = ['voom', 'message'];
+export const ringtoneEventTypes: RingtoneEventType[] = ['voom', 'message', 'theater'];
 export const defaultRingtoneFileName = '吉森信 - 前略 じーちゃん.mp3';
 
 function getPublicAssetUrl(fileName: string) {
@@ -133,9 +133,11 @@ function createDefaultRingtoneAsset(): RingtoneAsset {
 
 export function createDefaultRingtoneSettings(): AppRingtoneSettings {
   return {
+    enabled: true,
     global: {
       voom: createDefaultRingtoneAsset(),
-      message: createDefaultRingtoneAsset()
+      message: createDefaultRingtoneAsset(),
+      theater: createDefaultRingtoneAsset()
     },
     characters: {}
   };
@@ -410,11 +412,12 @@ function normalizeCharacterRingtoneSettings(entry: Partial<CharacterRingtoneSett
     if (asset) normalized[eventType] = asset;
   });
 
-  return normalized.voom || normalized.message ? normalized : null;
+  return ringtoneEventTypes.some((eventType) => normalized[eventType]) ? normalized : null;
 }
 
 export function normalizeRingtoneSettings(settings: Partial<AppRingtoneSettings> | null | undefined): AppRingtoneSettings {
   const fallback = createDefaultRingtoneSettings();
+  const enabled = settings?.enabled === false ? false : fallback.enabled;
   const global = ringtoneEventTypes.reduce((result, eventType) => {
     result[eventType] = normalizeRingtoneAsset(settings?.global?.[eventType], fallback.global[eventType]) ?? fallback.global[eventType];
     return result;
@@ -428,7 +431,7 @@ export function normalizeRingtoneSettings(settings: Partial<AppRingtoneSettings>
     });
   }
 
-  return { global, characters };
+  return { enabled, global, characters };
 }
 
 export function normalizeKeepAliveSettings(settings: Partial<AppKeepAliveSettings> | null | undefined): AppKeepAliveSettings {

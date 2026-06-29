@@ -64,7 +64,7 @@ function showNextNotice() {
   const nextTheater = store.sortedSmallTheaters.find((theater) => !seenTheaterIds.value.has(theater.id));
   if (!nextTheater) return;
   activeTheater.value = nextTheater;
-  void playRingtone(store.settings, 'voom', nextTheater.charId);
+  void playRingtone(store.settings, 'theater', nextTheater.charId);
 }
 
 function closeNotice() {
