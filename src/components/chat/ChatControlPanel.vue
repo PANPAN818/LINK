@@ -4,7 +4,7 @@
         <section class="memory-hero">
           <div>
             <span>Hippocampus Memory</span>
-            <strong>{{ totalMemoryTokens }} tokens</strong>
+            <strong>{{ totalMemoryTokenLabel }}</strong>
             <p>{{ hiddenFloorStatus }} 记忆会按“原子记忆 + 分段总结 + 大总结”三层保存，优先把当前最相关的内容交给 AI。</p>
           </div>
           <button class="manual-summary-button" type="button" :disabled="summarizing" @click="showManualSummary = !showManualSummary">
@@ -147,6 +147,47 @@
           </div>
         </section>
 
+        <section class="settings-block memory-timeline-block">
+          <header class="section-header record-header">
+            <div>
+              <span>Chronology</span>
+              <strong>记忆时间线</strong>
+              <small class="memory-section-note">按事件发生时间整理原子记忆；没有原子时会退回显示分段总结的时间范围。</small>
+            </div>
+            <em>{{ memoryTimelineItems.length }} 条</em>
+          </header>
+          <div v-if="memoryTimelineItems.length" class="memory-merge-dashboard timeline-dashboard">
+            <span>
+              <strong>{{ timedMemoryAtomCount }}</strong>
+              <small>有时间</small>
+            </span>
+            <span>
+              <strong>{{ openMemoryAtomCount }}</strong>
+              <small>待处理</small>
+            </span>
+            <span>
+              <strong>{{ memoryTimelineSpanLabel }}</strong>
+              <small>跨度</small>
+            </span>
+          </div>
+          <div v-if="memoryTimelineItems.length" class="memory-timeline-list" role="list">
+            <article v-for="item in visibleMemoryTimelineItems" :key="item.id" class="memory-timeline-row" :class="[`timeline-${item.kind}`, { 'is-archived': item.archived }]" role="listitem">
+              <time>{{ item.timeLabel }}</time>
+              <div class="timeline-dot" aria-hidden="true"></div>
+              <div class="timeline-copy">
+                <span>{{ item.eyebrow }}</span>
+                <strong>{{ item.title }}</strong>
+                <p>{{ item.content }}</p>
+                <div v-if="item.meta.length" class="timeline-meta">
+                  <em v-for="meta in item.meta" :key="meta">{{ meta }}</em>
+                </div>
+              </div>
+            </article>
+          </div>
+          <button v-if="canShowMoreTimelineItems" class="list-more-action" type="button" @click="showMoreTimelineItems">显示更多时间线</button>
+          <div v-else class="empty-note memory-empty-note">还没有可展示的时间线。完成一次原子写入或分段总结后，这里会按发生时间排列记忆。</div>
+        </section>
+
         <section class="memory-records settings-block">
           <header class="section-header record-header">
             <div>
@@ -208,7 +249,7 @@
               </span>
             </button>
           </section>
-          <article v-for="memory in memories" :key="memory.id" class="memory-card">
+          <article v-for="memory in visibleMemories" :key="memory.id" class="memory-card">
             <div class="memory-card-head">
               <div>
                 <span>{{ memory.isMergedSummary ? 'Long memory page' : 'Memory page' }}</span>
@@ -222,6 +263,7 @@
               <button class="danger-action" type="button" @click="requestDeleteMemory(memory.id)">删除总结</button>
             </div>
           </article>
+          <button v-if="canShowMoreMemories" class="list-more-action" type="button" @click="showMoreMemories">显示更多总结</button>
           <div v-if="!memories.length" class="empty-note memory-empty-note">记忆空间暂时空着。达到楼层或点击手动总结后，新的书页会收进这里。</div>
         </section>
       </section>
@@ -270,6 +312,8 @@
               <div class="memory-atom-badges">
                 <span>{{ memoryAtomStatusLabel(atom.status) }}</span>
                 <span>重要度 {{ atom.importance }}</span>
+                <span>{{ memoryAtomFloorLabel(atom) }}</span>
+                <span>{{ memoryAtomTimeLabel(atom) }}</span>
                 <span v-if="atom.pinned">已固定</span>
                 <span v-if="atom.archivedAt">已屏蔽</span>
               </div>
@@ -299,6 +343,7 @@
               </div>
             </article>
           </div>
+          <button v-if="canShowMoreMemoryAtoms" class="list-more-action" type="button" @click="showMoreMemoryAtoms">显示更多原子</button>
           <div v-else class="empty-note memory-empty-note">还没有原子记忆。开启每轮原子写入后，回复会逐步提炼可管理的小颗粒记忆。</div>
         </section>
       </section>
@@ -696,7 +741,7 @@
 
 <script setup lang="ts">
 import { ChevronDown, Plus } from 'lucide-vue-next';
-import { computed, reactive, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue';
 import AppModal from '@/components/common/AppModal.vue';
 import AvatarCropperModal from '@/components/image/AvatarCropperModal.vue';
 import { useAppStore } from '@/stores/appStore';
@@ -713,6 +758,25 @@ type ConfirmTone = 'primary' | 'danger';
 type ConfirmAction = () => Promise<void> | void;
 type MemoryNumberField = 'summarizeEvery' | 'atomWriterEvery' | 'autoMergeThreshold' | 'autoMergeBatchSize';
 type MemoryAtomMetaField = 'owner' | 'counterparty' | 'due' | 'resolution';
+
+type IdleWindow = Window & {
+  requestIdleCallback?: (callback: () => void, options?: { timeout?: number }) => number;
+  cancelIdleCallback?: (handle: number) => void;
+};
+
+interface MemoryTimelineItem {
+  id: string;
+  kind: 'atom' | 'summary';
+  time: number;
+  timeEnd?: number;
+  timeLabel: string;
+  eyebrow: string;
+  title: string;
+  content: string;
+  meta: string[];
+  archived?: boolean;
+}
+
 const memoryAtomStatusOptions: Array<{ value: ConversationMemoryEntryStatus; label: string }> = [
   { value: 'active', label: '有效' },
   { value: 'open', label: '待处理' },
@@ -779,16 +843,76 @@ const manualSummary = reactive({
   hiddenStartFloor: 0,
   hiddenEndFloor: 0
 });
+const timelineDisplayLimit = ref(80);
+const memoryDisplayLimit = ref(40);
+const atomDisplayLimit = ref(80);
+const totalMemoryTokens = ref<number | null>(null);
+const totalMemoryTokenPending = ref(false);
+let tokenEstimateTimer: number | undefined;
+let tokenEstimateIdleId: number | undefined;
+let tokenEstimateRun = 0;
 
 const memories = computed(() => store.memoriesForConversation(props.conversationId));
 const memoryAtoms = computed(() => store.memoryAtomsForConversation(props.conversationId));
 const currentConversationSettings = computed(() => store.settingsForConversation(props.conversationId));
-const totalMemoryTokens = computed(() => store.nextReplyTokenCountForConversation(props.conversationId));
+const totalMemoryTokenLabel = computed(() => {
+  if (totalMemoryTokens.value !== null) return `${totalMemoryTokens.value} tokens`;
+  return totalMemoryTokenPending.value ? '计算中' : '待计算';
+});
 const openMemoryAtomCount = computed(() => memoryAtoms.value.filter((atom) => atom.status === 'open' && !atom.archivedAt).length);
 const pinnedMemoryAtomCount = computed(() => memoryAtoms.value.filter((atom) => atom.pinned).length);
 const archivedMemoryAtomCount = computed(() => memoryAtoms.value.filter((atom) => atom.archivedAt).length);
+const timedMemoryAtomCount = computed(() => memoryAtoms.value.filter((atom) => atom.occurredAt || atom.timeLabel).length);
 const memoryAtomPreview = computed(() => [...memoryAtoms.value]
-  .sort((left, right) => Number(right.pinned) - Number(left.pinned) || right.importance - left.importance || right.updatedAt - left.updatedAt));
+  .sort((left, right) => Number(right.pinned) - Number(left.pinned) || right.importance - left.importance || right.updatedAt - left.updatedAt)
+  .slice(0, atomDisplayLimit.value));
+const canShowMoreMemoryAtoms = computed(() => memoryAtomPreview.value.length < memoryAtoms.value.length);
+const memoryTimelineItems = computed<MemoryTimelineItem[]>(() => {
+  const atomItems = memoryAtoms.value.map((atom): MemoryTimelineItem => ({
+    id: `atom:${atom.id}`,
+    kind: 'atom',
+    time: atom.occurredAt ?? atom.createdAt,
+    timeEnd: atom.occurredEndAt,
+    timeLabel: memoryAtomTimeLabel(atom),
+    eyebrow: `${memoryAtomFloorLabel(atom)} · ${memoryAtomTypeLabel(atom.type)}`,
+    title: atom.subject,
+    content: compactTimelineText(atom.content, 128),
+    meta: [
+      memoryAtomStatusLabel(atom.status),
+      `重要度 ${atom.importance}`,
+      atom.pinned ? '已固定' : '',
+      atom.archivedAt ? '已屏蔽' : '',
+      atom.due ? `期限 ${atom.due}` : '',
+      atom.resolution ? `结果 ${atom.resolution}` : ''
+    ].filter(Boolean),
+    archived: Boolean(atom.archivedAt)
+  }));
+  const summaryItems = memories.value.map((memory): MemoryTimelineItem => ({
+    id: `memory:${memory.id}`,
+    kind: 'summary',
+    time: memory.createdAt,
+    timeEnd: memory.updatedAt > memory.createdAt ? memory.updatedAt : undefined,
+    timeLabel: formatTimelineRange(memory.createdAt, memory.updatedAt > memory.createdAt ? memory.updatedAt : undefined),
+    eyebrow: `${memoryRangeLabel(memory)} · ${memoryMergeBadge(memory)}`,
+    title: memory.isMergedSummary ? '合并大总结' : '分段总结',
+    content: compactTimelineText(memory.summary, 128),
+    meta: [`${memory.tokenCount} tokens`, hiddenRangeLabel(memory)]
+  }));
+  return (atomItems.length ? atomItems : summaryItems)
+    .sort((left, right) => left.time - right.time || left.id.localeCompare(right.id));
+});
+const visibleMemoryTimelineItems = computed(() => memoryTimelineItems.value.slice(0, timelineDisplayLimit.value));
+const visibleMemories = computed(() => memories.value.slice(0, memoryDisplayLimit.value));
+const canShowMoreTimelineItems = computed(() => visibleMemoryTimelineItems.value.length < memoryTimelineItems.value.length);
+const canShowMoreMemories = computed(() => visibleMemories.value.length < memories.value.length);
+const memoryTimelineSpanLabel = computed(() => {
+  const items = memoryTimelineItems.value;
+  if (!items.length) return '0';
+  const start = items[0].time;
+  const end = items.reduce((max, item) => Math.max(max, item.timeEnd ?? item.time), start);
+  const days = Math.max(1, Math.ceil((end - start + 1) / (24 * 60 * 60 * 1000)));
+  return days > 99 ? '99+' : String(days);
+});
 const messageCount = computed(() => getConversationFloorCount(store.messagesForConversation(props.conversationId)));
 const hiddenFloorStatus = computed(() => {
   const hiddenRanges = getEffectiveHiddenFloorRanges(memories.value)
@@ -870,6 +994,55 @@ const canManualSummarize = computed(() => {
   return hiddenStart >= start && hiddenEnd >= hiddenStart && hiddenEnd <= end;
 });
 
+function cancelScheduledTokenEstimate() {
+  const idleWindow = typeof window !== 'undefined' ? window as IdleWindow : null;
+  if (tokenEstimateTimer !== undefined) {
+    window.clearTimeout(tokenEstimateTimer);
+    tokenEstimateTimer = undefined;
+  }
+  if (tokenEstimateIdleId !== undefined && idleWindow?.cancelIdleCallback) {
+    idleWindow.cancelIdleCallback(tokenEstimateIdleId);
+    tokenEstimateIdleId = undefined;
+  }
+}
+
+function scheduleTokenEstimate() {
+  tokenEstimateRun += 1;
+  cancelScheduledTokenEstimate();
+  totalMemoryTokens.value = null;
+  if (activeTab.value !== 'memory') {
+    totalMemoryTokenPending.value = false;
+    return;
+  }
+  totalMemoryTokenPending.value = true;
+  const runId = tokenEstimateRun;
+  const runEstimate = () => {
+    tokenEstimateTimer = undefined;
+    tokenEstimateIdleId = undefined;
+    if (runId !== tokenEstimateRun || activeTab.value !== 'memory') return;
+    totalMemoryTokens.value = store.nextReplyTokenCountForConversation(props.conversationId);
+    totalMemoryTokenPending.value = false;
+  };
+  const idleWindow = typeof window !== 'undefined' ? window as IdleWindow : null;
+  if (idleWindow?.requestIdleCallback) {
+    tokenEstimateIdleId = idleWindow.requestIdleCallback(runEstimate, { timeout: 1200 });
+    return;
+  }
+  tokenEstimateTimer = window.setTimeout(runEstimate, 160);
+}
+
+function showMoreTimelineItems() {
+  timelineDisplayLimit.value += 80;
+}
+
+function showMoreMemories() {
+  memoryDisplayLimit.value += 40;
+}
+
+function showMoreMemoryAtoms() {
+  atomDisplayLimit.value += 80;
+}
+
 watch(
   () => [props.conversationId, currentConversationSettings.value] as const,
   () => {
@@ -883,6 +1056,23 @@ watch(
   },
   { immediate: true }
 );
+
+watch(
+  () => [activeTab.value, props.conversationId, messageCount.value, memories.value.length, memoryAtoms.value.length, currentConversationSettings.value] as const,
+  scheduleTokenEstimate,
+  { immediate: true }
+);
+
+watch(
+  () => props.conversationId,
+  () => {
+    timelineDisplayLimit.value = 80;
+    memoryDisplayLimit.value = 40;
+    atomDisplayLimit.value = 80;
+  }
+);
+
+onBeforeUnmount(cancelScheduledTokenEstimate);
 
 watch(
   mergeableMemories,
@@ -1099,6 +1289,43 @@ function memoryMergeDepth(memory: ConversationMemoryRecord): number {
 function memoryMergeBadge(memory: ConversationMemoryRecord) {
   if (!memory.isMergedSummary) return '片段记忆';
   return `第 ${memoryMergeDepth(memory)} 层大总结 · ${leafMemoryCount(memory)} 个来源`;
+}
+
+const timelineTimeFormatter = new Intl.DateTimeFormat('zh-CN', {
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+  hourCycle: 'h23'
+});
+
+function formatTimelineTime(timestamp: number | undefined) {
+  if (!timestamp || !Number.isFinite(timestamp)) return '时间未知';
+  return timelineTimeFormatter.format(timestamp);
+}
+
+function formatTimelineRange(start: number | undefined, end?: number) {
+  const startText = formatTimelineTime(start);
+  const endText = end && end !== start ? formatTimelineTime(end) : '';
+  return endText && endText !== startText ? `${startText} 至 ${endText}` : startText;
+}
+
+function compactTimelineText(value: string, maxLength: number) {
+  const normalized = value.replace(/\s+/g, ' ').trim();
+  if (!normalized) return '无文本内容';
+  return normalized.length > maxLength ? `${normalized.slice(0, maxLength)}...` : normalized;
+}
+
+function memoryAtomFloorLabel(atom: ConversationMemoryAtom) {
+  const floors = [...new Set(atom.evidenceFloors.filter((floor) => Number.isFinite(floor) && floor > 0))].sort((left, right) => left - right);
+  if (!floors.length) return `${atom.lastTouchedFloor || 1}楼`;
+  if (floors.length === 1) return `${floors[0]}楼`;
+  return `${floors[0]}-${floors[floors.length - 1]}楼`;
+}
+
+function memoryAtomTimeLabel(atom: ConversationMemoryAtom) {
+  return atom.timeLabel || formatTimelineRange(atom.occurredAt ?? atom.createdAt, atom.occurredEndAt);
 }
 
 function memoryAtomTypeLabel(type: string) {
@@ -1790,6 +2017,138 @@ function applyEditedAvatar(value: string) {
   font-size: 11px;
   font-weight: 900;
   line-height: 1;
+}
+
+.memory-timeline-block {
+  gap: 12px;
+}
+
+.timeline-dashboard strong {
+  font-size: 16px;
+}
+
+.memory-timeline-list {
+  position: relative;
+  display: grid;
+  gap: 12px;
+  padding: 4px 0 2px;
+}
+
+.memory-timeline-list::before {
+  content: '';
+  position: absolute;
+  top: 10px;
+  bottom: 10px;
+  left: 94px;
+  width: 2px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, rgba(6, 199, 85, 0.28), rgba(17, 17, 17, 0.08));
+}
+
+.list-more-action {
+  min-height: 42px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.82);
+  color: #326743;
+  font-size: 12px;
+  font-weight: 950;
+  box-shadow: inset 0 0 0 1px rgba(31, 107, 58, 0.08);
+}
+
+.memory-timeline-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: 80px 18px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  min-width: 0;
+}
+
+.memory-timeline-row time {
+  padding-top: 3px;
+  color: #73787d;
+  font-size: 10px;
+  font-weight: 850;
+  line-height: 1.35;
+  text-align: right;
+}
+
+.timeline-dot {
+  position: relative;
+  z-index: 1;
+  width: 12px;
+  height: 12px;
+  margin: 6px auto 0;
+  border: 3px solid #ffffff;
+  border-radius: 999px;
+  background: #06c755;
+  box-shadow: 0 0 0 1px rgba(6, 199, 85, 0.24), 0 6px 14px rgba(6, 199, 85, 0.16);
+}
+
+.timeline-summary .timeline-dot {
+  background: #8a8f94;
+  box-shadow: 0 0 0 1px rgba(138, 143, 148, 0.22), 0 6px 14px rgba(26, 31, 29, 0.08);
+}
+
+.timeline-copy {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid rgba(20, 24, 22, 0.05);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.82);
+}
+
+.timeline-copy > span {
+  overflow: hidden;
+  color: #6d8a73;
+  font-size: 10px;
+  font-weight: 950;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.timeline-copy strong {
+  overflow: hidden;
+  color: #171717;
+  font-size: 13px;
+  font-weight: 950;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.timeline-copy p {
+  margin: 0;
+  color: #5f666b;
+  font-size: 12px;
+  font-weight: 750;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.timeline-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.timeline-meta em {
+  padding: 4px 7px;
+  border-radius: 999px;
+  background: rgba(6, 199, 85, 0.08);
+  color: #277044;
+  font-style: normal;
+  font-size: 10px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.memory-timeline-row.is-archived .timeline-copy {
+  background: rgba(244, 246, 245, 0.72);
+  opacity: 0.82;
 }
 
 .memory-atom-content-field {

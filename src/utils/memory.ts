@@ -1,4 +1,4 @@
-import type { ChatMemorySettings, ChatMessage, ChatMode, ConversationMemoryAtom, ConversationMemoryDebugTrace, ConversationMemoryEntry, ConversationMemoryEntryStatus, ConversationMemoryEntryType, ConversationMemoryRecord, ConversationOfflineSettings, ConversationSettings, OfflineInterruptionMode, OfflineParagraphMode, OfflinePerspective, OfflinePromptPreset, OfflineRetellMode, OfflineTonePreset } from '@/types/domain';
+import type { ChatMemorySettings, ChatMessage, ChatMode, ConversationMemoryAtom, ConversationMemoryDebugTrace, ConversationMemoryEntry, ConversationMemoryEntryStatus, ConversationMemoryEntryType, ConversationMemoryRecord, ConversationMemoryTimeBasis, ConversationOfflineSettings, ConversationSettings, OfflineInterruptionMode, OfflineParagraphMode, OfflinePerspective, OfflinePromptPreset, OfflineRetellMode, OfflineTonePreset } from '@/types/domain';
 import { createId } from './id';
 import { normalizeChatModelOverrides } from './settings';
 import { defaultTimeAwarenessSettings, normalizeTimeAwarenessSettings } from './timeAwareness';
@@ -9,8 +9,8 @@ export const defaultChatMemorySettings: ChatMemorySettings = {
   autoSummarize: true,
   summarizeEvery: 50,
   summaryModel: '',
-  summaryPrompt: '请把下面聊天楼层整理成可长期读取的结构化记忆，以{{char}}的第三人称视角。必须先校验旧记忆：后文已经解决、撤销、推翻或过期的事项，不要继续写成未解决。按固定格式输出，每条一行：- [类型|状态|重要度1-5|主体|证据楼层] 内容。类型只能用 fact/preference/promise/conflict/plot/relationship/boundary/emotion/world；状态只能用 active/open/resolved/superseded/cancelled。只把仍会影响后续扮演的内容写入；resolved 只保留会影响情绪或关系余波的事项；去重、合并同义项，不要评价用户；用中文输出。',
-  mergeSummaryPrompt: '请把下面多段结构化记忆合并成更高层级的长期记忆，以{{char}}的第三人称视角。必须去重并执行生命周期更新：已解决的 promise/conflict 标为 resolved，后文推翻旧事实时旧事实标为 superseded 或直接移除；只保留稳定事实、长期关系变化、重要偏好、仍开放承诺、仍开放冲突和关键剧情节点。按固定格式输出，每条一行：- [类型|状态|重要度1-5|主体|证据楼层] 内容。类型只能用 fact/preference/promise/conflict/plot/relationship/boundary/emotion/world；状态只能用 active/open/resolved/superseded/cancelled。用中文输出。',
+  summaryPrompt: '请把下面聊天楼层整理成可长期读取的结构化记忆，以{{char}}的第三人称视角。必须先校验旧记忆：后文已经解决、撤销、推翻或过期的事项，不要继续写成未解决。按固定格式输出，每条一行：- [类型|状态|重要度1-5|主体|证据楼层|发生时间] 内容。类型只能用 fact/preference/promise/conflict/plot/relationship/boundary/emotion/world；状态只能用 active/open/resolved/superseded/cancelled。发生时间优先写精确日期时间或时间范围，无法确认时写“第 x-y 楼 / 时间未知”。只把仍会影响后续扮演的内容写入；resolved 只保留会影响情绪或关系余波的事项；去重、合并同义项，不要评价用户；用中文输出。',
+  mergeSummaryPrompt: '请把下面多段结构化记忆合并成更高层级的长期记忆，以{{char}}的第三人称视角。必须去重并执行生命周期更新：已解决的 promise/conflict 标为 resolved，后文推翻旧事实时旧事实标为 superseded 或直接移除；只保留稳定事实、长期关系变化、重要偏好、仍开放承诺、仍开放冲突和关键剧情节点。按固定格式输出，每条一行：- [类型|状态|重要度1-5|主体|证据楼层|发生时间] 内容。类型只能用 fact/preference/promise/conflict/plot/relationship/boundary/emotion/world；状态只能用 active/open/resolved/superseded/cancelled。发生时间必须保留原条目的时间标签或楼层范围，不要压成“之前/后来”。用中文输出。',
   vectorMemoryEnabled: true,
   hideSummarizedMessages: true,
   atomWriterEnabled: true,
@@ -24,7 +24,8 @@ function normalizeMemoryPrompt(value: unknown, fallback: string) {
   const prompt = String(value ?? '').trim();
   if (!prompt) return fallback;
   const isLegacyDefaultPrompt = prompt.includes('保留人物关系变化、承诺、偏好、冲突和未解决事项')
-    || prompt.includes('保留稳定事实、长期关系变化、重要承诺、偏好、冲突和未解决事项');
+    || prompt.includes('保留稳定事实、长期关系变化、重要承诺、偏好、冲突和未解决事项')
+    || (prompt.includes('[类型|状态|重要度1-5|主体|证据楼层]') && !prompt.includes('发生时间'));
   return isLegacyDefaultPrompt ? fallback : prompt;
 }
 
@@ -406,6 +407,80 @@ function normalizeOptionalMemoryText(value: unknown) {
   return text || undefined;
 }
 
+function normalizeMemoryTimestamp(value: unknown) {
+  const numericValue = Number(value);
+  if (Number.isFinite(numericValue) && numericValue > 0) return numericValue;
+  const text = String(value ?? '').trim();
+  if (!text) return undefined;
+  const parsed = Date.parse(text.replace(/[年月]/g, '-').replace(/[日号]/g, ''));
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+}
+
+function normalizeMemoryTimeBasis(value: unknown, fallback: ConversationMemoryTimeBasis): ConversationMemoryTimeBasis {
+  const normalized = String(value ?? '').trim() as ConversationMemoryTimeBasis;
+  return ['message-time', 'model-time', 'memory-created', 'user-edited'].includes(normalized) ? normalized : fallback;
+}
+
+function formatMemorySourceTime(timestamp: number) {
+  if (!Number.isFinite(timestamp) || timestamp <= 0) return '';
+  const date = new Date(timestamp);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  const hours = String(date.getHours()).padStart(2, '0');
+  const minutes = String(date.getMinutes()).padStart(2, '0');
+  return `${year}-${month}-${day} ${hours}:${minutes}`;
+}
+
+function normalizeMemoryTimeLabel(value: unknown) {
+  const text = normalizeOptionalMemoryText(value);
+  if (!text || /^时间未知$|^unknown$/i.test(text)) return undefined;
+  return text;
+}
+
+function memoryTimeFromMessages(sourceMessages: ChatMessage[] | undefined, evidenceFloors: number[], fallbackStartFloor: number, fallbackEndFloor: number): Partial<Pick<ConversationMemoryEntry, 'occurredAt' | 'occurredEndAt' | 'timeLabel' | 'timeBasis'>> {
+  if (!sourceMessages?.length) return {};
+  const floorMap = getMessageFloorMap(sourceMessages);
+  const evidenceFloorSet = new Set(evidenceFloors.map((floor) => Math.max(1, Math.floor(floor))));
+  const matchedMessages = sourceMessages.filter((message) => {
+    const localFloor = floorMap.get(message.id) ?? 0;
+    const floor = localFloor ? fallbackStartFloor + localFloor - 1 : 0;
+    return evidenceFloorSet.has(floor) || (floor >= fallbackStartFloor && floor <= fallbackEndFloor && !evidenceFloorSet.size);
+  });
+  const timeSources = matchedMessages.length ? matchedMessages : sourceMessages;
+  const timestamps = timeSources
+    .map((message) => Number(message.createdAt))
+    .filter((timestamp) => Number.isFinite(timestamp) && timestamp > 0)
+    .sort((left, right) => left - right);
+  if (!timestamps.length) return {};
+  const occurredAt = timestamps[0];
+  const occurredEndAt = timestamps[timestamps.length - 1];
+  const startText = formatMemorySourceTime(occurredAt);
+  const endText = formatMemorySourceTime(occurredEndAt);
+  return {
+    occurredAt,
+    ...(occurredEndAt > occurredAt ? { occurredEndAt } : {}),
+    timeLabel: startText && endText && startText !== endText ? `${startText} 至 ${endText}` : startText,
+    timeBasis: 'message-time' as ConversationMemoryTimeBasis
+  };
+}
+
+function normalizeMemoryTimeMeta(entry: Partial<ConversationMemoryEntry>, fallback: { startFloor: number; endFloor: number; createdAt: number; sourceMessages?: ChatMessage[] }) {
+  const occurredAt = normalizeMemoryTimestamp(entry.occurredAt);
+  const occurredEndAt = normalizeMemoryTimestamp(entry.occurredEndAt);
+  const evidenceFloors = parseEvidenceFloors(entry.evidenceFloors?.join(','), fallback.startFloor, fallback.endFloor);
+  const sourceTime = memoryTimeFromMessages(fallback.sourceMessages, evidenceFloors, fallback.startFloor, fallback.endFloor);
+  const timeLabel = normalizeMemoryTimeLabel(entry.timeLabel) || sourceTime.timeLabel || `第 ${fallback.startFloor}-${fallback.endFloor} 楼 / 时间未知`;
+  const resolvedOccurredAt = occurredAt ?? sourceTime.occurredAt ?? fallback.createdAt;
+  const resolvedOccurredEndAt = occurredEndAt ?? sourceTime.occurredEndAt;
+  return {
+    occurredAt: resolvedOccurredAt,
+    ...(resolvedOccurredEndAt && resolvedOccurredEndAt > resolvedOccurredAt ? { occurredEndAt: resolvedOccurredEndAt } : {}),
+    timeLabel,
+    timeBasis: normalizeMemoryTimeBasis(entry.timeBasis, sourceTime.timeBasis ?? (normalizeMemoryTimeLabel(entry.timeLabel) ? 'model-time' : 'memory-created'))
+  };
+}
+
 function inferMemoryEntryMeta(type: ConversationMemoryEntryType, status: ConversationMemoryEntryStatus, subject: string, content: string) {
   const text = `${subject} ${content}`;
   const due = text.match(/(?:期限|时间|约定|计划|改天|下次|今晚|明天|后天|周[一二三四五六日天]|星期[一二三四五六日天]|\d{1,2}[月/-]\d{1,2}[日号]?)/)?.[0];
@@ -459,7 +534,7 @@ function buildFallbackSubject(type: ConversationMemoryEntryType) {
   }[type];
 }
 
-function parseBracketMemoryEntry(line: string, fallbackType: ConversationMemoryEntryType, fallbackStatus: ConversationMemoryEntryStatus, fallbackStartFloor: number, fallbackEndFloor: number, now: number): ConversationMemoryEntry | null {
+function parseBracketMemoryEntry(line: string, fallbackType: ConversationMemoryEntryType, fallbackStatus: ConversationMemoryEntryStatus, fallbackStartFloor: number, fallbackEndFloor: number, now: number, sourceMessages?: ChatMessage[]): ConversationMemoryEntry | null {
   const match = line.match(/^[-*]\s*\[([^\]]+)]\s*(.+)$/);
   if (!match) return null;
   const parts = match[1].split('|').map((part) => part.trim());
@@ -468,6 +543,7 @@ function parseBracketMemoryEntry(line: string, fallbackType: ConversationMemoryE
   const importance = clampMemoryImportance(parts[2]);
   const subject = parts[3]?.trim() || buildFallbackSubject(type);
   const evidenceFloors = parseEvidenceFloors(parts[4], fallbackStartFloor, fallbackEndFloor);
+  const timeLabel = normalizeMemoryTimeLabel(parts[5]);
   const content = normalizeMemoryContent(match[2]);
   if (!content) return null;
   return {
@@ -479,6 +555,7 @@ function parseBracketMemoryEntry(line: string, fallbackType: ConversationMemoryE
     ...normalizeMemoryEntryMeta({}, type, status, subject, content),
     evidenceFloors,
     lastTouchedFloor: Math.max(...evidenceFloors, fallbackEndFloor),
+    ...normalizeMemoryTimeMeta({ evidenceFloors, timeLabel }, { startFloor: fallbackStartFloor, endFloor: fallbackEndFloor, createdAt: now, sourceMessages }),
     importance,
     vector: vectorizeText(`${subject} ${content}`),
     createdAt: now,
@@ -486,7 +563,7 @@ function parseBracketMemoryEntry(line: string, fallbackType: ConversationMemoryE
   };
 }
 
-function parseLooseMemoryEntry(line: string, fallbackType: ConversationMemoryEntryType, fallbackStatus: ConversationMemoryEntryStatus, fallbackStartFloor: number, fallbackEndFloor: number, now: number): ConversationMemoryEntry | null {
+function parseLooseMemoryEntry(line: string, fallbackType: ConversationMemoryEntryType, fallbackStatus: ConversationMemoryEntryStatus, fallbackStartFloor: number, fallbackEndFloor: number, now: number, sourceMessages?: ChatMessage[]): ConversationMemoryEntry | null {
   const match = line.match(/^[-*]\s+(.+)$/);
   if (!match) return null;
   const content = normalizeMemoryContent(match[1]);
@@ -511,6 +588,7 @@ function parseLooseMemoryEntry(line: string, fallbackType: ConversationMemoryEnt
     ...normalizeMemoryEntryMeta({}, type, status, buildFallbackSubject(type), content),
     evidenceFloors,
     lastTouchedFloor: Math.max(...evidenceFloors, fallbackEndFloor),
+    ...normalizeMemoryTimeMeta({ evidenceFloors }, { startFloor: fallbackStartFloor, endFloor: fallbackEndFloor, createdAt: now, sourceMessages }),
     importance: status === 'open' || type === 'relationship' ? 4 : 3,
     vector: vectorizeText(`${buildFallbackSubject(type)} ${content}`),
     createdAt: now,
@@ -518,7 +596,7 @@ function parseLooseMemoryEntry(line: string, fallbackType: ConversationMemoryEnt
   };
 }
 
-export function normalizeMemoryRecordEntries(memory: Pick<ConversationMemoryRecord, 'summary' | 'startFloor' | 'endFloor' | 'entries' | 'createdAt' | 'updatedAt'>, now = Date.now()): ConversationMemoryEntry[] {
+export function normalizeMemoryRecordEntries(memory: Pick<ConversationMemoryRecord, 'summary' | 'startFloor' | 'endFloor' | 'entries' | 'createdAt' | 'updatedAt'> & { sourceMessages?: ChatMessage[] }, now = Date.now()): ConversationMemoryEntry[] {
   const startFloor = Math.max(1, Math.floor(Number(memory.startFloor) || 1));
   const endFloor = Math.max(startFloor, Math.floor(Number(memory.endFloor) || startFloor));
   if (Array.isArray(memory.entries) && memory.entries.length) {
@@ -539,6 +617,7 @@ export function normalizeMemoryRecordEntries(memory: Pick<ConversationMemoryReco
           ...normalizeMemoryEntryMeta(entry, type, status, String(entry.subject ?? '').trim() || buildFallbackSubject(type), content),
           evidenceFloors,
           lastTouchedFloor: Math.max(1, Math.floor(Number(entry.lastTouchedFloor) || Math.max(...evidenceFloors, endFloor))),
+          ...normalizeMemoryTimeMeta(entry, { startFloor, endFloor, createdAt: memory.createdAt || now, sourceMessages: memory.sourceMessages }),
           importance: clampMemoryImportance(entry.importance),
           vector: Array.isArray(entry.vector) && entry.vector.length ? entry.vector.map((value) => Number(value)).filter((value) => Number.isFinite(value)) : vectorizeText(`${entry.subject} ${content}`),
           createdAt: Number.isFinite(entry.createdAt) ? entry.createdAt : memory.createdAt || now,
@@ -565,8 +644,8 @@ export function normalizeMemoryRecordEntries(memory: Pick<ConversationMemoryReco
       currentStatus = inferEntryStatusFromSection(sectionTitle);
       return;
     }
-    const parsed = parseBracketMemoryEntry(line, currentType, currentStatus, startFloor, endFloor, updatedAt)
-      ?? parseLooseMemoryEntry(line, currentType, currentStatus, startFloor, endFloor, updatedAt);
+    const parsed = parseBracketMemoryEntry(line, currentType, currentStatus, startFloor, endFloor, updatedAt, memory.sourceMessages)
+      ?? parseLooseMemoryEntry(line, currentType, currentStatus, startFloor, endFloor, updatedAt, memory.sourceMessages);
     if (parsed) entries.push({ ...parsed, createdAt, updatedAt });
   });
 
@@ -582,6 +661,7 @@ export function normalizeMemoryRecordEntries(memory: Pick<ConversationMemoryReco
     ...normalizeMemoryEntryMeta({}, 'plot', 'active', '摘要', content),
     evidenceFloors: startFloor === endFloor ? [startFloor] : [startFloor, endFloor],
     lastTouchedFloor: endFloor,
+    ...normalizeMemoryTimeMeta({ evidenceFloors: startFloor === endFloor ? [startFloor] : [startFloor, endFloor] }, { startFloor, endFloor, createdAt, sourceMessages: memory.sourceMessages }),
     importance: 3,
     vector: vectorizeText(content),
     createdAt,
@@ -628,6 +708,7 @@ export function normalizeMemoryAtom(atom: Partial<ConversationMemoryAtom>, fallb
     ...normalizeMemoryEntryMeta(atom, type, status, subject, content),
     evidenceFloors,
     lastTouchedFloor: Math.max(1, Math.floor(Number(atom.lastTouchedFloor) || Math.max(...evidenceFloors, 1))),
+    ...normalizeMemoryTimeMeta(atom, { startFloor: Math.min(...evidenceFloors), endFloor: Math.max(...evidenceFloors), createdAt: Number.isFinite(atom.createdAt) ? Number(atom.createdAt) : now }),
     importance: clampMemoryImportance(atom.importance),
     vector: Array.isArray(atom.vector) && atom.vector.length ? atom.vector.map((value) => Number(value)).filter((value) => Number.isFinite(value)) : vectorizeText(`${subject} ${content}`),
     sourceMemoryId: String(atom.sourceMemoryId ?? '').trim() || undefined,
@@ -809,13 +890,14 @@ function formatMemoryEntry(entry: ConversationMemoryEntry) {
     cancelled: '已取消'
   }[entry.status];
   const floorText = entry.evidenceFloors.length ? `；证据楼层 ${entry.evidenceFloors.join('/')}` : '';
+  const timeText = entry.timeLabel ? `；发生时间 ${entry.timeLabel}` : '';
   const metaText = [
     entry.owner ? `责任 ${entry.owner}` : '',
     entry.counterparty ? `对象 ${entry.counterparty}` : '',
     entry.due ? `期限 ${entry.due}` : '',
     entry.resolution ? `结果 ${entry.resolution}` : ''
   ].filter(Boolean).join('；');
-  return `- ${entry.subject}：${entry.content}（${statusLabel}；重要度 ${entry.importance}${floorText}${metaText ? `；${metaText}` : ''}）`;
+  return `- ${entry.subject}：${entry.content}（${statusLabel}；重要度 ${entry.importance}${floorText}${timeText}${metaText ? `；${metaText}` : ''}）`;
 }
 
 function memoryContextSection(title: string, entries: ConversationMemoryEntry[]) {
@@ -1083,7 +1165,7 @@ export function createMemoryRecord(input: {
     summary: input.summary,
     tokenCount: estimateTokenCount(input.summary),
     vector: [...(input.vector ?? [])],
-    entries: dedupeMemoryEntries(input.entries?.length ? normalizeMemoryRecordEntries({ summary: input.summary, startFloor: input.startFloor, endFloor: input.endFloor, entries: input.entries, createdAt: now, updatedAt: now }, now) : normalizeMemoryRecordEntries({ summary: input.summary, startFloor: input.startFloor, endFloor: input.endFloor, entries: [], createdAt: now, updatedAt: now }, now)),
+    entries: dedupeMemoryEntries(input.entries?.length ? normalizeMemoryRecordEntries({ summary: input.summary, startFloor: input.startFloor, endFloor: input.endFloor, entries: input.entries, createdAt: now, updatedAt: now, sourceMessages: input.sourceMessages }, now) : normalizeMemoryRecordEntries({ summary: input.summary, startFloor: input.startFloor, endFloor: input.endFloor, entries: [], createdAt: now, updatedAt: now, sourceMessages: input.sourceMessages }, now)),
     sourceMessageIds: input.sourceMessages.map((message) => message.id),
     model: input.model,
     createdAt: now,

@@ -198,6 +198,78 @@ export const useAppStore = defineStore('app', () => {
   const unreadConversationCount = computed(() => conversationsForActiveUser.value.reduce((total, conversation) => total + conversation.unreadCount, 0));
   const accounts = computed(() => users.value);
 
+  const usersById = computed(() => new Map(users.value.map((account) => [account.id, account])));
+  const charactersById = computed(() => new Map(characters.value.map((character) => [character.id, character])));
+  const conversationsById = computed(() => new Map(conversations.value.map((conversation) => [conversation.id, conversation])));
+  const messagesByConversationId = computed(() => {
+    const groupedMessages = new Map<string, ChatMessage[]>();
+    for (const message of messages.value) {
+      const conversationMessages = groupedMessages.get(message.conversationId) ?? [];
+      conversationMessages.push(message);
+      groupedMessages.set(message.conversationId, conversationMessages);
+    }
+    for (const conversationMessages of groupedMessages.values()) {
+      conversationMessages.sort((leftMessage, rightMessage) => leftMessage.createdAt - rightMessage.createdAt);
+    }
+    return groupedMessages;
+  });
+  const messageMapsByConversationId = computed(() => {
+    const groupedMessageMaps = new Map<string, Map<string, ChatMessage>>();
+    for (const [conversationId, conversationMessages] of messagesByConversationId.value) {
+      groupedMessageMaps.set(conversationId, new Map(conversationMessages.map((message) => [message.id, message])));
+    }
+    return groupedMessageMaps;
+  });
+  const conversationSettingsById = computed(() => new Map(conversationSettings.value.map((entry) => [entry.conversationId, entry])));
+  const normalizedConversationSettingsById = computed(() => {
+    const normalizedSettings = new Map<string, ConversationSettings>();
+    for (const entry of conversationSettings.value) {
+      const conversation = conversationsById.value.get(entry.conversationId);
+      normalizedSettings.set(entry.conversationId, normalizeConversationSettings(entry, entry.conversationId, conversation?.activeMode));
+    }
+    for (const conversation of conversations.value) {
+      if (normalizedSettings.has(conversation.id)) continue;
+      const character = charactersById.value.get(conversation.charId);
+      normalizedSettings.set(conversation.id, normalizeConversationSettings({ voomFrequency: character?.voomFrequency }, conversation.id, conversation.activeMode));
+    }
+    return normalizedSettings;
+  });
+  const memoriesByConversationId = computed(() => {
+    const groupedMemories = new Map<string, ConversationMemoryRecord[]>();
+    for (const memory of conversationMemories.value) {
+      const conversationRecords = groupedMemories.get(memory.conversationId) ?? [];
+      conversationRecords.push(memory);
+      groupedMemories.set(memory.conversationId, conversationRecords);
+    }
+    for (const conversationRecords of groupedMemories.values()) {
+      conversationRecords.sort((leftMemory, rightMemory) => leftMemory.startFloor - rightMemory.startFloor);
+    }
+    return groupedMemories;
+  });
+  const memoryAtomsByConversationId = computed(() => {
+    const groupedAtoms = new Map<string, ConversationMemoryAtom[]>();
+    for (const atom of conversationMemoryAtoms.value) {
+      const conversationAtoms = groupedAtoms.get(atom.conversationId) ?? [];
+      conversationAtoms.push(atom);
+      groupedAtoms.set(atom.conversationId, conversationAtoms);
+    }
+    for (const conversationAtoms of groupedAtoms.values()) {
+      conversationAtoms.sort((leftAtom, rightAtom) => rightAtom.updatedAt - leftAtom.updatedAt);
+    }
+    return groupedAtoms;
+  });
+  const stickersByPrimaryGroupId = computed(() => {
+    const groupedStickers = new Map<string, Sticker[]>();
+    for (const sticker of sortedStickers.value) {
+      const groupId = sticker.groupIds[0] ?? '';
+      if (!groupId) continue;
+      const groupStickers = groupedStickers.get(groupId) ?? [];
+      groupStickers.push(sticker);
+      groupedStickers.set(groupId, groupStickers);
+    }
+    return groupedStickers;
+  });
+
   function dedupeStickerGroups(groups: StickerGroup[], entries: Sticker[]) {
     const seenByName = new Map<string, StickerGroup>();
     const removedIdToKeptId = new Map<string, string>();
@@ -450,15 +522,15 @@ export const useAppStore = defineStore('app', () => {
   }
 
   function userById(id: string) {
-    return users.value.find((account) => account.id === id);
+    return usersById.value.get(id);
   }
 
   function characterById(id: string) {
-    return characters.value.find((character) => character.id === id);
+    return charactersById.value.get(id);
   }
 
   function conversationById(id: string) {
-    return conversations.value.find((conversation) => conversation.id === id);
+    return conversationsById.value.get(id);
   }
 
   function setActiveConversation(conversationId: string | null) {
@@ -470,7 +542,7 @@ export const useAppStore = defineStore('app', () => {
   }
 
   function messagesForConversation(id: string) {
-    return messages.value.filter((message) => message.conversationId === id).sort((a, b) => a.createdAt - b.createdAt);
+    return messagesByConversationId.value.get(id) ?? [];
   }
 
   function normalizeGeneratedImages(entries: GeneratedImageRecord[]) {
@@ -497,7 +569,9 @@ export const useAppStore = defineStore('app', () => {
   }
 
   function settingsForConversation(id: string) {
-    const existing = conversationSettings.value.find((entry) => entry.conversationId === id);
+    const cachedSettings = normalizedConversationSettingsById.value.get(id);
+    if (cachedSettings) return cachedSettings;
+    const existing = conversationSettingsById.value.get(id);
     const conversation = conversationById(id);
     if (existing) return normalizeConversationSettings(existing, id, conversation?.activeMode);
     const character = conversation ? characterById(conversation.charId) : null;
@@ -505,29 +579,32 @@ export const useAppStore = defineStore('app', () => {
   }
 
   function memoriesForConversation(id: string) {
-    return conversationMemories.value
-      .filter((memory) => memory.conversationId === id)
-      .sort((a, b) => a.startFloor - b.startFloor);
+    return memoriesByConversationId.value.get(id) ?? [];
   }
 
-  function sourceMessageIdsAreRecallable(conversationId: string, sourceMessageIds: string[]) {
+  function messageMapForConversation(id: string) {
+    return messageMapsByConversationId.value.get(id) ?? new Map<string, ChatMessage>();
+  }
+
+  function sourceMessageIdsAreRecallable(sourceMessageIds: string[], sourceMessagesById: Map<string, ChatMessage>) {
     if (!sourceMessageIds.length) return true;
-    const messagesById = new Map(messagesForConversation(conversationId).map((message) => [message.id, message]));
     return sourceMessageIds.every((messageId) => {
-      const sourceMessage = messagesById.get(messageId);
+      const sourceMessage = sourceMessagesById.get(messageId);
       return Boolean(sourceMessage && sourceMessage.replyVariantState !== 'inactive');
     });
   }
 
   function filterRecallableMemories(conversationId: string, memories: ConversationMemoryRecord[], excludeSourceMessageIds: string[] = []) {
     const excludedIds = new Set(excludeSourceMessageIds.map((id) => id.trim()).filter(Boolean));
-    return memories.filter((memory) => sourceMessageIdsAreRecallable(conversationId, memory.sourceMessageIds)
+    const sourceMessagesById = messageMapForConversation(conversationId);
+    return memories.filter((memory) => sourceMessageIdsAreRecallable(memory.sourceMessageIds, sourceMessagesById)
       && !memory.sourceMessageIds.some((messageId) => excludedIds.has(messageId)));
   }
 
   function filterRecallableMemoryAtoms(conversationId: string, atoms: ConversationMemoryAtom[], excludeSourceMessageIds: string[] = []) {
     const excludedIds = new Set(excludeSourceMessageIds.map((id) => id.trim()).filter(Boolean));
-    return atoms.filter((atom) => sourceMessageIdsAreRecallable(conversationId, atom.sourceMessageIds)
+    const sourceMessagesById = messageMapForConversation(conversationId);
+    return atoms.filter((atom) => sourceMessageIdsAreRecallable(atom.sourceMessageIds, sourceMessagesById)
       && !atom.sourceMessageIds.some((messageId) => excludedIds.has(messageId)));
   }
 
@@ -555,13 +632,13 @@ export const useAppStore = defineStore('app', () => {
       .map((message) => [message.id, message]));
     const selectedAtoms = mergeMemoryAtoms(atoms)
       .filter((atom) => atom.conversationId === conversationId && selectedIds.has(atom.id))
-      .sort((left, right) => left.lastTouchedFloor - right.lastTouchedFloor || left.updatedAt - right.updatedAt)
+      .sort((left, right) => (left.occurredAt ?? left.createdAt) - (right.occurredAt ?? right.createdAt) || left.lastTouchedFloor - right.lastTouchedFloor || left.updatedAt - right.updatedAt)
       .slice(0, Math.min(16, Math.max(6, Math.floor(maxEntries))));
     return selectedAtoms.map((atom) => {
       const sourceMessages = atom.sourceMessageIds.map((messageId) => messageById.get(messageId)).filter((message): message is ChatMessage => Boolean(message));
-      const sourceTimeText = sourceMessages.length
+      const sourceTimeText = atom.timeLabel || (sourceMessages.length
         ? formatMemoryTimelineTimeRange(sourceMessages.map((message) => message.createdAt))
-        : `记忆写入 ${formatMemoryTimelineTime(atom.createdAt)}`;
+        : `记忆写入 ${formatMemoryTimelineTime(atom.createdAt)}`);
       return `- ${memoryAtomFloorText(atom)}｜${sourceTimeText}｜${memoryStatusTimelineLabel(atom.status)}｜${atom.subject}：${compactMemoryTimelineText(atom.content, 110)}`;
     }).join('\n');
   }
@@ -575,9 +652,7 @@ export const useAppStore = defineStore('app', () => {
   }
 
   function memoryAtomsForConversation(id: string) {
-    return filterRecallableMemoryAtoms(id, conversationMemoryAtoms.value)
-      .filter((atom) => atom.conversationId === id)
-      .sort((a, b) => b.updatedAt - a.updatedAt);
+    return filterRecallableMemoryAtoms(id, memoryAtomsByConversationId.value.get(id) ?? []);
   }
 
   function memoryDebugTraceForConversation(id: string) {
@@ -598,13 +673,23 @@ export const useAppStore = defineStore('app', () => {
   function stickersForGroup(groupId: string) {
     if (isRecentStickerGroupId(groupId)) return recentStickers.value;
     if (!groupId || groupId === 'all') return sortedStickers.value;
-    return sortedStickers.value.filter((sticker) => sticker.groupIds[0] === groupId);
+    return stickersByPrimaryGroupId.value.get(groupId) ?? [];
   }
 
   function stickersForGroups(groupIds: string[]) {
     const groupIdSet = new Set(groupIds.map((id) => id.trim()).filter((id) => Boolean(id) && !isRecentStickerGroupId(id)));
     if (!groupIdSet.size) return [];
-    return sortedStickers.value.filter((sticker) => groupIdSet.has(sticker.groupIds[0] ?? ''));
+    const resolvedStickers: Sticker[] = [];
+    const seenStickerIds = new Set<string>();
+    for (const groupId of groupIdSet) {
+      const groupStickers = stickersByPrimaryGroupId.value.get(groupId) ?? [];
+      for (const sticker of groupStickers) {
+        if (seenStickerIds.has(sticker.id)) continue;
+        seenStickerIds.add(sticker.id);
+        resolvedStickers.push(sticker);
+      }
+    }
+    return resolvedStickers;
   }
 
   function resolveCharacterStickerSelections(selections: string[] | undefined, allowedStickers: Sticker[]) {
@@ -3224,7 +3309,7 @@ export const useAppStore = defineStore('app', () => {
     if (!chatSettings.memory.autoMergeEnabled || autoMergingConversationIds.has(conversationId)) return null;
     const threshold = Math.max(3, chatSettings.memory.autoMergeThreshold);
     const batchSize = Math.min(Math.max(2, chatSettings.memory.autoMergeBatchSize), threshold);
-    const candidates = memoriesForConversation(conversationId).sort(compareMemoryRecordsByRange);
+    const candidates = [...memoriesForConversation(conversationId)].sort(compareMemoryRecordsByRange);
     if (candidates.length < threshold) return null;
 
     autoMergingConversationIds.add(conversationId);
@@ -3419,7 +3504,7 @@ export const useAppStore = defineStore('app', () => {
     if (!atoms.length) return '';
     return [
       '合并保护条目：以下开放承诺、冲突、关系或边界不得被压成模糊描述；如果仍开放，必须以结构化条目保留 open 状态，并保留责任方、对象、期限或结果。',
-      atoms.map((atom) => `- [${atom.type}|${atom.status}|${atom.importance}|${atom.subject}|${atom.evidenceFloors.join('/') || atom.lastTouchedFloor}] ${atom.content}${atom.owner ? `；责任 ${atom.owner}` : ''}${atom.counterparty ? `；对象 ${atom.counterparty}` : ''}${atom.due ? `；期限 ${atom.due}` : ''}`).join('\n')
+      atoms.map((atom) => `- [${atom.type}|${atom.status}|${atom.importance}|${atom.subject}|${atom.evidenceFloors.join('/') || atom.lastTouchedFloor}|${atom.timeLabel || '时间未知'}] ${atom.content}${atom.owner ? `；责任 ${atom.owner}` : ''}${atom.counterparty ? `；对象 ${atom.counterparty}` : ''}${atom.due ? `；期限 ${atom.due}` : ''}`).join('\n')
     ].join('\n');
   }
 
@@ -3713,12 +3798,17 @@ export const useAppStore = defineStore('app', () => {
       const counterparty = normalizeAuditText(update.counterparty);
       const due = normalizeAuditText(update.due);
       const resolution = normalizeAuditText(update.resolution) ?? (update.status && update.status !== 'open' ? normalizeAuditText(update.reason) : undefined);
+      const timeLabel = normalizeAuditText(update.timeLabel);
       if (subject) nextUpdates.subject = subject;
       if (content) nextUpdates.content = content;
       if (owner !== undefined) nextUpdates.owner = owner;
       if (counterparty !== undefined) nextUpdates.counterparty = counterparty;
       if (due !== undefined) nextUpdates.due = due;
       if (resolution !== undefined) nextUpdates.resolution = resolution;
+      if (timeLabel !== undefined) nextUpdates.timeLabel = timeLabel;
+      if (Number.isFinite(update.occurredAt) && Number(update.occurredAt) > 0) nextUpdates.occurredAt = Number(update.occurredAt);
+      if (Number.isFinite(update.occurredEndAt) && Number(update.occurredEndAt) > 0) nextUpdates.occurredEndAt = Number(update.occurredEndAt);
+      if (timeLabel !== undefined || Number.isFinite(update.occurredAt) || Number.isFinite(update.occurredEndAt)) nextUpdates.timeBasis = 'model-time';
       if (Number.isFinite(update.importance)) nextUpdates.importance = Math.min(5, Math.max(1, Math.round(Number(update.importance))));
       if (Number.isFinite(update.confidence)) nextUpdates.confidence = Math.min(1, Math.max(0, Number(update.confidence)));
       if (!Object.keys(nextUpdates).length) continue;
@@ -3753,23 +3843,25 @@ export const useAppStore = defineStore('app', () => {
     try {
       const floorMap = getMessageFloorMap(messagesForConversation(conversationId).filter((message) => message.replyVariantState !== 'inactive'));
       const exchangeText = usefulMessages.map((message) => messageReadableContent(message)).join('\n');
+      const exchangeTimelineText = renderMessageTimelineContext(usefulMessages, floorMap, floorMap.get(usefulMessages[0].id) ?? 1);
       const sourceMessageIds = usefulMessages.map((message) => message.id);
       const queryVector = await memoryQueryVectorForConversation(conversationId, exchangeText, modelOverride);
       const summary = await generateConversationSummary({
         messages: usefulMessages.map((message) => {
           const floor = floorMap.get(message.id) ?? 1;
           const sender = message.sender === 'user' ? getUserAiName(boundUser) : characterName;
-          return `${floor}楼 ${sender}: ${messageReadableContent(message)}`;
+          const sentAtText = chatSettings.timeAwareness.enabled ? `（发送时间：${formatMemoryTimelineTime(message.createdAt)}）` : '';
+          return `${floor}楼 ${sender}${sentAtText}: ${messageReadableContent(message)}`;
         }).join('\n'),
         previousSummary: await memoryContextForConversationAsync(conversationId, exchangeText, { includeResolved: true, maxTokens: 1400, maxEntries: 24, storeDebug: false, modelOverride, queryVector }),
         timeAwareness: chatSettings.timeAwareness,
         timeAwarenessUserName: getUserAiName(boundUser),
-        timelineContext: renderMessageTimelineContext(usefulMessages, floorMap, floorMap.get(usefulMessages[0].id) ?? 1),
+        timelineContext: exchangeTimelineText,
         settings: settings.value ?? undefined,
         modelOverride,
         promptOverride: renderCharacterMemoryPrompt(chatSettings.memory.summaryPrompt, characterName)
       });
-      if (!sourceMessageIdsAreRecallable(conversationId, sourceMessageIds)) return;
+      if (!sourceMessageIdsAreRecallable(sourceMessageIds, messageMapForConversation(conversationId))) return;
       const now = Date.now();
       const floors = usefulMessages.map((message) => floorMap.get(message.id) ?? 1);
       const tempRecord: ConversationMemoryRecord = {
@@ -3790,6 +3882,10 @@ export const useAppStore = defineStore('app', () => {
         createdAt: now,
         updatedAt: now
       };
+      tempRecord.entries = normalizeMemoryRecordEntries({
+        ...tempRecord,
+        sourceMessages: usefulMessages
+      }, now);
       const atoms = await hydrateMemoryAtomVectors(createMemoryAtomsFromRecord(tempRecord, now).map((atom) => ({
         ...atom,
         id: createId('atom'),
@@ -3802,7 +3898,7 @@ export const useAppStore = defineStore('app', () => {
         .filter((atom) => !sourceMessageIds.some((messageId) => atom.sourceMessageIds.includes(messageId)));
       if (relatedOldAtoms.length) {
         const audit = await generateMemoryAtomAudit({
-          conversationText: exchangeText,
+          conversationText: chatSettings.timeAwareness.enabled ? `${exchangeText}\n\n本轮事件时间线：\n${exchangeTimelineText}` : exchangeText,
           previousAtoms: relatedOldAtoms,
           newAtoms: atoms,
           settings: settings.value ?? undefined,

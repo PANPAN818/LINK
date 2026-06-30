@@ -56,7 +56,7 @@
         background:
           radial-gradient(circle at 50% 7%, rgba(239, 68, 90, 0.14), transparent 30%),
           linear-gradient(180deg, #fff8fa 0%, #f6f4f5 42%, #f4f5f6 100%);
-        transition: opacity 320ms ease, visibility 320ms ease;
+        transition: opacity 180ms ease, visibility 180ms ease;
       }
 
       #boot-loader.is-hidden {
@@ -542,8 +542,8 @@
           setProgress(100);
           window.setTimeout(() => {
             loader.classList.add('is-hidden');
-            window.setTimeout(() => loader.remove(), 340);
-          }, 220);
+            window.setTimeout(() => loader.remove(), 200);
+          }, 40);
         };
 
         tick();

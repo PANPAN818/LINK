@@ -632,6 +632,8 @@ let voiceChunks: Blob[] = [];
 let voiceRecognition: BrowserSpeechRecognition | null = null;
 let voiceTimer: number | undefined;
 let proactiveReplyTimer: number | undefined;
+let bottomRestoreQueued = false;
+let bottomRestoreTimeouts: number[] = [];
 let discardRecording = false;
 let voiceRecognitionStartText = '';
 let voiceRecognitionFinalText = '';
@@ -729,7 +731,7 @@ const stickerRecommendationBase = computed(() => {
     query: composerText.value,
     stickers: store.stickers,
     groups: store.sortedStickerGroups,
-    messages: store.messages,
+    messages: store.messagesForConversation(props.id),
     conversationId: props.id,
     boundGroupIds: chatSettings.value.characterStickerGroupIds,
     limit: 12
@@ -760,10 +762,16 @@ function scrollMessagesToBottomNow() {
   messageList.scrollTop = messageList.scrollHeight;
 }
 
+function clearQueuedBottomRestores() {
+  bottomRestoreTimeouts.forEach((timerId) => window.clearTimeout(timerId));
+  bottomRestoreTimeouts = [];
+}
+
 function restoreMessagesToBottomAfterLayout() {
+  clearQueuedBottomRestores();
   scrollMessagesToBottomNow();
   window.requestAnimationFrame(scrollMessagesToBottomNow);
-  for (const delay of bottomRestoreDelays) window.setTimeout(scrollMessagesToBottomNow, delay);
+  bottomRestoreTimeouts = bottomRestoreDelays.map((delay) => window.setTimeout(scrollMessagesToBottomNow, delay));
 }
 
 function focusComposerInput() {
@@ -780,7 +788,12 @@ function focusComposerInput() {
 }
 
 function queueMessagesToBottomAfterLayout() {
-  void nextTick(restoreMessagesToBottomAfterLayout);
+  if (bottomRestoreQueued) return;
+  bottomRestoreQueued = true;
+  void nextTick(() => {
+    bottomRestoreQueued = false;
+    restoreMessagesToBottomAfterLayout();
+  });
 }
 
 async function syncConversationState(id: string) {
@@ -1771,6 +1784,7 @@ async function enterOffline() {
 
 onBeforeUnmount(() => {
   abortVoiceRecording();
+  clearQueuedBottomRestores();
   if (proactiveReplyTimer !== undefined) window.clearInterval(proactiveReplyTimer);
 });
 </script>

@@ -85,6 +85,9 @@ export interface MemoryAtomAuditUpdate {
   counterparty?: string;
   due?: string;
   resolution?: string;
+  timeLabel?: string;
+  occurredAt?: number;
+  occurredEndAt?: number;
   importance?: number;
   confidence?: number;
   reason?: string;
@@ -2251,7 +2254,7 @@ function buildSmallTheaterPrompt(input: { context: PromptContext; topic: SmallTh
 3. 有互动性：至少包含 3 个可点击/可切换/可展开/可选择/可拖动/可输入的交互点，交互由原生 JavaScript 实现，并且不依赖网络。
 4. 不允许加载外部 JS/CSS/字体/图片/接口；图片只能用 CSS、emoji、渐变、内嵌 SVG data URL 或纯 HTML/CSS 视觉替代。
 5. 小剧场要像一个完整可玩的移动网页，而不是静态文章：可以使用论坛楼层、问答折叠、群聊切换、相册翻页、时间线、卡牌、投票、抽签、小游戏、档案抽屉等形式。
-6. 内容必须遵守信息边界：NPC 只来自当前角色设定、世界书、记忆或合理新生成的当前角色社交圈；禁止借用其他角色的 NPC、关系和评论区常客。
+6. 内容必须遵守信息边界：NPC 可以来自当前角色设定、世界书、记忆或合理新生成的当前角色社交圈，如果没有可以对NPC进行合理的世界线拓展。
 7. 标题、正文、按钮文案和交互反馈要自然、有代入感；不要在页面里解释“这是功能”“这是 HTML/CSS/JS”“如何使用本应用”。
 8. 这是番外，不改变正文事实；如果写平行世界、传闻、论坛猜测或匿名爆料，必须在页面语气里自然体现它不是既定事实。
 9. JavaScript 必须健壮：使用 DOMContentLoaded 或脚本放在 body 末尾，选择器存在性要检查，交互不能因为缺少元素报错。
@@ -2383,7 +2386,7 @@ export async function generateUserVoomComments(input: {
     { "id": "c2", "authorName": "NPC 网名", "content": "回复内容", "contentTranslation": "如 content 不是普通话，则给普通话译文；否则留空", "parentId": "c1" }
   ]
 }`,
-    '要求：1. 输出 0-10 条；2. authorId 可以来自可见角色，NPC 则不要填 authorId，必须填写具体 authorName；3. NPC 只能来自可见角色自己的设定、社交圈、朋友同事家人粉丝或评论区常客线索，不确定归属就不要生成该 NPC；4. parentId 留空表示直接评论用户动态，填写本次前面输出的 id 表示回复那条评论；5. 可以让角色回复 NPC，也可以让 NPC 回复角色或其他 NPC，但不要代替用户本人评论；6. 评论要短、自然、有社交软件感，不要解释设定；7. 不要使用“NPC”“朋友A”“路人”这类占位名；8. contentTranslation 规则：外语、粤语、方言、繁体中文、文言/古风表达都要翻译成自然现代简体普通话；不要加“翻译：”前缀。'
+    '要求：1. 输出 0-10 条；2. authorId 可以来自可见角色，NPC 则不要填 authorId，必须填写具体 authorName；3. NPC 可以来自可见角色自己的设定、社交圈、朋友同事家人粉丝或参考上下文内容生成，如果没有提及则可以根据世界线合理拓展相应NPC；4. parentId 留空表示直接评论用户动态，填写本次前面输出的 id 表示回复那条评论；5. 可以让角色回复 NPC，也可以让 NPC 回复角色或其他 NPC，但不要代替用户本人评论；6. 评论要短、自然、有社交软件感，不要解释设定；7. 不要使用“NPC”“朋友A”“路人”这类占位名；8. contentTranslation 规则：外语、粤语都要翻译成自然现代简体普通话；不要加“翻译：”前缀。'
   ].filter(Boolean).join('\n\n');
 
   const apiReply = await callTextApi(input.settings, prompt, input.modelOverride);
@@ -2423,7 +2426,7 @@ export async function generateVoomCommentReplies(input: {
     `VOOM 作者：${postAuthorName}${postBelongsToUser ? '（当前用户）' : ''}`,
     postBelongsToUser
       ? '社交圈边界：这是用户发布的 VOOM。除当前执行角色本人外，不要新增任何NPC作者；不要替用户发言。'
-      : '社交圈边界：新增NPC只能来自这条 VOOM 作者所属角色自己的社交圈。禁止把其他角色设定里的朋友、同事、家人、同学、粉丝、熟人、NPC网名或评论区常客借到这里；不确定归属时就不生成该NPC。',
+      : '社交圈边界：新增NPC只能来自这条 VOOM 作者所属角色自己的社交圈。',
     `VOOM 正文：\n${formatVoomPostPromptContent(input.post, includeTimeContext)}`,
     `评论区：\n${input.post.comments.map((comment) => formatVoomCommentPromptLine(comment, includeTimeContext)).join('\n') || '暂无评论。'}`,
     `优先关注这些评论：\n${targetComments.map((comment) => formatVoomCommentPromptLine(comment, includeTimeContext)).join('\n') || '没有指定评论，可根据正文补一条自然评论。'}`,
@@ -2432,10 +2435,10 @@ export async function generateVoomCommentReplies(input: {
 {
   "replies": [
     { "id": "r1", "authorName": "${fallbackAuthorName}", "content": "回复内容", "contentTranslation": "如 content 不是普通话，则给普通话译文；否则留空", "parentId": "被回复评论ID，可留空" },
-    { "id": "r2", "authorName": "NPC网名", "content": "自然评论或回复", "contentTranslation": "如 content 不是普通话，则给普通话译文；否则留空", "parentId": "已有评论ID或本次前面输出的id，可留空" }
+    { "id": "r2", "authorName": "NPC网名", "content": "自然评论或回复", "contentTranslation": "如 content 不是中文，则给普通话译文；否则留空", "parentId": "已有评论ID或本次前面输出的id，可留空" }
   ]
 }`,
-    '要求：1. 输出 0-6 条；2. authorName 可以是当前执行角色真名，也可以是符合社交圈边界的真实感 NPC 网名；3. 角色可以回复用户或其他人的评论，NPC 也可以发新评论、回复角色或互相回复；4. parentId 留空表示新评论，填写已有评论 ID 或本次前面输出的 id 表示回复；5. 不要代替用户发言，不要使用“NPC”“路人”“朋友A”这类占位名；6. 内容像真实社交软件评论区，短、自然、有上下文，不要解释设定；7. contentTranslation 规则：外语、粤语、方言、繁体中文、文言都要翻译成简体普通话；不要加“翻译：”前缀。'
+    '要求：1. 输出 0-6 条；2. authorName 可以是当前执行角色真名，也可以是符合社交圈边界的真实感 NPC 网名；3. 角色可以回复用户或其他人的评论，NPC 也可以发新评论、回复角色或互相回复；4. parentId 留空表示新评论，填写已有评论 ID 或本次前面输出的 id 表示回复；5. 不要代替用户发言，不要使用“NPC”“路人”“朋友A”这类占位名；6. 内容像真实社交软件评论区，短、自然、有上下文，不要解释设定；7. contentTranslation 规则：外语、粤语都要翻译成简体普通话；不要加“翻译：”前缀。'
   ].join('\n\n');
 
   const apiReply = await callTextApi(input.settings, prompt, input.modelOverride);
@@ -2556,7 +2559,7 @@ export async function generateMusicCommentThread(input: {
     { "id": "c1", "authorId": "绑定角色id，可留空", "authorName": "角色昵称或真实感听友名", "content": "评论内容", "contentTranslation": "如需翻译则填写，否则留空", "parentId": "回复的已有评论ID或本次前面输出的id，可留空" }
   ]
 }`,
-    '要求：1. 输出 8-12 条；2. 至少包含 2 条该用户绑定角色的评论或回复，角色 authorId 必须来自绑定角色；3. 其余可以是有真实感的路人听友；4. 可以回复任意已有评论或本次前面评论；5. 不要使用“NPC”“路人A”“朋友A”这类占位名；6. 语气像音乐 App 评论区，短、自然、有情绪和梗，但不要刷屏；7. contentTranslation 规则：外语、粤语、方言、繁体中文、文言/古风表达都要翻译成自然现代简体普通话，不要加“翻译：”前缀。'
+    '要求：1. 输出 8-12 条；2. 至少包含 2 条该用户绑定角色的评论或回复，角色 authorId 必须来自绑定角色；3. 其余可以是有真实感的路人听友；4. 可以回复任意已有评论或本次前面评论；5. 不要使用“NPC”“路人A”“朋友A”这类占位名；6. 语气像音乐 App 评论区，短、自然、有情绪和梗，但不要刷屏；7. contentTranslation 规则：外语、粤语都要翻译成自然现代简体普通话，不要加“翻译：”前缀。'
   ].join('\n\n');
 
   const apiReply = await callTextApi(input.settings, prompt, input.modelOverride);
@@ -2583,10 +2586,10 @@ export async function generateConversationSummary(input: {
     ? renderTimeAwarenessPrompt(input.timeAwareness, { userName: input.timeAwarenessUserName || '用户' })
     : '';
   const prompt = [
-    input.promptOverride?.trim() || '请把下面聊天楼层整理成结构化长期记忆。每条一行：- [类型|状态|重要度1-5|主体|证据楼层] 内容。类型只能用 fact/preference/promise/conflict/plot/relationship/boundary/emotion/world；状态只能用 active/open/resolved/superseded/cancelled。必须根据新聊天校验旧记忆，已解决或被推翻的事项不能继续写成 open；不要评价用户；用中文输出。',
+    input.promptOverride?.trim() || '请把下面聊天楼层整理成结构化长期记忆。每条一行：- [类型|状态|重要度1-5|主体|证据楼层|发生时间] 内容。类型只能用 fact/preference/promise/conflict/plot/relationship/boundary/emotion/world；状态只能用 active/open/resolved/superseded/cancelled。发生时间优先写待总结事件时间线中的精确时间或时间范围，无法确认时写可见楼层范围；必须根据新聊天校验旧记忆，已解决或被推翻的事项不能继续写成 open；不要评价用户；用中文输出。',
     timeAwarenessPrompt,
     '记忆生命周期规则：新聊天优先于旧记忆；同一事实有新版本时保留新版本，并把旧版本标为 superseded 或移除；承诺/冲突/未解决事项只有仍需要后续处理时才标为 open；已经回应、兑现、和解、拒绝或撤销的事项标为 resolved/cancelled，且不要在后续回复里反复催促。',
-    includeTimeline ? '时间线写入规则：每条内容尽量携带楼层、日期或相对时间；不要只写“之前”“后来”等模糊顺序；无法确认精确时间时，保留可见楼层范围和已知时间范围。' : '',
+    includeTimeline ? '时间线写入规则：每条内容必须尽量填写第 6 个字段“发生时间”；优先使用待总结事件时间线中的精确发送时间或时间范围，不能只写“之前”“后来”；无法确认剧情发生时间时，至少写“第 x-y 楼 / 时间未知”。' : '',
     input.previousSummary ? `旧记忆候选（仅供校验和更新，不是绝对事实）：\n${input.previousSummary}` : '旧记忆候选：暂无。',
     includeTimeline && input.timelineContext ? `待总结事件时间线：\n${input.timelineContext}` : '',
     `待总结聊天：\n${input.messages}`
@@ -2595,12 +2598,15 @@ export async function generateConversationSummary(input: {
   return apiReply || input.messages.slice(0, 1400);
 }
 
-function formatAtomForAudit(atom: Pick<ConversationMemoryAtom, 'id' | 'type' | 'status' | 'subject' | 'content' | 'importance' | 'owner' | 'counterparty' | 'due' | 'resolution' | 'evidenceFloors' | 'lastTouchedFloor'>) {
+function formatAtomForAudit(atom: Pick<ConversationMemoryAtom, 'id' | 'type' | 'status' | 'subject' | 'content' | 'importance' | 'owner' | 'counterparty' | 'due' | 'resolution' | 'evidenceFloors' | 'lastTouchedFloor' | 'timeLabel' | 'occurredAt' | 'occurredEndAt'>) {
   const meta = [
     atom.owner ? `owner=${atom.owner}` : '',
     atom.counterparty ? `counterparty=${atom.counterparty}` : '',
     atom.due ? `due=${atom.due}` : '',
     atom.resolution ? `resolution=${atom.resolution}` : '',
+    atom.timeLabel ? `time=${atom.timeLabel}` : '',
+    atom.occurredAt ? `occurredAt=${atom.occurredAt}` : '',
+    atom.occurredEndAt ? `occurredEndAt=${atom.occurredEndAt}` : '',
     atom.evidenceFloors?.length ? `floors=${atom.evidenceFloors.join('/')}` : '',
     atom.lastTouchedFloor ? `lastFloor=${atom.lastTouchedFloor}` : ''
   ].filter(Boolean).join('; ');
@@ -2623,7 +2629,7 @@ function normalizeMemoryAtomAuditResult(value: unknown, allowedIds: Set<string>)
       const normalizedUpdate: MemoryAtomAuditUpdate = { id };
       if (statuses.includes(status)) normalizedUpdate.status = status;
       if (types.includes(type)) normalizedUpdate.type = type;
-      const textFields = ['subject', 'content', 'owner', 'counterparty', 'due', 'resolution', 'reason'] as const;
+      const textFields = ['subject', 'content', 'owner', 'counterparty', 'due', 'resolution', 'timeLabel', 'reason'] as const;
       textFields.forEach((field) => {
         const text = String(update[field] ?? '').replace(/\s+/g, ' ').trim();
         if (text) normalizedUpdate[field] = text;
@@ -2632,6 +2638,10 @@ function normalizeMemoryAtomAuditResult(value: unknown, allowedIds: Set<string>)
       if (Number.isFinite(importance)) normalizedUpdate.importance = Math.min(5, Math.max(1, importance));
       const confidence = Number(update.confidence);
       if (Number.isFinite(confidence)) normalizedUpdate.confidence = Math.min(1, Math.max(0, confidence));
+      const occurredAt = Number(update.occurredAt);
+      if (Number.isFinite(occurredAt) && occurredAt > 0) normalizedUpdate.occurredAt = occurredAt;
+      const occurredEndAt = Number(update.occurredEndAt);
+      if (Number.isFinite(occurredEndAt) && occurredEndAt > 0) normalizedUpdate.occurredEndAt = occurredEndAt;
       return Object.keys(normalizedUpdate).length > 1 ? normalizedUpdate : null;
     })
     .filter((item): item is MemoryAtomAuditUpdate => Boolean(item));
@@ -2650,8 +2660,8 @@ export async function generateMemoryAtomAudit(input: {
   const allowedIds = new Set(previousAtoms.map((atom) => atom.id));
   const prompt = [
     '你是聊天记忆生命周期审查器。请只审查“旧原子记忆”是否被“本轮对话”和“新原子候选”更新、解决、推翻或取消。',
-    '只允许输出 JSON 对象，不要 Markdown，不要解释。格式：{"updates":[{"id":"旧原子ID","status":"active|open|resolved|superseded|cancelled","content":"可选的新内容","subject":"可选主题","owner":"可选责任方","counterparty":"可选对象","due":"可选期限","resolution":"可选结果","importance":1-5,"confidence":0-1,"reason":"简短原因"}]}。',
-    '规则：只能引用旧原子里存在的 id；不要为新事实编造 id；承诺/冲突仍需后续处理才保留 open；已经兑现、和解、拒绝、撤销或被新版本覆盖的，改为 resolved/superseded/cancelled；信息不足就不要输出该原子的更新。',
+    '只允许输出 JSON 对象，不要 Markdown，不要解释。格式：{"updates":[{"id":"旧原子ID","status":"active|open|resolved|superseded|cancelled","content":"可选的新内容","subject":"可选主题","owner":"可选责任方","counterparty":"可选对象","due":"可选期限","resolution":"可选结果","timeLabel":"可选发生时间文本","occurredAt":可选毫秒时间戳,"occurredEndAt":可选毫秒时间戳,"importance":1-5,"confidence":0-1,"reason":"简短原因"}]}。',
+    '规则：只能引用旧原子里存在的 id；不要为新事实编造 id；承诺/冲突仍需后续处理才保留 open；已经兑现、和解、拒绝、撤销或被新版本覆盖的，改为 resolved/superseded/cancelled；如果本轮对话明确修正了发生时间，必须同步 timeLabel/occurredAt/occurredEndAt；信息不足就不要输出该原子的更新。',
     `旧原子记忆：\n${previousAtoms.map(formatAtomForAudit).join('\n')}`,
     input.newAtoms.length ? `新原子候选：\n${input.newAtoms.slice(0, 18).map(formatAtomForAudit).join('\n')}` : '新原子候选：暂无。',
     `本轮对话：\n${input.conversationText}`

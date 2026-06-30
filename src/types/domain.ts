@@ -219,6 +219,7 @@ export interface ConversationSettings {
 
 export type ConversationMemoryEntryType = 'fact' | 'preference' | 'promise' | 'conflict' | 'plot' | 'relationship' | 'boundary' | 'emotion' | 'world';
 export type ConversationMemoryEntryStatus = 'active' | 'open' | 'resolved' | 'superseded' | 'cancelled';
+export type ConversationMemoryTimeBasis = 'message-time' | 'model-time' | 'memory-created' | 'user-edited';
 
 export interface ConversationMemoryScoreBreakdown {
   label: string;
@@ -238,6 +239,10 @@ export interface ConversationMemoryEntry {
   resolution?: string;
   evidenceFloors: number[];
   lastTouchedFloor: number;
+  occurredAt?: number;
+  occurredEndAt?: number;
+  timeLabel?: string;
+  timeBasis?: ConversationMemoryTimeBasis;
   importance: number;
   vector?: number[];
   sourceAtomIds?: string[];
