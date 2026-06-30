@@ -1216,6 +1216,24 @@ function normalizeQuoteActions(value: unknown): RoleplayQuoteAction[] {
   return [{ messageId, replyIndex }];
 }
 
+function normalizeTransferDecisionStatus(value: unknown): 'accepted' | 'rejected' | '' {
+  const status = String(value ?? '').trim().toLocaleLowerCase();
+  if (['accepted', 'accept', 'received', 'receive', 'take', 'yes', '收款', '接收', '接受', '领取', '同意'].includes(status)) return 'accepted';
+  if (['rejected', 'reject', 'refused', 'refuse', 'declined', 'decline', 'no', '退回', '拒收', '拒绝', '婉拒'].includes(status)) return 'rejected';
+  return '';
+}
+
+function normalizeTransferDecisionActions(value: unknown): Array<{ messageId: string; status: 'accepted' | 'rejected' }> {
+  if (Array.isArray(value)) return value.flatMap((item) => normalizeTransferDecisionActions(item));
+  if (!value || typeof value !== 'object') return [];
+
+  const record = value as Record<string, unknown>;
+  const status = normalizeTransferDecisionStatus(record.status ?? record.decision ?? record.action ?? record.result);
+  if (!status) return [];
+  const messageIds = normalizeMessageIds(record.messageId ?? record.targetMessageId ?? record.transferMessageId ?? record.id);
+  return messageIds.map((messageId) => ({ messageId, status }));
+}
+
 function normalizeRoleplayMessageActions(record: Record<string, unknown>): RoleplayMessageActions {
   const actionRecord = record.messageActions && typeof record.messageActions === 'object'
     ? record.messageActions as Record<string, unknown>
@@ -1244,7 +1262,16 @@ function normalizeRoleplayMessageActions(record: Record<string, unknown>): Rolep
     ...normalizeQuoteActions(actionRecord.quoteReplies),
     ...normalizeQuoteActions(actionRecord.references)
   ];
-  return { recallMessageIds, quotes, offlineInvitation: normalizeOfflineInvitationAction(record, actionRecord) };
+  const transferDecisionEntries = [
+    ...normalizeTransferDecisionActions(record.transferDecisions),
+    ...normalizeTransferDecisionActions(record.transferDecision),
+    ...normalizeTransferDecisionActions(record.transferReplies),
+    ...normalizeTransferDecisionActions(actionRecord.transferDecisions),
+    ...normalizeTransferDecisionActions(actionRecord.transferDecision),
+    ...normalizeTransferDecisionActions(actionRecord.transferReplies)
+  ];
+  const transferDecisions = Array.from(new Map(transferDecisionEntries.map((decision) => [decision.messageId, decision])).values());
+  return { recallMessageIds, quotes, transferDecisions, offlineInvitation: normalizeOfflineInvitationAction(record, actionRecord) };
 }
 
 function normalizeOfflineInvitationAction(record: Record<string, unknown>, actionRecord: Record<string, unknown>): { prompt: string } | null {
