@@ -2117,7 +2117,7 @@ export async function generateRoleplayReply(input: GenerateReplyInput): Promise<
         replies,
         plotChoices,
         replyTranslations,
-        narrations: narrations.slice(0, 3),
+        narrations: narrations.slice(0, 5),
         images,
         stickers,
         stickerPlacements,

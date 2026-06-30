@@ -636,11 +636,11 @@
             <input :checked="draft.autoGenerateVoom" type="checkbox" @change="updateAutoGenerateVoom" />
             <span class="switch-track"></span>
             <div>
-              <strong>允许 AI 回复时自动活跃 VOOM</strong>
+              <strong>允许 AI 回复时自动发布 VOOM</strong>
             </div>
           </label>
           <label class="field frequency-field">
-            <span>发布动态 / 拓展评论区频率</span>
+            <span>发布动态频率</span>
             <select :value="draft.voomFrequency" @change="updateVoomFrequency">
               <option v-for="option in voomFrequencyOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
             </select>

@@ -54,7 +54,7 @@
 | `onlineChatPunctuationPrompt` | `src/services/prompt.ts` | 线上标点符号、空格、换行和聊天语气规则。默认开启，可通过 `buildPrompt` options 关闭。 |
 | `onlineChatRoutineCarePrompt` | `src/services/prompt.ts` | 禁止把关心偷懒写成催睡觉、催休息、催下线、催吃饭。默认开启。 |
 | `onlineStickerSemanticsPrompt` | `src/services/prompt.ts` | 要求不要过度解读用户 Sticker，优先理解文字内容。默认开启。 |
-| `narrationModePrompt` | `src/services/prompt.ts` | 仅 `context.narrationModeEnabled` 开启时注入，允许 messages 中交错输出旁白项。 |
+| `narrationModePrompt` | `src/services/prompt.ts` | 仅 `context.narrationModeEnabled` 开启时注入，要求 messages 中每轮交错输出 1-5 条旁白项，位置由数组顺序决定。 |
 | 线下邀约关闭提示 | `buildPrompt` 内联字符串 | 当 `context.offlineInvitationEnabled === false` 时，强制 `offlineInvitation` 为 `null`。 |
 | 媒体 / 转账规则 | `buildPrompt` 内联字符串 | 说明 Sticker、图片、语音、定位、转账在对话历史中的含义和可用输出。 |
 | 可用 Sticker 列表 | `renderAvailableStickers(context)` | 限制角色只能主动发送列表内 Sticker。 |

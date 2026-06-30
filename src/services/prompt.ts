@@ -280,10 +280,10 @@ export const narrationModePrompt = `补充旁白模式规则：
 
 旁白模式已开启，只在线上聊天生效。本次仍然只使用同一次角色回复 API；不要另起一段非 JSON 文本。
 
-messages 可加入旁白项，并与聊天气泡、图片、Sticker 按真实发送顺序交错。旁白项格式：
+messages 必须加入 1-5 条旁白项，并与聊天气泡、图片、Sticker 按真实发送顺序交错；旁白位置任意，由 messages 数组顺序决定。旁白项格式：
 { "type": "narration", "content": "旁白句" }
 
-narration 不属于聊天气泡，不要写进 text 项。
+narration 不属于聊天气泡，不要写进 text 项。本轮至少输出 1 条、最多输出 5 条 narration；不要省略旁白，也不要超过 5 条。
 
 旁白内容：
 1. 可描写{{char}}当下可观察的动作、姿态、停顿、打字状态、手机/环境互动等动描。

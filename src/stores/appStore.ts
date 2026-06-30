@@ -1020,24 +1020,6 @@ export const useAppStore = defineStore('app', () => {
     return commentUser ? getUserAiName(commentUser) : comment.authorName;
   }
 
-  function characterForVoomDisplayComment(comment: VoomComment) {
-    const authorId = String(comment.authorId ?? '').trim();
-    const authorName = comment.authorName.trim().toLocaleLowerCase();
-    return characters.value.find((character) => {
-      if (authorId && character.id === authorId) return true;
-      return [character.userNote, character.nickname, character.name, getCharacterVoomAuthorName(character)]
-        .map((name) => name.trim().toLocaleLowerCase())
-        .includes(authorName);
-    }) ?? null;
-  }
-
-  function voomCommentDisplayName(comment: VoomComment) {
-    const character = characterForVoomDisplayComment(comment);
-    if (character) return getCharacterVoomDisplayName(character);
-    const commentUser = userForVoomComment(comment);
-    return commentUser ? getUserDisplayName(commentUser) : comment.authorName;
-  }
-
   function formatVoomCommentEvent(comment: VoomComment, comments: VoomComment[]) {
     const parentComment = comment.parentId ? comments.find((entry) => entry.id === comment.parentId) : undefined;
     const parentName = parentComment ? voomCommentAiAuthorName(parentComment) : '';
@@ -1065,17 +1047,6 @@ export const useAppStore = defineStore('app', () => {
   function notificationPreview(content: string, fallback: string) {
     const normalizedContent = content.replace(/\s+/g, ' ').trim() || fallback;
     return normalizedContent.length > 120 ? `${normalizedContent.slice(0, 117)}...` : normalizedContent;
-  }
-
-  function isCurrentUserVoomComment(comment: VoomComment) {
-    const currentUser = user.value;
-    if (!currentUser) return false;
-    if (comment.authorId && comment.authorId === currentUser.id) return true;
-    const authorName = comment.authorName.trim().toLocaleLowerCase();
-    return [getUserVoomAuthorName(currentUser), getUserAiName(currentUser)]
-      .map((name) => name.trim().toLocaleLowerCase())
-      .filter(Boolean)
-      .includes(authorName);
   }
 
   function notifyCharacterMessages(conversation: Conversation, charMessages: ChatMessage[]) {
@@ -1109,27 +1080,6 @@ export const useAppStore = defineStore('app', () => {
       title: `${authorName} 发布了 VOOM`,
       body,
       tag: `link-voom-post-${post.id}`,
-      icon: character?.avatar || post.authorAvatar,
-      url: '/voom'
-    });
-  }
-
-  function notifyVoomComments(post: VoomPost, comments: VoomComment[], conversation?: Conversation | null) {
-    const characterComments = comments.filter((comment) => !isCurrentUserVoomComment(comment));
-    if (!characterComments.length) return;
-    const latestComment = characterComments[characterComments.length - 1];
-    const character = characterForVoomDisplayComment(latestComment) ?? (conversation?.charId ? characterById(conversation.charId) : null);
-    const latestCommentDisplayName = voomCommentDisplayName(latestComment);
-    const title = characterComments.length > 1
-      ? `${latestCommentDisplayName} 等评论了 VOOM`
-      : `${latestCommentDisplayName} 评论了 VOOM`;
-    const body = notificationPreview(formatContentWithChineseTranslation(latestComment.content, latestComment.contentTranslation), '有新的 VOOM 评论');
-    void playRingtone(settings.value, 'voom', character?.id || conversation?.charId || post.charId);
-    void showLinkNotification(settings.value?.keepAlive, {
-      kind: 'voom',
-      title,
-      body,
-      tag: `link-voom-comment-${post.id}`,
       icon: character?.avatar || post.authorAvatar,
       url: '/voom'
     });
@@ -4106,7 +4056,7 @@ export const useAppStore = defineStore('app', () => {
         ? (parsedReply.narrations ?? [])
           .map((narration) => String(narration ?? '').trim())
           .filter(Boolean)
-          .slice(0, 3)
+          .slice(0, 5)
         : [];
       const replyStickers = resolveCharacterStickerSelections(parsedReply.stickers, availableCharacterStickers);
       const replyStickerPlacements = (parsedReply.stickerPlacements ?? [])
@@ -4415,18 +4365,9 @@ export const useAppStore = defineStore('app', () => {
       const shouldGenerateMoment = options?.generateMoment || (chatSettings.autoGenerateVoom && shouldAutoGenerateMoment(chatSettings.voomFrequency));
       if (shouldGenerateMoment) {
         finishConversationReply(conversationId);
-        if (options?.generateMoment || Math.random() < 0.5) {
-          void createMomentFromConversation(conversationId).catch((error) => {
-            console.error(error);
-          });
-        } else {
-          void autoReplyToVoomComments(conversationId).then((replied) => {
-            if (replied) return;
-            return createMomentFromConversation(conversationId);
-          }).catch((error) => {
-            console.error(error);
-          });
-        }
+        void createMomentFromConversation(conversationId).catch((error) => {
+          console.error(error);
+        });
       }
     } catch (error) {
       if (options?.proactive) {
@@ -4720,7 +4661,6 @@ export const useAppStore = defineStore('app', () => {
     voomPosts.value.unshift(post);
     await putEntity('voomPosts', post);
     await recordVoomPostEvents(post);
-    notifyVoomComments(post, post.comments, targetConversations[0]);
     return post;
   }
 
@@ -5390,48 +5330,7 @@ export const useAppStore = defineStore('app', () => {
     return post.charId === character.id;
   }
 
-  function voomPostCanBeAutoRepliedByConversation(post: VoomPost, conversation: Conversation, character: CharacterProfile) {
-    if (isReplyingVoomComments(post.id)) return false;
-    if (voomPostHasProactiveCommentExpansion(post, character.id)) return false;
-    if (post.authorType === 'user') return post.visibleCharacterIds?.includes(character.id) ?? false;
-    return post.charId === character.id || post.conversationId === conversation.id || post.conversationIds?.includes(conversation.id) === true;
-  }
-
-  function voomPostHasProactiveCommentExpansion(post: VoomPost, characterId: string) {
-    const normalizedCharacterId = characterId.trim();
-    return Boolean(normalizedCharacterId && post.proactiveCommentExpansionCharacterIds?.includes(normalizedCharacterId));
-  }
-
-  function nextProactiveCommentExpansionCharacterIds(post: VoomPost, characterId: string) {
-    const normalizedCharacterId = characterId.trim();
-    return normalizedCharacterId
-      ? [...new Set([...(post.proactiveCommentExpansionCharacterIds ?? []), normalizedCharacterId])]
-      : post.proactiveCommentExpansionCharacterIds;
-  }
-
-  function pickAutoVoomCommentPost(conversationId: string) {
-    const conversation = conversationById(conversationId);
-    const character = conversation ? characterById(conversation.charId) : null;
-    if (!conversation || !character) return null;
-
-    const candidates = sortedVoomPosts.value
-      .filter((post) => voomPostCanBeAutoRepliedByConversation(post, conversation, character))
-      .filter((post) => post.comments.length < 80)
-      .slice(0, 12);
-    if (!candidates.length) return null;
-
-    const userCommentPosts = candidates.filter((post) => post.comments.some((comment) => comment.authorId === character.boundUserId));
-    const pool = userCommentPosts.length ? userCommentPosts : candidates;
-    return pool[Math.floor(Math.random() * pool.length)] ?? null;
-  }
-
-  async function autoReplyToVoomComments(conversationId: string) {
-    const post = pickAutoVoomCommentPost(conversationId);
-    if (!post) return false;
-    return replyToVoomComments(post.id, { actorConversationId: conversationId, silent: true, proactive: true });
-  }
-
-  async function replyToVoomComments(postId: string, options: { actorConversationId?: string; silent?: boolean; suppressGlobalNotice?: boolean; proactive?: boolean } = {}) {
+  async function replyToVoomComments(postId: string, options: { actorConversationId?: string; silent?: boolean; suppressGlobalNotice?: boolean } = {}) {
     if (isReplyingVoomComments(postId)) return;
 
     const post = voomPosts.value.find((entry) => entry.id === postId);
@@ -5446,7 +5345,6 @@ export const useAppStore = defineStore('app', () => {
 
     const character = characterById(conversation.charId);
     if (!character) return;
-    if (options.proactive && voomPostHasProactiveCommentExpansion(post, character.id)) return false;
 
     const boundUser = userById(character.boundUserId) ?? user.value;
     if (!boundUser) return;
@@ -5492,10 +5390,9 @@ export const useAppStore = defineStore('app', () => {
       });
 
       const createdAt = Date.now();
-    const latestPost = voomPosts.value.find((entry) => entry.id === postId);
-    if (!latestPost) return false;
-    if (options.proactive && voomPostHasProactiveCommentExpansion(latestPost, character.id)) return false;
-    const existingCommentIds = new Set(latestPost.comments.map((comment) => comment.id));
+      const latestPost = voomPosts.value.find((entry) => entry.id === postId);
+      if (!latestPost) return false;
+      const existingCommentIds = new Set(latestPost.comments.map((comment) => comment.id));
       const generatedIds = replies.map(() => createId('comment'));
       const generatedIdByDraftId = new Map(replies.flatMap((reply, index) => reply.draftId ? [[reply.draftId, generatedIds[index]]] : []));
       const characterVoomAuthorName = getCharacterVoomAuthorName(character);
@@ -5535,7 +5432,6 @@ export const useAppStore = defineStore('app', () => {
         ...latestPost,
         conversationId: latestPost.conversationId || conversation.id,
         conversationIds: targetConversations.map((targetConversation) => targetConversation.id),
-        proactiveCommentExpansionCharacterIds: options.proactive ? nextProactiveCommentExpansionCharacterIds(latestPost, character.id) : latestPost.proactiveCommentExpansionCharacterIds,
         comments: [...latestPost.comments, ...nextComments]
       };
       if (options.suppressGlobalNotice) {
@@ -5550,10 +5446,9 @@ export const useAppStore = defineStore('app', () => {
         formatVoomCommentEvent(comment, nextPost.comments),
         { mode: targetConversation.activeMode, voomPostId: post.id, voomCommentId: comment.id, voomEventType: 'reply', createdAt: comment.createdAt }
       ))));
-      if (!options.suppressGlobalNotice) notifyVoomComments(nextPost, nextComments, conversation);
       return true;
     } catch (error) {
-      if (options.silent) console.warn('Auto VOOM comment reply failed.', error);
+      if (options.silent) console.warn('VOOM comment reply failed.', error);
       else showConfigAlert(error instanceof Error ? error.message : '评论区回复生成失败。', '无法回复评论');
       return false;
     } finally {

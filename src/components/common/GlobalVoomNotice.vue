@@ -37,7 +37,6 @@ import { useAppStore } from '@/stores/appStore';
 import { playRingtone } from '@/services/ringtone';
 import type { VoomComment, VoomPost } from '@/types/domain';
 import { getCharacterVoomAuthorName, getCharacterVoomDisplayName } from '@/utils/character';
-import { getUserAiName, getUserVoomAuthorName } from '@/utils/profile';
 import { formatContentWithChineseTranslation } from '@/utils/translation';
 import { stripVoomCommentReplyPrefix } from '@/utils/voom';
 
@@ -50,16 +49,13 @@ const activeNoticeKey = ref('');
 const seenPostIds = ref<Set<string>>(new Set());
 const initialized = ref(false);
 
-const noticeableVoomPosts = computed(() => store.sortedVoomPosts.filter((post) => post.authorType !== 'user' || latestCharacterComment(post)));
-const activeNoticeComment = computed(() => activePost.value && activeNoticeKey.value.startsWith('comment:') ? latestCharacterComment(activePost.value) : null);
+const noticeableVoomPosts = computed(() => store.sortedVoomPosts.filter((post) => post.authorType !== 'user'));
 const voomNoticeTitle = computed(() => {
   if (!activePost.value) return 'VOOM 有新动态';
-  if (activeNoticeComment.value) return `${voomNoticeAuthorName(activeNoticeComment.value)} 评论了 VOOM`;
   return `${voomNoticePostAuthorName(activePost.value)} 发布了 VOOM`;
 });
 const voomNoticeBody = computed(() => {
   if (!activePost.value) return '';
-  if (activeNoticeComment.value) return formatContentWithChineseTranslation(activeNoticeComment.value.content, activeNoticeComment.value.contentTranslation);
   return formatContentWithChineseTranslation(activePost.value.content, activePost.value.contentTranslation);
 });
 const voomNoticeImage = computed(() => activePost.value?.image?.trim() || '');
@@ -104,7 +100,6 @@ function showNextVoomNotice() {
 function closeVoomNotice() {
   if (activePost.value) {
     const nextSeenKeys = new Set([...seenPostIds.value, activeNoticeKey.value || voomNoticeKey(activePost.value)]);
-    if (activeNoticeKey.value.startsWith('post:')) currentVoomNoticeCommentKey(activePost.value) && nextSeenKeys.add(currentVoomNoticeCommentKey(activePost.value)!);
     seenPostIds.value = nextSeenKeys;
     persistSeenPostIds();
   }
@@ -128,44 +123,16 @@ function normalizeAuthorKey(name = '') {
   return name.trim().toLocaleLowerCase();
 }
 
-function isCurrentUserVoomComment(comment: VoomComment) {
-  const currentUser = store.user;
-  if (!currentUser) return false;
-  if (comment.authorId && comment.authorId === currentUser.id) return true;
-  const authorName = normalizeAuthorKey(comment.authorName);
-  return [getUserVoomAuthorName(currentUser), getUserAiName(currentUser)]
-    .map(normalizeAuthorKey)
-    .filter(Boolean)
-    .includes(authorName);
-}
-
-function latestCharacterComment(post: VoomPost) {
-  return [...post.comments].reverse().find((comment) => !isCurrentUserVoomComment(comment)) ?? null;
-}
-
 function voomPostNoticeKey(post: VoomPost) {
   return `post:${post.id}`;
 }
 
-function voomCommentNoticeKey(post: VoomPost, comment: VoomComment) {
-  return `comment:${post.id}:${comment.id}`;
-}
-
-function currentVoomNoticeCommentKey(post: VoomPost) {
-  const latestComment = latestCharacterComment(post);
-  return latestComment ? voomCommentNoticeKey(post, latestComment) : '';
-}
-
 function currentVoomNoticeKeys(post: VoomPost) {
-  return [voomPostNoticeKey(post), currentVoomNoticeCommentKey(post)].filter(Boolean);
+  return [voomPostNoticeKey(post)];
 }
 
 function voomNoticeKey(post: VoomPost) {
-  const postKey = voomPostNoticeKey(post);
-  if (post.authorType !== 'user' && !seenPostIds.value.has(postKey)) return postKey;
-  const latestComment = latestCharacterComment(post);
-  if (latestComment) return voomCommentNoticeKey(post, latestComment);
-  return postKey;
+  return voomPostNoticeKey(post);
 }
 
 function voomNoticePostAuthorName(post: VoomPost) {
