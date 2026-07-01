@@ -2,7 +2,7 @@ import { openDB, type DBSchema, type IDBPDatabase } from 'idb';
 import { toRaw } from 'vue';
 import type { AppSettings, AppSnapshot, CharacterProfile, ChatImageAttachment, ChatMessage, Conversation, ConversationMemoryAtom, ConversationMemoryRecord, ConversationSettings, FavoriteMessageRecord, GeneratedImageRecord, MusicCommentThread, MusicTrack, SmallTheater, SmallTheaterTopic, Sticker, StickerGroup, UserProfile, VisualProfile, VoomPost, WorldBookEntry } from '@/types/domain';
 import { compressInlineImageDataUrl } from '@/utils/imageFile';
-import { normalizeUserProfile } from '@/utils/profile';
+import { normalizeUserProfile, removeVisualProfileAvatar } from '@/utils/profile';
 import { normalizeAppSettings } from '@/utils/settings';
 import { isLegacyGanadiSticker, isLegacyGanadiStickerGroup, isRecentStickerGroupId } from '@/utils/stickers';
 import { normalizeWorldBooks } from '@/utils/worldBook';
@@ -119,8 +119,12 @@ async function compactCharacterProfileInlineImages(character: CharacterProfile):
   const nextBoundUserProfile = await compactVisualProfileInlineImages(character.boundUserProfile);
   if (nextBoundUserProfile !== character.boundUserProfile) changed = true;
 
-  const nextProfile = await compactVisualProfileInlineImages(character.profile);
-  if (nextProfile !== character.profile) changed = true;
+  const rawProfile = character.profile as Partial<VisualProfile> | undefined;
+  const compactedProfile = await compactVisualProfileInlineImages(rawProfile);
+  const nextProfile = ('avatar' in (compactedProfile ?? {}))
+    ? removeVisualProfileAvatar(compactedProfile) as CharacterProfile['profile']
+    : compactedProfile as CharacterProfile['profile'];
+  if (compactedProfile !== rawProfile || nextProfile !== compactedProfile) changed = true;
 
   return changed
     ? {

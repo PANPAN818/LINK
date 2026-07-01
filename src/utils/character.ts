@@ -1,5 +1,5 @@
 import type { CharacterInitialProfile, CharacterProfile, CharacterProfileHistoryEntry, CharacterProfileHistoryField, VisualProfile } from '@/types/domain';
-import { normalizeVisualProfile } from '@/utils/profile';
+import { normalizeVisualProfile, removeVisualProfileAvatar, toCharacterVisualProfile } from '@/utils/profile';
 import { normalizeChatModelOverrides } from '@/utils/settings';
 import { normalizeVoomFrequency } from '@/utils/voom';
 
@@ -98,13 +98,13 @@ export function normalizeCharacterProfile(character: CharacterProfile, fallbackU
     : [];
   const voomFrequency = normalizeVoomFrequency(character.voomFrequency);
   const mindStateLines = normalizeCharacterMindStateLines(character.mindState?.lines);
-  const profile = normalizeVisualProfile(character.profile, {
+  const profile = toCharacterVisualProfile(normalizeVisualProfile(removeVisualProfileAvatar(character.profile), {
     id: character.id,
     nickname,
     name,
     avatar: character.avatar,
     signature
-  });
+  }));
   const boundUserProfile = character.boundUserProfile
     ? normalizeVisualProfile(character.boundUserProfile as Partial<VisualProfile>)
     : undefined;

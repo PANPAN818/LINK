@@ -200,7 +200,7 @@ import { Pencil } from 'lucide-vue-next';
 import AvatarCropperModal from '@/components/image/AvatarCropperModal.vue';
 import type { CharacterProfile, CharacterProfileHistoryEntry, VoomPost } from '@/types/domain';
 import { readImageFileFromInput } from '@/utils/imageFile';
-import { createVisualProfile, getCharacterVisualProfile, normalizeVisualProfile } from '@/utils/profile';
+import { createVisualProfile, getCharacterVisualProfile, normalizeVisualProfile, toCharacterVisualProfile } from '@/utils/profile';
 
 const profileHistoryTimeFormatter = new Intl.DateTimeFormat('zh-CN', {
   month: '2-digit',
@@ -249,7 +249,7 @@ const editorForm = reactive({
   following: ''
 });
 
-const displayAvatar = computed(() => visualProfile.value?.avatar || props.character.avatar);
+const displayAvatar = computed(() => props.character.avatar || visualProfile.value?.avatar);
 const sheetBackgroundImage = computed(() => visualProfile.value?.backgroundImage || displayAvatar.value);
 const sheetStyle = computed(() => ({
   color: visualProfile.value?.textColor || '#f5f3f1',
@@ -309,7 +309,7 @@ function openEditor() {
   const profile = visualProfile.value;
   isFlipped.value = false;
   editorForm.backgroundImage = profile?.backgroundImage ?? '';
-  editorForm.avatar = profile?.avatar || props.character.avatar || '';
+  editorForm.avatar = props.character.avatar || '';
   editorForm.textColor = profile?.textColor || '#f5f3f1';
   editorForm.avatarBorderColor = profile?.avatarBorderColor || '#090c0f';
   editorForm.posts = String(profile?.stats.posts ?? 0);
@@ -399,12 +399,12 @@ function saveEditor() {
   if (!profile) return;
 
   const nextPosts = Number.parseInt(editorForm.posts, 10);
-  const nextAvatar = editorForm.avatar.trim() || props.character.avatar || profile.avatar;
+  const nextAvatar = editorForm.avatar.trim() || props.character.avatar;
 
   emit('save', {
     ...props.character,
     avatar: nextAvatar,
-    profile: normalizeVisualProfile({
+    profile: toCharacterVisualProfile(normalizeVisualProfile({
       ...profile,
       avatar: nextAvatar,
       backgroundImage: editorForm.backgroundImage.trim() || profile.backgroundImage,
@@ -422,7 +422,7 @@ function saveEditor() {
     }, {
       ...props.character,
       avatar: nextAvatar
-    })
+    }))
   });
 
   isEditing.value = false;

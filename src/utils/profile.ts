@@ -1,4 +1,4 @@
-import type { CharacterProfile, UserProfile, UserVisualProfile, VisualProfile } from '@/types/domain';
+import type { CharacterProfile, CharacterVisualProfile, UserProfile, UserVisualProfile, VisualProfile } from '@/types/domain';
 import momoAvatar from '@/assets/profile/momo-avatar.png';
 import momoHighlightCafe from '@/assets/profile/momo-highlight-cafe.png';
 import momoHighlightLook from '@/assets/profile/momo-highlight-look.png';
@@ -178,13 +178,18 @@ export function createVisualProfile(user?: VisualProfileOwner): VisualProfile {
   };
 }
 
-function removeVisualProfileAvatar(profile: Partial<VisualProfile> | undefined) {
+export function removeVisualProfileAvatar(profile: Partial<VisualProfile> | undefined) {
   if (!profile) return undefined;
   const { avatar, ...profileWithoutAvatar } = profile;
   return profileWithoutAvatar;
 }
 
 export function toUserVisualProfile(profile: VisualProfile): UserVisualProfile {
+  const { avatar, ...profileWithoutAvatar } = profile;
+  return profileWithoutAvatar;
+}
+
+export function toCharacterVisualProfile(profile: VisualProfile): CharacterVisualProfile {
   const { avatar, ...profileWithoutAvatar } = profile;
   return profileWithoutAvatar;
 }
@@ -333,5 +338,5 @@ export function getVisualProfile(user: UserProfile | null): VisualProfile | null
 
 export function getCharacterVisualProfile(character: CharacterProfile | null): VisualProfile | null {
   if (!character) return null;
-  return normalizeVisualProfile(character.profile, character);
+  return normalizeVisualProfile(removeVisualProfileAvatar(character.profile), character);
 }

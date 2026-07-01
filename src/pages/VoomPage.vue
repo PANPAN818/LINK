@@ -380,7 +380,7 @@ function voomAuthorNameForPost(post: VoomPost) {
 }
 
 function voomCharacterAvatar(character: CharacterProfile) {
-  return getCharacterVisualProfile(character)?.avatar || character.avatar;
+  return character.avatar || getCharacterVisualProfile(character)?.avatar;
 }
 
 function voomAuthorAvatarForPost(post: VoomPost) {

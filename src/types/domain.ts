@@ -53,7 +53,9 @@ export interface VisualProfile {
   moments: VisualProfileMoment[];
 }
 
-export type UserVisualProfile = Omit<VisualProfile, 'avatar'>;
+export type AvatarlessVisualProfile = Omit<VisualProfile, 'avatar'>;
+export type UserVisualProfile = AvatarlessVisualProfile;
+export type CharacterVisualProfile = AvatarlessVisualProfile;
 
 export interface UserProfile {
   id: string;
@@ -107,7 +109,7 @@ export interface CharacterProfile {
   initialProfile?: CharacterInitialProfile;
   profileHistory?: CharacterProfileHistoryEntry[];
   boundUserProfile?: VisualProfile;
-  profile?: VisualProfile;
+  profile?: CharacterVisualProfile;
   mindState?: CharacterMindState;
   modelOverrides?: ChatModelOverrides;
 }
