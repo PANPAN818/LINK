@@ -42,12 +42,8 @@ onMounted(() => {
 });
 
 function goBack() {
-  if (window.history.length > 1) {
-    router.back();
-    return;
-  }
   const conversationId = theater.value?.conversationId;
-  void router.replace(conversationId ? { name: 'small-theater', params: { id: conversationId } } : { name: 'chats' });
+  void router.replace(conversationId ? { name: 'small-theater', params: { id: conversationId }, query: { tab: 'cards' } } : { name: 'chats' });
 }
 
 </script>

@@ -69,16 +69,21 @@
           </button>
         </section>
 
-        <article v-for="theater in theaters" :key="theater.id" class="theater-card" role="button" tabindex="0" @click="openTheater(theater.id)" @keydown.enter.prevent="openTheater(theater.id)">
-          <span class="theater-card-icon"><Clapperboard :size="19" /></span>
-          <span class="theater-card-content">
-            <strong>{{ theater.title }}</strong>
-            <em>{{ theater.summary }}</em>
-          </span>
-          <button class="theater-card-delete" type="button" aria-label="删除小剧场" @click.stop="deleteTheater(theater.id)">
-            <Trash2 :size="17" />
-          </button>
-        </article>
+        <section v-for="group in theaterGroups" :key="group.title" class="theater-topic-group" :aria-label="`${group.title}分类`">
+          <header class="theater-topic-group-head">
+            <span>{{ group.title }}</span>
+            <em>{{ group.items.length }}</em>
+          </header>
+          <article v-for="theater in group.items" :key="theater.id" class="theater-card" role="button" tabindex="0" @click="openTheater(theater.id)" @keydown.enter.prevent="openTheater(theater.id)">
+            <span class="theater-card-content">
+              <strong>{{ theater.title }}</strong>
+              <em>{{ theater.summary }}</em>
+            </span>
+            <button class="theater-card-delete" type="button" aria-label="删除小剧场" @click.stop="deleteTheater(theater.id)">
+              <X :size="18" stroke-width="2.6" />
+            </button>
+          </article>
+        </section>
 
         <section v-if="!theaters.length" class="theater-empty">
           <Clapperboard :size="28" />
@@ -90,11 +95,11 @@
     </main>
 
     <nav class="theater-bottom-tabs" aria-label="小剧场页面切换">
-      <button type="button" :class="{ active: activeTab === 'topics' }" @click="activeTab = 'topics'">
+      <button type="button" :class="{ active: activeTab === 'topics' }" @click="setActiveTab('topics')">
         <ListChecks :size="20" />
         <span>题材管理</span>
       </button>
-      <button type="button" :class="{ active: activeTab === 'cards' }" @click="activeTab = 'cards'">
+      <button type="button" :class="{ active: activeTab === 'cards' }" @click="setActiveTab('cards')">
         <PanelsTopLeft :size="20" />
         <span>生成卡片</span>
       </button>
@@ -117,7 +122,7 @@
         <div class="topic-editor-actions" :class="{ editing: editingTopicId }">
           <button v-if="editingTopicId" class="danger" type="button" @click="deleteEditingTopic">删除</button>
           <button class="secondary" type="button" @click="showTopicEditor = false">取消</button>
-          <button class="primary" type="submit">{{ editingTopicId ? '保存编辑' : '保存' }}</button>
+          <button class="primary" type="submit">{{ editingTopicId ? '保存' : '保存' }}</button>
         </div>
       </form>
     </AppModal>
@@ -139,18 +144,21 @@
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue';
-import { useRouter } from 'vue-router';
-import { Clapperboard, ListChecks, LoaderCircle, PanelsTopLeft, Plus, Sparkles, Trash2 } from 'lucide-vue-next';
+import { useRoute, useRouter } from 'vue-router';
+import { Clapperboard, ListChecks, LoaderCircle, PanelsTopLeft, Plus, Sparkles, X } from 'lucide-vue-next';
 import AppModal from '@/components/common/AppModal.vue';
 import { useAppStore } from '@/stores/appStore';
-import type { SmallTheaterTopic } from '@/types/domain';
+import type { SmallTheater, SmallTheaterTopic } from '@/types/domain';
 
 const props = defineProps<{ id: string }>();
 
+const route = useRoute();
 const router = useRouter();
 const store = useAppStore();
 
-const activeTab = ref<'topics' | 'cards'>('topics');
+type SmallTheaterTab = 'topics' | 'cards';
+
+const activeTab = ref<SmallTheaterTab>(normalizeTheaterTab(route.query.tab));
 const showTopicEditor = ref(false);
 const editingTopicId = ref<string | null>(null);
 const selectedTopicId = ref('');
@@ -162,6 +170,20 @@ const character = computed(() => conversation.value ? store.characterById(conver
 const topics = computed(() => character.value ? store.smallTheaterTopicsForCharacter(character.value.id) : []);
 const theaters = computed(() => character.value ? store.smallTheatersForCharacter(character.value.id) : []);
 const enabledTopics = computed(() => topics.value.filter((topic) => topic.enabled));
+const theaterGroups = computed(() => groupTheatersByTopic(theaters.value));
+
+function normalizeTheaterTab(tab: unknown): SmallTheaterTab {
+  return tab === 'cards' ? 'cards' : 'topics';
+}
+
+function groupTheatersByTopic(items: SmallTheater[]) {
+  const groups = new Map<string, SmallTheater[]>();
+  items.forEach((theater) => {
+    const title = theater.topicTitle.trim() || '未分类题材';
+    groups.set(title, [...(groups.get(title) ?? []), theater]);
+  });
+  return [...groups.entries()].map(([title, groupItems]) => ({ title, items: groupItems }));
+}
 
 onMounted(async () => {
   await store.hydrate();
@@ -171,6 +193,15 @@ onMounted(async () => {
 watch(() => character.value?.id, async (characterId) => {
   if (characterId) await store.ensureSmallTheaterTopicsForCharacter(characterId);
 }, { immediate: true });
+
+watch(() => route.query.tab, (tab) => {
+  activeTab.value = normalizeTheaterTab(tab);
+});
+
+function setActiveTab(tab: SmallTheaterTab) {
+  activeTab.value = tab;
+  void router.replace({ query: { ...route.query, tab } });
+}
 
 function goBack() {
   if (window.history.length > 1) {
@@ -446,8 +477,9 @@ async function deleteTheater(theaterId: string) {
   height: 22px;
   padding: 0;
   border-radius: 999px;
-  background: #dedad7;
-  transition: background 0.18s ease;
+  background: #e6ebe8;
+  box-shadow: inset 0 0 0 1px rgba(120, 128, 122, 0.12);
+  transition: background 0.18s ease, box-shadow 0.18s ease;
 }
 
 .topic-switch span {
@@ -462,7 +494,8 @@ async function deleteTheater(theaterId: string) {
 }
 
 .topic-switch.active {
-  background: #171717;
+  background: #c9ecd5;
+  box-shadow: inset 0 0 0 1px rgba(91, 174, 120, 0.3);
 }
 
 .topic-switch.active span {
@@ -470,21 +503,28 @@ async function deleteTheater(theaterId: string) {
 }
 
 .theater-card-delete {
+  position: absolute;
+  top: 8px;
+  right: 8px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   width: 28px;
   height: 28px;
-  border-radius: 9px;
-  background: rgba(239, 68, 90, 0.08);
-  color: #ef445a;
+  border-radius: 999px;
+  background: transparent;
+  color: #4f9f6a;
+}
+
+.theater-card-delete:active {
+  background: rgba(201, 236, 213, 0.24);
 }
 
 .generate-panel {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(116px, auto);
+  grid-template-columns: minmax(0, 1fr) minmax(108px, 116px);
   align-items: end;
-  gap: 10px;
+  gap: 8px;
   padding: 12px;
 }
 
@@ -528,12 +568,26 @@ async function deleteTheater(theaterId: string) {
   align-items: center;
   justify-content: center;
   gap: 7px;
+  flex-wrap: nowrap;
   min-height: 42px;
-  padding: 0 14px;
+  min-width: 0;
+  padding: 0 12px;
   border-radius: 12px;
-  background: #171717;
-  color: #ffffff;
+  background: #c9ecd5;
+  color: #24613a;
   font-weight: 900;
+  white-space: nowrap;
+}
+
+.generate-button {
+  width: 100%;
+}
+
+.generate-button span,
+.topic-editor-actions button {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
@@ -546,29 +600,74 @@ async function deleteTheater(theaterId: string) {
 }
 
 .theater-card {
+  position: relative;
   display: grid;
-  grid-template-columns: 34px minmax(0, 1fr) 28px;
-  gap: 10px;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
   width: 100%;
-  padding: 10px;
+  min-height: 62px;
+  padding: 12px 42px 12px 14px;
+  border-color: rgba(129, 171, 145, 0.14);
+  border-radius: 18px;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.95) 0%, rgba(248, 252, 249, 0.92) 100%);
+  box-shadow: 0 10px 24px rgba(36, 70, 47, 0.05), inset 0 1px 0 rgba(255, 255, 255, 0.86);
   text-align: left;
   cursor: pointer;
 }
 
-.theater-card-icon {
-  display: inline-flex;
+.theater-card:active {
+  transform: translateY(1px);
+  box-shadow: 0 6px 16px rgba(36, 70, 47, 0.05), inset 0 1px 0 rgba(255, 255, 255, 0.86);
+}
+
+.theater-topic-group {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding-top: 8px;
+}
+
+.theater-topic-group + .theater-topic-group {
+  margin-top: 2px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(20, 24, 22, 0.06);
+}
+
+.theater-topic-group-head {
+  display: flex;
   align-items: center;
-  justify-content: center;
-  width: 34px;
-  height: 34px;
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.72);
-  color: #171717;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 0 2px;
+  color: #7b625f;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.theater-topic-group-head span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.theater-topic-group-head em {
+  flex: 0 0 auto;
+  min-width: 22px;
+  height: 20px;
+  border-radius: 999px;
+  background: rgba(201, 236, 213, 0.48);
+  color: #2f7b49;
+  font-size: 10px;
+  font-style: normal;
+  line-height: 20px;
+  text-align: center;
 }
 
 .theater-card-content {
   display: grid;
-  gap: 4px;
+  gap: 5px;
   min-width: 0;
 }
 
@@ -580,13 +679,14 @@ async function deleteTheater(theaterId: string) {
 }
 
 .theater-card-content strong {
-  color: #111111;
-  font-size: 14px;
+  color: #151719;
+  font-size: 13px;
   font-weight: 900;
+  letter-spacing: 0;
 }
 
 .theater-card-content em {
-  color: #85898e;
+  color: #8a928c;
   font-size: 12px;
   font-style: normal;
   font-weight: 500;
@@ -670,8 +770,23 @@ async function deleteTheater(theaterId: string) {
 }
 
 .topic-editor-switch input {
-  width: 18px;
-  height: 18px;
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 20px;
+  width: 20px;
+  height: 20px;
+  margin: 0;
+  padding: 0;
+  border: 1px solid rgba(91, 174, 120, 0.34);
+  border-radius: 50%;
+  appearance: none;
+  background: #ffffff;
+  box-shadow: inset 0 0 0 2px #ffffff;
+}
+
+.topic-editor-switch input:checked {
+  background: #c9ecd5;
+  border-color: #8dd5a5;
 }
 
 .topic-editor-actions {
@@ -681,11 +796,12 @@ async function deleteTheater(theaterId: string) {
 }
 
 .topic-editor-actions.editing {
-  grid-template-columns: 0.9fr 0.9fr 1.2fr;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .topic-editor-actions .secondary,
 .topic-editor-actions .danger {
+  min-width: 0;
   min-height: 42px;
   border-radius: 14px;
   background: rgba(17, 17, 17, 0.06);
@@ -694,8 +810,8 @@ async function deleteTheater(theaterId: string) {
 }
 
 .topic-editor-actions .danger {
-  background: rgba(239, 68, 90, 0.1);
-  color: #ef445a;
+  background: rgba(201, 236, 213, 0.36);
+  color: #2f7b49;
 }
 
 .missing-theater {
@@ -713,10 +829,6 @@ async function deleteTheater(theaterId: string) {
 
   .theater-main {
     padding-inline: 12px;
-  }
-
-  .generate-panel {
-    grid-template-columns: minmax(0, 1fr);
   }
 
   .theater-bottom-tabs {
