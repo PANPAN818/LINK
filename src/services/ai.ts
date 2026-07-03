@@ -6,6 +6,7 @@ import { getUserAiName } from '@/utils/profile';
 import { defaultNovelAiModels, defaultPollinationsModels, getResolvedApiConfig, getResolvedOpenAiImageConfig, novelAiOfficialApiUrl, novelAiProxyApiUrl } from '@/utils/settings';
 import { estimateTokenCount } from '@/utils/memory';
 import { getStickerDisplayImageUrl } from '@/utils/stickers';
+import { assertRenderableSmallTheaterHtml, withSmallTheaterRuntimeGuard } from '@/utils/smallTheaterHtml';
 import { renderTimeAwarenessPrompt } from '@/utils/timeAwareness';
 import { formatContentWithChineseTranslation, normalizeTranslationText } from '@/utils/translation';
 import { getVoomFrequencyChance, stripVoomCommentReplyPrefix } from '@/utils/voom';
@@ -2147,7 +2148,7 @@ function buildSmallTheaterPrompt(input: { context: PromptContext; topic: SmallTh
     `输出格式：只输出一个完整 HTML 文件代码块，形如：\n\`\`\`html\n<!doctype html>...\n\`\`\`。不要输出解释、JSON、Markdown 标题或代码块之外的文字。`,
     `HTML 要求：
 1. 必须包含 <!doctype html>、<html>、<head>、<meta charset="UTF-8">、<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">、<title>、完整 <style> 和 <script>。
-2. 页面必须从视口顶端开始全屏展示，不要预留宿主应用标题栏、返回栏或底部导航空间；使用 html, body { margin: 0; min-height: 100%; overflow-x: hidden; }，主容器使用 min-height: 100dvh 并提供 100svh/100vh 兼容兜底。
+2. 使用 html, body { margin: 0; min-height: 100%; overflow-x: hidden; }，主容器使用 min-height: 100dvh 并提供 100svh/100vh 兼容兜底。
 3. 必须适配手机端 320px-480px 宽度，考虑安全区、竖屏滚动、触控目标、按钮状态、长文本换行、软键盘、深浅色视觉对比和浏览器地址栏高度变化。
 4. 页面默认只允许纵向滚动，不要产生横向滚动；任何宽图、表格、卡片、代码、长词、按钮组都必须 max-width: 100%、min-width: 0、overflow-wrap: anywhere 或在局部容器内可控滚动。
 5. 不要把正文塞进固定高度的内部滚动面板；除非是明确的短列表/弹层，内容应随页面自然向下延展，避免用户在手机上看不完整或出现双重滚动。
@@ -2160,12 +2161,13 @@ function buildSmallTheaterPrompt(input: { context: PromptContext; topic: SmallTh
 12. 标题、正文、按钮文案和交互反馈要自然、有代入感；不要在页面里解释“这是功能”“这是 HTML/CSS/JS”“如何使用本应用”。
 13. 这是番外，不改变正文事实；如果写平行世界、传闻、论坛猜测或匿名爆料，必须在页面语气里自然体现它不是既定事实。
 14. JavaScript 必须健壮：使用 DOMContentLoaded 或脚本放在 body 末尾，选择器存在性要检查，事件委托或逐项绑定都要防空值，交互不能因为缺少元素报错。
-15. 任何弹层、抽屉、菜单、toast、底部操作栏都必须能关闭或自动让出正文；固定定位元素必须考虑 safe-area，并且不能永久遮住主要内容、输入框或按钮。
-16. 表单和输入框在 iOS 上字体至少 16px，避免聚焦缩放；输入反馈要即时显示，不能依赖 alert、confirm、prompt。
-17. CSS 不能依赖尚未定义的变量；不要使用会导致空白页的实验特性作为唯一布局手段，复杂效果必须有普通 CSS 兜底。
-18. <script> 中不要使用 import、export、TypeScript、顶层 await、fetch、localStorage、IndexedDB、跨域资源或框架语法；只使用可在沙盒 iframe 里直接运行的原生 JavaScript。
-19. 视觉要完整：有明确层级、背景、卡片/列表/控件状态、空状态或完成状态，避免文字溢出、重叠、按钮过小、点击无响应、内容被裁切或页面横向滚动。
-20. 输出前自检：在 320px、390px、480px 宽的手机竖屏里，首屏不空白，主要内容完整可滚动，所有交互可点，底部内容可到达，页面不会因为一段脚本错误整体不可用。`
+15. <body> 里必须先写出可见的静态 HTML 内容，JavaScript 只能增强交互，不能把全部正文放在脚本里动态生成；即使脚本失败，用户也要能看到标题、正文和主要控件。
+16. 任何弹层、抽屉、菜单、toast、底部操作栏都必须能关闭或自动让出正文；固定定位元素必须考虑 safe-area，并且不能永久遮住主要内容、输入框或按钮。
+17. 表单和输入框在 iOS 上字体至少 16px，避免聚焦缩放；输入反馈要即时显示，不能依赖 alert、confirm、prompt。
+18. CSS 不能依赖尚未定义的变量；不要使用会导致空白页的实验特性作为唯一布局手段，复杂效果必须有普通 CSS 兜底。
+19. <script> 中不要使用 import、export、TypeScript、顶层 await、fetch、localStorage、IndexedDB、跨域资源或框架语法；只使用可在沙盒 iframe 里直接运行的原生 JavaScript。
+20. 视觉要完整：有明确层级、背景、卡片/列表/控件状态、空状态或完成状态，避免文字溢出、重叠、按钮过小、点击无响应、内容被裁切或页面横向滚动。
+21. 输出前自检：在 320px、390px、480px 宽的手机竖屏里，首屏不空白，主要内容完整可滚动，所有交互可点，底部内容可到达，页面不会因为一段脚本错误整体不可用。`
   ].join('\n\n');
 }
 
@@ -2179,8 +2181,10 @@ export async function generateSmallTheater(input: {
   requireTextGenerationConfig(input.settings, input.modelOverride, '小剧场生成');
   const prompt = buildSmallTheaterPrompt({ context: input.context, topic: input.topic, recentTheaters: input.recentTheaters });
   const apiReply = await callTextApi(input.settings, prompt, input.modelOverride);
-  const html = ensureCompleteHtmlDocument(apiReply, input.topic.title);
+  let html = ensureCompleteHtmlDocument(apiReply, input.topic.title);
   if (!html) throw new Error('小剧场模型没有返回 HTML 内容。');
+  assertRenderableSmallTheaterHtml(html);
+  html = withSmallTheaterRuntimeGuard(html, input.topic.title);
 
   const fallbackSummary = `由「${input.topic.title}」生成的互动番外小剧场。`;
   return {

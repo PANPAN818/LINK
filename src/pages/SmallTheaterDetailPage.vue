@@ -1,6 +1,6 @@
 <template>
   <section v-if="theater" class="screen no-tabs theater-detail-page">
-    <iframe class="theater-frame" :title="theater.title" :srcdoc="theater.html" sandbox="allow-scripts"></iframe>
+    <iframe class="theater-frame" :title="theater.title" :srcdoc="theaterSrcdoc" sandbox="allow-scripts"></iframe>
   </section>
 
   <section v-else class="screen no-tabs theater-detail-page missing-detail">
@@ -23,6 +23,7 @@ import { computed, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { Clapperboard } from 'lucide-vue-next';
 import { useAppStore } from '@/stores/appStore';
+import { withSmallTheaterRuntimeGuard } from '@/utils/smallTheaterHtml';
 
 const props = defineProps<{ theaterId: string }>();
 
@@ -30,6 +31,7 @@ const router = useRouter();
 const store = useAppStore();
 
 const theater = computed(() => store.smallTheaterById(props.theaterId));
+const theaterSrcdoc = computed(() => theater.value ? withSmallTheaterRuntimeGuard(theater.value.html, theater.value.title) : '');
 
 onMounted(() => {
   void store.hydrate();
