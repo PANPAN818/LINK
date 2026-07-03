@@ -30,6 +30,9 @@ interface LinkDb extends DBSchema {
 }
 
 let dbPromise: Promise<IDBPDatabase<LinkDb>> | undefined;
+let backupReadLockDepth = 0;
+let backupReadLockReleased: Promise<void> | null = null;
+let releaseBackupReadLock: (() => void) | null = null;
 
 const storeNames = ['user', 'characters', 'conversations', 'messages', 'voomPosts', 'smallTheaterTopics', 'smallTheaters', 'musicFavoriteTracks', 'musicCommentThreads', 'worldBooks', 'stickerGroups', 'stickers', 'conversationSettings', 'conversationMemories', 'conversationMemoryAtoms', 'generatedImages', 'favorites', 'settings'] as const;
 const legacyDefaultUserIds = new Set(['1008600002']);
@@ -42,6 +45,28 @@ const inlineAvatarCompressionOptions = { maxDimension: 320, quality: 0.76, minBy
 const inlineProfileImageCompressionOptions = { maxDimension: 960, quality: 0.72, minBytes: 160 * 1024 };
 const startupMaintenanceStorageKey = 'link:storage-maintenance:2026-06-inline-media-v1';
 let startupMaintenancePromise: Promise<void> | null = null;
+
+async function waitForBackupReadLock() {
+  while (backupReadLockDepth > 0 && backupReadLockReleased) await backupReadLockReleased;
+}
+
+export async function withBackupReadLock<T>(task: () => Promise<T>): Promise<T> {
+  backupReadLockDepth += 1;
+  backupReadLockReleased ??= new Promise<void>((resolve) => {
+    releaseBackupReadLock = resolve;
+  });
+
+  try {
+    return await task();
+  } finally {
+    backupReadLockDepth = Math.max(0, backupReadLockDepth - 1);
+    if (backupReadLockDepth === 0) {
+      releaseBackupReadLock?.();
+      backupReadLockReleased = null;
+      releaseBackupReadLock = null;
+    }
+  }
+}
 
 function isInlineImageDataUrl(value: string | undefined) {
   return /^data:image\//i.test(String(value ?? '').trim());
@@ -722,6 +747,7 @@ function stripVueProxy(value: unknown, seen: WeakMap<object, unknown>): unknown 
 }
 
 export async function putEntity<TStore extends StoreName>(storeName: TStore, value: LinkDb[TStore]['value'], key?: LinkDb[TStore]['key']) {
+  await waitForBackupReadLock();
   const db = await getDb();
   const compactedValue = await compactValueForStore(storeName, value);
   const persistableValue = toPersistableValue(compactedValue);
@@ -733,6 +759,7 @@ export async function putEntity<TStore extends StoreName>(storeName: TStore, val
 }
 
 export async function deleteEntity<TStore extends StoreName>(storeName: TStore, key: LinkDb[TStore]['key']) {
+  await waitForBackupReadLock();
   const db = await getDb();
   await db.delete(storeName, key as never);
 }

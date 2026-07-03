@@ -39,7 +39,7 @@
               <input v-model.number="manualSummary.visibleTailFloors" min="0" type="number" />
             </label>
           </div>
-          <p>选择本轮要并入新增大总结的楼层；生成时会读取 1-结束楼层正文和该区间回忆录。</p>
+          <p>选择本轮要并入新增大总结的楼层；生成时只会读取所选楼层正文和该区间回忆录。</p>
           <div class="manual-summary-actions">
             <button class="summary-submit" type="submit" :disabled="summarizing || !canManualSummarize">新增大总结</button>
             <button class="secondary-action" type="button" @click="fillLatestRange">填入未大总结楼层</button>
@@ -953,6 +953,102 @@ const canManualSummarize = computed(() => {
   const end = Number(manualSummary.endFloor);
   return Number.isFinite(start) && Number.isFinite(end) && start >= 1 && end >= start && end <= messageCount.value;
 });
+const tokenEstimateKey = computed(() => JSON.stringify({
+  tab: activeTab.value,
+  conversationId: props.conversationId,
+  conversation: (() => {
+    const conversation = store.conversationById(props.conversationId);
+    return conversation ? { activeMode: conversation.activeMode, summary: conversation.summary, charId: conversation.charId, userId: conversation.userId } : null;
+  })(),
+  character: {
+    id: props.character.id,
+    nickname: props.character.nickname,
+    name: props.character.name,
+    signature: props.character.signature,
+    description: props.character.description,
+    boundUserId: props.character.boundUserId,
+    localWorldBookIds: props.character.localWorldBookIds
+  },
+  boundUser: boundUser.value ? {
+    id: boundUser.value.id,
+    nickname: boundUser.value.nickname,
+    name: boundUser.value.name,
+    signature: boundUser.value.signature,
+    description: boundUser.value.description
+  } : null,
+  settings: currentConversationSettings.value,
+  messages: conversationMessages.value.map((message) => ({
+    id: message.id,
+    sender: message.sender,
+    mode: message.mode,
+    content: message.content,
+    createdAt: message.createdAt,
+    editedAt: message.editedAt,
+    displayStyle: message.displayStyle,
+    replyBatchId: message.replyBatchId,
+    replyVariantState: message.replyVariantState,
+    voomPostId: message.voomPostId,
+    voomCommentId: message.voomCommentId,
+    voomEventType: message.voomEventType,
+    quote: message.quote ? {
+      sender: message.quote.sender,
+      content: message.quote.content,
+      sticker: message.quote.sticker ? { description: message.quote.sticker.description, hasImage: Boolean(message.quote.sticker.imageUrl) } : undefined,
+      image: message.quote.image ? { kind: message.quote.image.kind, description: message.quote.image.description, aiHint: message.quote.image.aiHint, hasUrl: Boolean(message.quote.image.url) } : undefined,
+      voice: message.quote.voice ? { transcript: message.quote.voice.transcript } : undefined,
+      location: message.quote.location,
+      transfer: message.quote.transfer,
+      offlineInvitation: message.quote.offlineInvitation
+    } : undefined,
+    sticker: message.sticker ? { description: message.sticker.description, hasImage: Boolean(message.sticker.imageUrl) } : undefined,
+    image: message.image ? { kind: message.image.kind, description: message.image.description, aiHint: message.image.aiHint, hasUrl: Boolean(message.image.url) } : undefined,
+    voice: message.voice ? { transcript: message.voice.transcript } : undefined,
+    location: message.location,
+    transfer: message.transfer,
+    offlineInvitation: message.offlineInvitation
+  })),
+  memories: memories.value.map((memory) => ({
+    id: memory.id,
+    mode: memory.mode,
+    kind: memory.kind,
+    startFloor: memory.startFloor,
+    endFloor: memory.endFloor,
+    hiddenStartFloor: memory.hiddenStartFloor,
+    hiddenEndFloor: memory.hiddenEndFloor,
+    summary: memory.summary,
+    tokenCount: memory.tokenCount,
+    entries: memory.entries,
+    sourceMessageIds: memory.sourceMessageIds,
+    summaryRole: memory.summaryRole,
+    isMergedSummary: memory.isMergedSummary,
+    mergedFrom: memory.mergedFrom?.map((child) => ({ id: child.id, startFloor: child.startFloor, endFloor: child.endFloor, hiddenStartFloor: child.hiddenStartFloor, hiddenEndFloor: child.hiddenEndFloor, summary: child.summary, entries: child.entries, sourceMessageIds: child.sourceMessageIds, summaryRole: child.summaryRole, isMergedSummary: child.isMergedSummary })),
+    createdAt: memory.createdAt,
+    updatedAt: memory.updatedAt
+  })),
+  worldBooks: store.worldBooks.map((book) => ({
+    id: book.id,
+    title: book.title,
+    content: book.content,
+    scope: book.scope,
+    enabled: book.enabled,
+    entries: book.entries.map((entry) => ({
+      id: entry.id,
+      title: entry.title,
+      content: entry.content,
+      enabled: entry.enabled,
+      activation: entry.activation,
+      keys: entry.keys,
+      secondaryKeys: entry.secondaryKeys,
+      position: entry.position,
+      order: entry.order,
+      depth: entry.depth,
+      probability: entry.probability,
+      caseSensitive: entry.caseSensitive
+    }))
+  })),
+  stickerGroups: store.stickerGroups.map((group) => ({ id: group.id, name: group.name, sortOrder: group.sortOrder, updatedAt: group.updatedAt })),
+  stickers: store.stickers.map((sticker) => ({ id: sticker.id, description: sticker.description, groupIds: sticker.groupIds, hasImage: Boolean(sticker.imageUrl), updatedAt: sticker.updatedAt }))
+}));
 
 function cancelScheduledTokenEstimate() {
   const idleWindow = typeof window !== 'undefined' ? window as IdleWindow : null;
@@ -976,12 +1072,20 @@ function scheduleTokenEstimate() {
   }
   totalMemoryTokenPending.value = true;
   const runId = tokenEstimateRun;
-  const runEstimate = () => {
+  const runEstimate = async () => {
     tokenEstimateTimer = undefined;
     tokenEstimateIdleId = undefined;
     if (runId !== tokenEstimateRun || activeTab.value !== 'memory') return;
-    totalMemoryTokens.value = store.nextReplyTokenCountForConversation(props.conversationId);
-    totalMemoryTokenPending.value = false;
+    try {
+      const tokenCount = await store.nextReplyTokenCountForConversationAsync(props.conversationId);
+      if (runId !== tokenEstimateRun || activeTab.value !== 'memory') return;
+      totalMemoryTokens.value = tokenCount;
+    } catch {
+      if (runId !== tokenEstimateRun || activeTab.value !== 'memory') return;
+      totalMemoryTokens.value = null;
+    } finally {
+      if (runId === tokenEstimateRun && activeTab.value === 'memory') totalMemoryTokenPending.value = false;
+    }
   };
   const idleWindow = typeof window !== 'undefined' ? window as IdleWindow : null;
   if (idleWindow?.requestIdleCallback) {
@@ -1014,7 +1118,7 @@ watch(
 );
 
 watch(
-  () => [activeTab.value, props.conversationId, messageCount.value, memories.value.length, currentConversationSettings.value] as const,
+  () => tokenEstimateKey.value,
   scheduleTokenEstimate,
   { immediate: true }
 );
@@ -1202,10 +1306,11 @@ async function manualSummarize() {
       visibleTailFloors: Math.max(0, Math.floor(Number(manualSummary.visibleTailFloors) || 0))
     });
     if (result?.status === 'existing') {
-      store.showConfigAlert(`1-${result.record.endFloor} 楼新增大总结已存在，可直接编辑或先删除后重建。`, '大总结已存在');
+      store.showConfigAlert(`${result.record.startFloor}-${result.record.endFloor} 楼新增大总结已存在，可直接编辑或先删除后重建。`, '大总结已存在');
     } else if (result?.status === 'busy') {
+      const busyStartFloor = result.record?.startFloor ?? segmentStartFloor;
       const busyEndFloor = result.record?.endFloor ?? endFloor;
-      store.showConfigAlert(`1-${busyEndFloor} 楼新增大总结正在生成中，请稍后刷新记忆空间。`, '大总结生成中');
+      store.showConfigAlert(`${busyStartFloor}-${busyEndFloor} 楼新增大总结正在生成中，请稍后刷新记忆空间。`, '大总结生成中');
     } else if (!result) {
       store.showConfigAlert(`该楼层范围暂时无法生成新增大总结，当前会话只有 ${messageCount.value} 楼，请检查结束楼层。`, '无法生成');
     }
@@ -1216,9 +1321,26 @@ async function manualSummarize() {
 }
 
 function fillLatestRange() {
-  const lastEndFloor = memories.value.flatMap((memory) => collectIncrementalGrandSummaries(memory)).reduce((max, memory) => Math.max(max, memory.endFloor), 0);
-  const startFloor = Math.min(Math.max(1, lastEndFloor + 1), Math.max(1, messageCount.value));
-  const endFloor = Math.max(startFloor, messageCount.value);
+  const floorCount = Math.max(1, messageCount.value);
+  const coveredRanges = memories.value
+    .flatMap((memory) => collectIncrementalGrandSummaries(memory))
+    .map((memory) => ({
+      startFloor: Math.max(1, Math.floor(memory.startFloor)),
+      endFloor: Math.max(1, Math.floor(memory.endFloor))
+    }))
+    .filter((range) => range.endFloor >= range.startFloor)
+    .sort((left, right) => left.startFloor - right.startFloor || left.endFloor - right.endFloor);
+  let startFloor = 1;
+  let endFloor = floorCount;
+  for (const range of coveredRanges) {
+    if (range.endFloor < startFloor) continue;
+    if (range.startFloor > startFloor) {
+      endFloor = Math.min(floorCount, range.startFloor - 1);
+      break;
+    }
+    startFloor = Math.max(startFloor, range.endFloor + 1);
+  }
+  if (startFloor > floorCount) startFloor = floorCount;
   manualSummary.startFloor = startFloor;
   manualSummary.endFloor = endFloor;
   manualSummary.hiddenStartFloor = draft.memory.grandSummaryHiddenStartFloor;
@@ -1373,10 +1495,12 @@ function manualSummaryDetailLines() {
   const startFloor = Math.max(1, Math.floor(Number(manualSummary.startFloor)));
   const endFloor = Math.max(startFloor, Math.floor(Number(manualSummary.endFloor)));
   const visibleTailFloors = Math.max(0, Math.floor(Number(manualSummary.visibleTailFloors) || 0));
-  const hiddenRange = getGrandSummaryHiddenRange(endFloor, manualSummary.hiddenStartFloor, visibleTailFloors);
+  const hiddenStartFloor = Math.max(0, Math.floor(Number(manualSummary.hiddenStartFloor) || 0));
+  const effectiveHiddenStartFloor = hiddenStartFloor > 0 ? Math.max(startFloor, hiddenStartFloor) : 0;
+  const hiddenRange = getGrandSummaryHiddenRange(endFloor, effectiveHiddenStartFloor, visibleTailFloors);
   return [
     `新增区间：${startFloor}-${endFloor}楼`,
-    `大总结范围：1-${endFloor}楼`,
+    `大总结范围：${startFloor}-${endFloor}楼`,
     draft.memory.hideSummarizedMessages && hiddenRange.hiddenStartFloor > 0 ? `隐藏范围：成功后隐藏 ${hiddenRange.hiddenStartFloor}-${hiddenRange.hiddenEndFloor}楼，保留最新 ${visibleTailFloors} 楼` : '隐藏范围：当前不会隐藏楼层',
     `当前对话总楼层：${messageCount.value}`
   ];
@@ -1420,7 +1544,7 @@ function requestManualSummarize() {
   openConfirmDialog({
     eyebrow: 'Manual grand memory',
     title: '新增这段大总结？',
-    message: '会读取 1-结束楼层正文和所选区间回忆录，生成新增大总结；成功后会删除该区间回忆录。',
+    message: '会读取所选楼层正文和该区间回忆录，生成新增大总结；成功后会删除该区间回忆录。',
     details: manualSummaryDetailLines(),
     confirmText: '新增大总结',
     runningText: '生成中',

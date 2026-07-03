@@ -2,7 +2,7 @@ import { computed, ref, toRaw } from 'vue';
 import { defineStore } from 'pinia';
 import { deleteEntity, loadSnapshot, putEntity, replaceSnapshot, scheduleStartupStorageMaintenance } from '@/data/db';
 import { defaultSettings } from '@/data/seed';
-import type { AppSettings, AppSnapshot, CharacterProfile, CharacterProfileHistoryEntry, CharacterProfileHistoryField, ChatImageAttachment, ChatImageCandidate, ChatLocationAttachment, ChatMessage, ChatMessageQuote, ChatMode, ChatModelOverrides, ChatModelScope, ChatOfflineInvitationAttachment, ChatOfflineInvitationStatus, ChatTransferAttachment, ChatTransferStatus, ChatVoiceAttachment, Conversation, ConversationMemoryAtom, ConversationMemoryRecord, ConversationSettings, FavoriteMessageKind, FavoriteMessageRecord, GeneratedImageRecord, ImageModuleId, MusicCommentThread, MusicTrack, SmallTheater, SmallTheaterTopic, Sticker, StickerGroup, UserProfile, VisualProfile, VoomComment, VoomFrequency, VoomImageCandidate, VoomPost, VoomPostVisibility, WorldBookEntry } from '@/types/domain';
+import type { AppSettings, AppSnapshot, CharacterProfile, CharacterProfileHistoryEntry, CharacterProfileHistoryField, ChatImageAttachment, ChatImageCandidate, ChatLocationAttachment, ChatMessage, ChatMessageQuote, ChatMode, ChatModelOverrides, ChatModelScope, ChatOfflineInvitationAttachment, ChatOfflineInvitationStatus, ChatTransferAttachment, ChatTransferStatus, ChatVoiceAttachment, Conversation, ConversationMemoryAtom, ConversationMemoryRecord, ConversationSettings, FavoriteMessageKind, FavoriteMessageRecord, GenerateReplyInput, GeneratedImageRecord, ImageModuleId, MusicCommentThread, MusicTrack, SmallTheater, SmallTheaterTopic, Sticker, StickerGroup, UserProfile, VisualProfile, VoomComment, VoomFrequency, VoomImageCandidate, VoomPost, VoomPostVisibility, WorldBookEntry } from '@/types/domain';
 import { createAccountId, createId } from '@/utils/id';
 import { getCharacterAiName, getCharacterInitialProfile, getCharacterVoomAuthorName, getCharacterVoomDisplayName, normalizeCharacterMindStateLines, normalizeCharacterProfile } from '@/utils/character';
 import { getUserAiName, getUserDisplayName, getUserVoomAuthorName, normalizeUserProfile, normalizeVisualProfile } from '@/utils/profile';
@@ -28,6 +28,30 @@ interface CreateUserVoomPostPayload {
   imageDescription?: string;
   visibility: VoomPostVisibility;
   characterIds: string[];
+}
+
+interface RoleplayReplyInputBundle {
+  conversation: Conversation;
+  character: CharacterProfile;
+  boundUser: UserProfile;
+  chatSettings: ConversationSettings;
+  modelOverride: string;
+  input: GenerateReplyInput;
+}
+
+interface BuildRoleplayReplyInputOptions {
+  proactive?: boolean;
+  replyInstruction?: string;
+  excludeSourceMessageIds?: string[];
+  timeAwarenessNow?: number;
+}
+
+interface IncrementalGrandSummaryOptions {
+  segmentStartFloor: number;
+  endFloor: number;
+  sourceStartFloor?: number;
+  hiddenStartFloor?: number;
+  visibleTailFloors?: number;
 }
 
 type ConversationSummaryResultStatus = 'created' | 'updated' | 'existing' | 'busy';
@@ -794,6 +818,71 @@ export const useAppStore = defineStore('app', () => {
     return memoryContextForConversation(id, queryText, options);
   }
 
+  function getLastUserTurnText(conversationMessages: ChatMessage[]) {
+    const lastUserMessages = [...conversationMessages].reverse().filter((message, index, reversedMessages) => {
+      const previousMessages = reversedMessages.slice(0, index);
+      return message.sender === 'user' && !previousMessages.some((previous) => previous.sender === 'char');
+    }).reverse();
+    return lastUserMessages.map((message) => messageReadableContent(message)).join('\n');
+  }
+
+  async function buildRoleplayReplyInputForConversation(conversationId: string, options: BuildRoleplayReplyInputOptions = {}): Promise<RoleplayReplyInputBundle | null> {
+    const conversation = conversationById(conversationId);
+    if (!conversation) return null;
+    const character = characterById(conversation.charId);
+    if (!character) return null;
+    const boundUser = userById(character.boundUserId) ?? user.value;
+    if (!boundUser) return null;
+
+    const conversationMessages = messagesForConversation(conversationId).filter((message) => message.replyVariantState !== 'inactive');
+    const userMessageText = getLastUserTurnText(conversationMessages);
+    const chatSettings = settingsForConversation(conversationId);
+    const modelOverride = getConversationTextModelOverride(chatSettings, conversation.activeMode);
+    const availableCharacterStickers = stickersForGroups(chatSettings.characterStickerGroupIds);
+    const memorySummary = await memoryContextForConversationAsync(conversationId, userMessageText, {
+      storeDebug: false,
+      modelOverride: getConversationTextModelOverride(chatSettings, 'summary', conversation.activeMode),
+      excludeSourceMessageIds: options.excludeSourceMessageIds
+    });
+
+    return {
+      conversation,
+      character,
+      boundUser,
+      chatSettings,
+      modelOverride,
+      input: {
+        user: boundUser,
+        character,
+        boundUser,
+        mode: conversation.activeMode,
+        messages: visibleMessagesForConversation(conversationId),
+        worldBooks: worldBooks.value,
+        conversationSummary: conversation.summary,
+        memorySummary,
+        stickerVisionEnabled: chatSettings.stickerVisionEnabled,
+        narrationModeEnabled: chatSettings.narrationModeEnabled,
+        offlineInvitationEnabled: chatSettings.offlineInvitationEnabled,
+        timeAwareness: chatSettings.timeAwareness,
+        timeAwarenessNow: options.timeAwarenessNow,
+        offlineSettings: chatSettings.offline,
+        replyInstruction: options.replyInstruction
+          ? options.replyInstruction
+          : options.proactive
+          ? `这不是用户刚发来的新消息，而是${getCharacterAiName(character)}在自己的生活节奏里主动联系${getUserAiName(boundUser)}。请基于最近对话、关系状态、时间流逝和角色当前生活，生成一组自然的主动消息；不要假装用户刚说了什么，也不要替用户发言。`
+          : undefined,
+        availableStickers: availableCharacterStickers.map((sticker) => ({
+          stickerId: sticker.id,
+          description: sticker.description,
+          imageUrl: getStickerDisplayImageUrl(sticker)
+        })),
+        userMessage: userMessageText,
+        settings: settings.value ?? undefined,
+        modelOverride
+      }
+    };
+  }
+
   function nextReplyTokenCountForConversation(id: string) {
     const conversation = conversationById(id);
     if (!conversation) return 0;
@@ -832,6 +921,11 @@ export const useAppStore = defineStore('app', () => {
       settings: settings.value ?? undefined,
       modelOverride: getConversationTextModelOverride(chatSettings, conversation.activeMode)
     });
+  }
+
+  async function nextReplyTokenCountForConversationAsync(id: string) {
+    const bundle = await buildRoleplayReplyInputForConversation(id, { timeAwarenessNow: Date.now() });
+    return bundle ? estimateRoleplayReplyInputTokens(bundle.input) : 0;
   }
 
   function lastMessageForConversation(id: string) {
@@ -3584,6 +3678,7 @@ export const useAppStore = defineStore('app', () => {
     const summaryEvery = Math.max(20, chatSettings.memory.grandSummaryEvery);
     const existingGrandSummaries = memoriesForConversation(conversationId)
       .flatMap((memory) => collectIncrementalGrandSummaries(memory))
+      .filter((memory) => memory.startFloor === 1)
       .sort(compareMemoryRecordsByRange);
     const previousEndFloor = existingGrandSummaries.reduce((max, memory) => Math.max(max, memory.endFloor), 0);
     const nextEndFloor = Math.max(summaryEvery, (Math.floor(previousEndFloor / summaryEvery) + 1) * summaryEvery);
@@ -3598,10 +3693,13 @@ export const useAppStore = defineStore('app', () => {
   }
 
   async function createManualIncrementalGrandSummary(conversationId: string, options: { segmentStartFloor: number; endFloor: number; hiddenStartFloor?: number; visibleTailFloors?: number }): Promise<ConversationSummaryResult | null> {
-    return createIncrementalGrandSummary(conversationId, options);
+    return createIncrementalGrandSummary(conversationId, {
+      ...options,
+      sourceStartFloor: options.segmentStartFloor
+    });
   }
 
-  async function createIncrementalGrandSummary(conversationId: string, options: { segmentStartFloor: number; endFloor: number; hiddenStartFloor?: number; visibleTailFloors?: number }): Promise<ConversationSummaryResult | null> {
+  async function createIncrementalGrandSummary(conversationId: string, options: IncrementalGrandSummaryOptions): Promise<ConversationSummaryResult | null> {
     const conversation = conversationById(conversationId);
     if (!conversation) return null;
     const chatSettings = settingsForConversation(conversationId);
@@ -3611,13 +3709,14 @@ export const useAppStore = defineStore('app', () => {
     const segmentStartFloor = Math.max(1, Math.floor(Number(options.segmentStartFloor) || 1));
     const nextEndFloor = Math.max(segmentStartFloor, Math.floor(Number(options.endFloor) || segmentStartFloor));
     if (floorCount < nextEndFloor) return null;
-    const sourceMessages = getMessagesInFloorRange(conversationMessages, 1, nextEndFloor);
+    const sourceStartFloor = Math.min(nextEndFloor, Math.max(1, Math.floor(Number(options.sourceStartFloor ?? 1) || 1)));
+    const sourceMessages = getMessagesInFloorRange(conversationMessages, sourceStartFloor, nextEndFloor);
     if (!sourceMessages.length) return null;
 
     const rangeIdentity = {
       conversationId,
       mode: conversation.activeMode,
-      startFloor: 1,
+      startFloor: sourceStartFloor,
       endFloor: nextEndFloor,
       isMergedSummary: true
     } satisfies Pick<ConversationMemoryRecord, 'conversationId' | 'mode' | 'startFloor' | 'endFloor' | 'isMergedSummary'>;
@@ -3641,7 +3740,7 @@ export const useAppStore = defineStore('app', () => {
       const floorMap = getMessageFloorMap(conversationMessages);
       const includeTimeline = chatSettings.timeAwareness.enabled;
       const floorMessageText = sourceMessages.map((message) => {
-        const floor = floorMap.get(message.id) ?? 1;
+        const floor = floorMap.get(message.id) ?? sourceStartFloor;
         const sender = message.sender === 'user' ? userSenderName : message.sender === 'char' ? characterName : '系统';
         const sentAtText = includeTimeline ? `（发送时间：${formatMemoryTimelineTime(message.createdAt)}）` : '';
         return `${floor}楼 ${sender}${sentAtText}: ${message.content}`;
@@ -3651,7 +3750,7 @@ export const useAppStore = defineStore('app', () => {
         : '本轮暂无可读取回忆录，仅依据楼层正文总结。';
       const summary = await generateConversationSummary({
         messages: [
-          `【1-${nextEndFloor}楼楼层正文】`,
+          `【${sourceStartFloor}-${nextEndFloor}楼楼层正文】`,
           floorMessageText,
           `【${segmentStartFloor}-${nextEndFloor}楼回忆录】`,
           memoirText
@@ -3661,7 +3760,7 @@ export const useAppStore = defineStore('app', () => {
         timeAwareness: chatSettings.timeAwareness,
         timeAwarenessUserName: getUserAiName(boundUser),
         timelineContext: [
-          renderMessageTimelineContext(sourceMessages, floorMap, 1),
+          renderMessageTimelineContext(sourceMessages, floorMap, sourceStartFloor),
           renderMemoryRangeTimelineContext(memoirsForSegment)
         ].filter(Boolean).join('\n'),
         settings: settings.value ?? undefined,
@@ -3672,10 +3771,12 @@ export const useAppStore = defineStore('app', () => {
         .flatMap((memory) => collectIncrementalGrandSummaries(memory))
         .find((memory) => isSameMemoryRange(memory, rangeIdentity));
       if (existingAfterGeneration) return { record: existingAfterGeneration, status: 'existing' };
+      const hiddenStartFloor = Math.max(0, Math.floor(Number(options.hiddenStartFloor ?? chatSettings.memory.grandSummaryHiddenStartFloor) || 0));
+      const effectiveHiddenStartFloor = hiddenStartFloor > 0 ? Math.max(sourceStartFloor, hiddenStartFloor) : 0;
       const hiddenRange = chatSettings.memory.hideSummarizedMessages
         ? getGrandSummaryHiddenRange(
             nextEndFloor,
-            options.hiddenStartFloor ?? chatSettings.memory.grandSummaryHiddenStartFloor,
+        effectiveHiddenStartFloor,
             options.visibleTailFloors ?? chatSettings.memory.grandSummaryVisibleTailFloors
           )
         : { hiddenStartFloor: 0, hiddenEndFloor: 0 };
@@ -3685,7 +3786,7 @@ export const useAppStore = defineStore('app', () => {
         conversationId,
         mode: conversation.activeMode,
         kind: 'long-term',
-        startFloor: 1,
+        startFloor: sourceStartFloor,
         endFloor: nextEndFloor,
         hiddenStartFloor: hiddenRange.hiddenStartFloor,
         hiddenEndFloor: hiddenRange.hiddenEndFloor,
@@ -3940,13 +4041,6 @@ export const useAppStore = defineStore('app', () => {
     const boundUser = userById(character.boundUserId) ?? user.value;
     if (!boundUser) return;
 
-    const conversationMessages = messagesForConversation(conversationId).filter((message) => message.replyVariantState !== 'inactive');
-    const lastUserMessages = [...conversationMessages].reverse().filter((message, index, reversedMessages) => {
-      const previousMessages = reversedMessages.slice(0, index);
-      return message.sender === 'user' && !previousMessages.some((previous) => previous.sender === 'char');
-    }).reverse();
-
-    const userMessageText = lastUserMessages.map((message) => messageReadableContent(message)).join('\n');
     const chatSettings = settingsForConversation(conversationId);
     const modelOverride = getConversationTextModelOverride(chatSettings, conversation.activeMode);
     if (!hasConfiguredTextModel(modelOverride)) {
@@ -3963,39 +4057,14 @@ export const useAppStore = defineStore('app', () => {
         await localizeRecentStickerMessagesForVision(conversationId);
       }
       const availableCharacterStickers = stickersForGroups(chatSettings.characterStickerGroupIds);
-      const memorySummary = await memoryContextForConversationAsync(conversationId, userMessageText, {
-        modelOverride: getConversationTextModelOverride(chatSettings, 'summary', conversation.activeMode),
+      const replyInputBundle = await buildRoleplayReplyInputForConversation(conversationId, {
+        timeAwarenessNow: generationStartedAt,
+        proactive: options?.proactive,
+        replyInstruction: options?.replyInstruction,
         excludeSourceMessageIds: options?.excludeSourceMessageIds
       });
-      const replyPayload = await generateRoleplayReply({
-        user: boundUser,
-        character,
-        boundUser,
-        mode: conversation.activeMode,
-        messages: visibleMessagesForConversation(conversationId),
-        worldBooks: worldBooks.value,
-        conversationSummary: conversation.summary,
-        memorySummary,
-        stickerVisionEnabled: chatSettings.stickerVisionEnabled,
-        narrationModeEnabled: chatSettings.narrationModeEnabled,
-        offlineInvitationEnabled: chatSettings.offlineInvitationEnabled,
-        timeAwareness: chatSettings.timeAwareness,
-        timeAwarenessNow: generationStartedAt,
-        offlineSettings: chatSettings.offline,
-        replyInstruction: options?.replyInstruction
-          ? options.replyInstruction
-          : options?.proactive
-          ? `这不是用户刚发来的新消息，而是${getCharacterAiName(character)}在自己的生活节奏里主动联系${getUserAiName(boundUser)}。请基于最近对话、关系状态、时间流逝和角色当前生活，生成一组自然的主动消息；不要假装用户刚说了什么，也不要替用户发言。`
-          : undefined,
-        availableStickers: availableCharacterStickers.map((sticker) => ({
-          stickerId: sticker.id,
-          description: sticker.description,
-          imageUrl: getStickerDisplayImageUrl(sticker)
-        })),
-        userMessage: userMessageText,
-        settings: settings.value ?? undefined,
-        modelOverride
-      });
+      if (!replyInputBundle) return;
+      const replyPayload = await generateRoleplayReply(replyInputBundle.input);
       const parsedReply = JSON.parse(replyPayload) as RoleplayReplyResult;
       const replyBatchId = createId('reply');
       const replyVariantFields = options?.replyVariantGroupId
@@ -5561,6 +5630,7 @@ export const useAppStore = defineStore('app', () => {
     hiddenMessageIdsForConversation,
     memoryContextForConversation,
     nextReplyTokenCountForConversation,
+    nextReplyTokenCountForConversationAsync,
     lastMessageForConversation,
     createMessageQuoteSnapshot,
     isMessageFavorited,

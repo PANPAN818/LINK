@@ -1,10 +1,12 @@
-import { isLinkBackupChunkManifest, type LinkBackupChunkManifest } from '@/utils/backup';
+import { isLinkBackupChunkManifest, linkBackupSnapshotArrayKeys, parseLinkBackupFileText, stringifyLinkBackupFile, type LinkBackupChunkManifest, type LinkBackupFile } from '@/utils/backup';
+import type { AppSnapshot } from '@/types/domain';
 
 export interface GitHubViewer {
   login: string;
 }
 
-const githubBackupChunkSize = 768 * 1024;
+const githubBackupChunkSize = 512 * 1024;
+const githubIncrementalRetainCount = 8;
 
 export interface GitHubBackupRepository {
   owner: string;
@@ -22,12 +24,72 @@ export interface GitHubBackupTarget {
   path: string;
 }
 
+export interface GitHubBackupDiscoveryInput {
+  token: string;
+  owner: string;
+  preferredRepo?: string;
+  preferredPath?: string;
+}
+
+export interface GitHubBackupDiscoveryResult extends GitHubBackupRepository {
+  path: string;
+}
+
 export interface GitHubBackupHistoryItem {
   sha: string;
   committedAt: string;
   message: string;
   downloadPath: string;
 }
+
+export interface GitHubBackupUploadProgress {
+  label: string;
+  percent: number;
+}
+
+export interface GitHubBackupUploadOptions {
+  retainIncrementalManifests?: number;
+  onProgress?: (progress: GitHubBackupUploadProgress) => void | Promise<void>;
+}
+
+export interface GitHubBackupDownloadOptions {
+  onProgress?: (progress: GitHubBackupUploadProgress) => void | Promise<void>;
+}
+
+interface GitHubIncrementalBackupManifest {
+  app: 'LINK';
+  backupVersion: 2;
+  incremental: true;
+  exportedAt: number;
+  base: {
+    path: string;
+    exportedAt: number;
+  };
+  increments: GitHubIncrementalBackupEntry[];
+}
+
+interface GitHubIncrementalBackupEntry {
+  id: string;
+  path: string;
+  exportedAt: number;
+  baseExportedAt: number;
+  changes: number;
+  deletions: number;
+  settingsChanged: boolean;
+}
+
+interface GitHubIncrementalBackupDelta {
+  app: 'LINK';
+  backupVersion: 2;
+  incrementalDelta: true;
+  exportedAt: number;
+  baseExportedAt: number;
+  changed: Partial<Record<BackupArrayKey, unknown[]>>;
+  deleted: Partial<Record<BackupArrayKey, string[]>>;
+  settings?: AppSnapshot['settings'];
+}
+
+type BackupArrayKey = typeof linkBackupSnapshotArrayKeys[number];
 
 export interface GitHubLoginUrl {
   url: string;
@@ -44,12 +106,21 @@ interface GitHubRepositoryResponse {
   };
 }
 
+interface GitHubRepositoryListResponse extends GitHubRepositoryResponse {
+  updated_at?: string;
+}
+
 interface GitHubContentResponse {
   content?: string;
   encoding?: string;
   sha?: string;
   type?: string;
   download_url?: string;
+}
+
+interface GitHubErrorPayload {
+  message?: string;
+  documentation_url?: string;
 }
 
 interface GitHubCommitHistoryResponse {
@@ -63,10 +134,26 @@ interface GitHubCommitHistoryResponse {
 }
 
 export class GitHubBackupError extends Error {
-  constructor(message: string, readonly status = 0) {
+  constructor(
+    message: string,
+    readonly status = 0,
+    readonly rateLimitRemaining = '',
+    readonly rateLimitReset = ''
+  ) {
     super(message);
     this.name = 'GitHubBackupError';
   }
+}
+
+interface RemoteBackupState {
+  text: string;
+  backup: LinkBackupFile;
+  manifest?: GitHubIncrementalBackupManifest;
+  rootChunkPaths: string[];
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value));
 }
 
 function normalizeRepoName(repo: string) {
@@ -75,6 +162,14 @@ function normalizeRepoName(repo: string) {
 
 function encodePath(path: string) {
   return path.split('/').map((segment) => encodeURIComponent(segment)).join('/');
+}
+
+function normalizeBackupPath(pathValue: string) {
+  return pathValue.trim().replace(/^\/+/, '') || 'link-backup.json';
+}
+
+function createBackupId(timestamp = Date.now()) {
+  return new Date(timestamp).toISOString().replace(/[:.]/g, '-');
 }
 
 function encodeBase64(text: string) {
@@ -100,9 +195,14 @@ function encodeBytesBase64(bytes: Uint8Array) {
   return btoa(binary);
 }
 
-function decodeBytesBase64(text: string) {
+function decodeBytesBase64(text: string, label = 'GitHub 分片备份') {
   const normalized = text.replace(/\s+/g, '');
-  const binary = atob(normalized);
+  let binary = '';
+  try {
+    binary = atob(normalized);
+  } catch {
+    throw new GitHubBackupError(`${label} 内容不是有效的 base64 数据。`);
+  }
   const bytes = new Uint8Array(binary.length);
   for (let index = 0; index < binary.length; index += 1) {
     bytes[index] = binary.charCodeAt(index);
@@ -161,27 +261,41 @@ export function getGitHubOAuthWorkerOrigin() {
 
 async function parseGitHubError(response: Response) {
   try {
-    const body = await response.json() as { message?: string };
+    const body = await response.json() as GitHubErrorPayload;
     return body.message || response.statusText || 'GitHub 请求失败。';
   } catch {
     return response.statusText || 'GitHub 请求失败。';
   }
 }
 
+function createGitHubHttpError(response: Response, message: string) {
+  return new GitHubBackupError(
+    message,
+    response.status,
+    response.headers.get('x-ratelimit-remaining') ?? '',
+    response.headers.get('x-ratelimit-reset') ?? ''
+  );
+}
+
 async function githubApiFetch<T>(path: string, token: string, init: RequestInit = {}): Promise<T> {
-  const response = await fetch(`https://api.github.com${path}`, {
-    ...init,
-    headers: {
-      Accept: 'application/vnd.github+json',
-      Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json',
-      'X-GitHub-Api-Version': '2022-11-28',
-      ...(init.headers ?? {})
-    }
-  });
+  let response: Response;
+  try {
+    response = await fetch(`https://api.github.com${path}`, {
+      ...init,
+      headers: {
+        Accept: 'application/vnd.github+json',
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        'X-GitHub-Api-Version': '2022-11-28',
+        ...(init.headers ?? {})
+      }
+    });
+  } catch {
+    throw new GitHubBackupError('无法连接 GitHub，请检查网络、代理、浏览器拦截或跨域设置。');
+  }
 
   if (!response.ok) {
-    throw new GitHubBackupError(await parseGitHubError(response), response.status);
+    throw createGitHubHttpError(response, await parseGitHubError(response));
   }
 
   if (response.status === 204) return undefined as T;
@@ -189,31 +303,41 @@ async function githubApiFetch<T>(path: string, token: string, init: RequestInit 
 }
 
 async function githubApiFetchText(path: string, token: string): Promise<string> {
-  const response = await fetch(`https://api.github.com${path}`, {
-    headers: {
-      Accept: 'application/vnd.github.raw',
-      Authorization: `Bearer ${token}`,
-      'X-GitHub-Api-Version': '2022-11-28'
-    }
-  });
+  let response: Response;
+  try {
+    response = await fetch(`https://api.github.com${path}`, {
+      headers: {
+        Accept: 'application/vnd.github.raw',
+        Authorization: `Bearer ${token}`,
+        'X-GitHub-Api-Version': '2022-11-28'
+      }
+    });
+  } catch {
+    throw new GitHubBackupError('无法下载 GitHub 文件，请检查网络、代理、浏览器拦截或跨域设置。');
+  }
 
   if (!response.ok) {
-    throw new GitHubBackupError(await parseGitHubError(response), response.status);
+    throw createGitHubHttpError(response, await parseGitHubError(response));
   }
 
   return await response.text();
 }
 
 async function fetchGitHubDownloadUrl(url: string, token: string): Promise<string> {
-  const response = await fetch(url, {
-    headers: {
-      Accept: 'application/octet-stream',
-      Authorization: `Bearer ${token}`
-    }
-  });
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      headers: {
+        Accept: 'application/octet-stream',
+        Authorization: `Bearer ${token}`
+      }
+    });
+  } catch {
+    throw new GitHubBackupError('无法下载 GitHub 原始文件，请检查网络、代理或浏览器拦截设置。');
+  }
 
   if (!response.ok) {
-    throw new GitHubBackupError(await parseGitHubError(response), response.status);
+    throw createGitHubHttpError(response, await parseGitHubError(response));
   }
 
   return await response.text();
@@ -227,14 +351,15 @@ async function readGitHubFileText(apiPath: string, token: string, missingMessage
     return decodeBase64(content.content);
   }
 
+  if (content.download_url) return await fetchGitHubDownloadUrl(content.download_url, token);
+
   try {
     const rawText = await githubApiFetchText(apiPath, token);
     if (rawText) return rawText;
-  } catch (error) {
-    if (!content.download_url) throw error;
+  } catch {
+    // Fall through to the explicit missing-content error below.
   }
 
-  if (content.download_url) return await fetchGitHubDownloadUrl(content.download_url, token);
   throw new GitHubBackupError(missingMessage);
 }
 
@@ -246,6 +371,62 @@ function toBackupRepository(response: GitHubRepositoryResponse): GitHubBackupRep
     private: response.private,
     htmlUrl: response.html_url
   };
+}
+
+function looksLikeLinkBackupRoot(text: string) {
+  const parsed = parseJsonRecord(text);
+  return Boolean(
+    isGitHubIncrementalBackupManifest(parsed)
+    || isLinkBackupChunkManifest(parsed)
+    || parsed?.app === 'LINK'
+    || isRecord(parsed?.snapshot)
+  );
+}
+
+function rankBackupRepositoryCandidate(repo: GitHubRepositoryListResponse, preferredRepo: string) {
+  const name = repo.name.toLocaleLowerCase();
+  const preferred = preferredRepo.toLocaleLowerCase();
+  if (preferred && name === preferred) return 0;
+  if (name === 'link-private-backups') return 1;
+  if (/link.*backup|backup.*link/i.test(repo.name)) return 2;
+  if (/link|backup/i.test(repo.name)) return 3;
+  return 4;
+}
+
+export async function findGitHubBackupRepository(input: GitHubBackupDiscoveryInput): Promise<GitHubBackupDiscoveryResult | null> {
+  const token = input.token.trim();
+  const owner = input.owner.trim() || (await fetchGitHubViewer(token)).login;
+  const preferredRepo = normalizeRepoName(input.preferredRepo ?? 'link-private-backups');
+  const preferredPath = normalizeBackupPath(input.preferredPath ?? 'link-backup.json');
+  if (!token) throw new GitHubBackupError('请先填写 GitHub token。');
+
+  const repositories = await githubApiFetch<GitHubRepositoryListResponse[]>(
+    '/user/repos?visibility=all&affiliation=owner&sort=updated&direction=desc&per_page=100',
+    token
+  );
+  const candidateRepos = repositories
+    .filter((repo) => repo.owner.login === owner && repo.private)
+    .sort((left, right) => rankBackupRepositoryCandidate(left, preferredRepo) - rankBackupRepositoryCandidate(right, preferredRepo))
+    .slice(0, 24);
+  const backupPaths = [...new Set([preferredPath, 'link-backup.json'])];
+
+  for (const repo of candidateRepos) {
+    for (const path of backupPaths) {
+      try {
+        const text = await downloadGitHubBackupTextAtPath({ token, owner, repo: repo.name, branch: repo.default_branch || 'main', path }, path, repo.default_branch || 'main', '');
+        if (!looksLikeLinkBackupRoot(text)) continue;
+        return {
+          ...toBackupRepository(repo),
+          path
+        };
+      } catch (error) {
+        if (error instanceof GitHubBackupError && error.status === 404) continue;
+        throw error;
+      }
+    }
+  }
+
+  return null;
 }
 
 export async function fetchGitHubViewer(token: string): Promise<GitHubViewer> {
@@ -281,14 +462,144 @@ export async function ensureGitHubBackupRepository(target: Pick<GitHubBackupTarg
   return toBackupRepository(created);
 }
 
-export async function uploadGitHubBackup(target: GitHubBackupTarget, content: string, message: string) {
+async function emitUploadProgress(options: GitHubBackupUploadOptions | undefined, label: string, percent: number) {
+  await options?.onProgress?.({ label, percent: Math.min(100, Math.max(0, Math.round(percent))) });
+}
+
+function parseJsonRecord(text: string) {
+  try {
+    const parsed: unknown = JSON.parse(text);
+    return isRecord(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function isGitHubIncrementalBackupManifest(value: unknown): value is GitHubIncrementalBackupManifest {
+  return Boolean(
+    isRecord(value)
+    && value.app === 'LINK'
+    && value.backupVersion === 2
+    && value.incremental === true
+    && isRecord(value.base)
+    && typeof value.base.path === 'string'
+    && Array.isArray(value.increments)
+  );
+}
+
+function isGitHubIncrementalBackupDelta(value: unknown): value is GitHubIncrementalBackupDelta {
+  return Boolean(
+    isRecord(value)
+    && value.app === 'LINK'
+    && value.backupVersion === 2
+    && value.incrementalDelta === true
+    && isRecord(value.changed)
+    && isRecord(value.deleted)
+  );
+}
+
+function getEntryKey(storeName: BackupArrayKey, value: unknown) {
+  if (!isRecord(value)) return '';
+  const key = storeName === 'conversationSettings'
+    ? value.conversationId
+    : storeName === 'musicCommentThreads'
+      ? value.trackKey
+      : value.id;
+  return String(key ?? '').trim();
+}
+
+function createEntryMap(storeName: BackupArrayKey, entries: unknown[]) {
+  const map = new Map<string, unknown>();
+  entries.forEach((entry) => {
+    const key = getEntryKey(storeName, entry);
+    if (key) map.set(key, entry);
+  });
+  return map;
+}
+
+function valuesAreEqual(left: unknown, right: unknown) {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function createIncrementalDelta(previous: LinkBackupFile, next: LinkBackupFile): GitHubIncrementalBackupDelta & { changeCount: number; deletionCount: number; settingsChanged: boolean } {
+  const changed: GitHubIncrementalBackupDelta['changed'] = {};
+  const deleted: GitHubIncrementalBackupDelta['deleted'] = {};
+  let changeCount = 0;
+  let deletionCount = 0;
+
+  for (const storeName of linkBackupSnapshotArrayKeys) {
+    const previousEntries = createEntryMap(storeName, previous.snapshot[storeName] ?? []);
+    const nextEntries = createEntryMap(storeName, next.snapshot[storeName] ?? []);
+    const changedEntries: unknown[] = [];
+    const deletedKeys: string[] = [];
+
+    nextEntries.forEach((entry, key) => {
+      if (!previousEntries.has(key) || !valuesAreEqual(previousEntries.get(key), entry)) changedEntries.push(entry);
+    });
+
+    previousEntries.forEach((_entry, key) => {
+      if (!nextEntries.has(key)) deletedKeys.push(key);
+    });
+
+    if (changedEntries.length) changed[storeName] = changedEntries;
+    if (deletedKeys.length) deleted[storeName] = deletedKeys;
+    changeCount += changedEntries.length;
+    deletionCount += deletedKeys.length;
+  }
+
+  const settingsChanged = !valuesAreEqual(previous.snapshot.settings, next.snapshot.settings);
+  return {
+    app: 'LINK',
+    backupVersion: 2,
+    incrementalDelta: true,
+    exportedAt: next.exportedAt,
+    baseExportedAt: previous.exportedAt,
+    changed,
+    deleted,
+    ...(settingsChanged ? { settings: next.snapshot.settings } : {}),
+    changeCount,
+    deletionCount,
+    settingsChanged
+  };
+}
+
+function applyIncrementalDelta(backup: LinkBackupFile, delta: GitHubIncrementalBackupDelta): LinkBackupFile {
+  const snapshot = typeof structuredClone === 'function'
+    ? structuredClone(backup.snapshot) as AppSnapshot
+    : JSON.parse(JSON.stringify(backup.snapshot)) as AppSnapshot;
+
+  for (const storeName of linkBackupSnapshotArrayKeys) {
+    const entries = createEntryMap(storeName, snapshot[storeName] ?? []);
+    delta.deleted[storeName]?.forEach((key) => entries.delete(key));
+    delta.changed[storeName]?.forEach((entry) => {
+      const key = getEntryKey(storeName, entry);
+      if (key) entries.set(key, entry);
+    });
+    snapshot[storeName] = [...entries.values()] as never;
+  }
+
+  if (delta.settings) snapshot.settings = delta.settings;
+
+  return {
+    app: 'LINK',
+    backupVersion: 1,
+    exportedAt: delta.exportedAt,
+    snapshot
+  };
+}
+
+function incrementalDirForPath(path: string) {
+  return `${normalizeBackupPath(path)}.incremental`;
+}
+
+async function uploadGitHubBackupContent(target: GitHubBackupTarget, pathValue: string, content: string, message: string) {
   const bytes = new TextEncoder().encode(content);
   if (bytes.length > githubBackupChunkSize) {
-    await uploadGitHubChunkedBackup(target, bytes, message);
+    await uploadGitHubChunkedContent(target, pathValue, bytes, message);
     return;
   }
 
-  await uploadGitHubTextFile(target, target.path, content, message);
+  await uploadGitHubTextFile(target, pathValue, content, message);
 }
 
 async function uploadGitHubTextFile(target: GitHubBackupTarget, pathValue: string, content: string, message: string) {
@@ -296,7 +607,7 @@ async function uploadGitHubTextFile(target: GitHubBackupTarget, pathValue: strin
   const owner = target.owner.trim();
   const repo = normalizeRepoName(target.repo);
   const branch = target.branch.trim() || 'main';
-  const path = pathValue.trim().replace(/^\/+/, '') || 'link-backup.json';
+  const path = normalizeBackupPath(pathValue);
   let sha = '';
 
   if (!token || !owner || !repo) throw new GitHubBackupError('GitHub 备份配置不完整。');
@@ -320,10 +631,10 @@ async function uploadGitHubTextFile(target: GitHubBackupTarget, pathValue: strin
   });
 }
 
-async function uploadGitHubChunkedBackup(target: GitHubBackupTarget, bytes: Uint8Array, message: string) {
-  const path = target.path.trim().replace(/^\/+/, '') || 'link-backup.json';
+async function uploadGitHubChunkedContent(target: GitHubBackupTarget, pathValue: string, bytes: Uint8Array, message: string) {
+  const path = normalizeBackupPath(pathValue);
   const exportedAt = Date.now();
-  const backupId = new Date(exportedAt).toISOString().replace(/[:.]/g, '-');
+  const backupId = createBackupId(exportedAt);
   const partDir = `${path}.parts/${backupId}`;
   const chunks: LinkBackupChunkManifest['chunks'] = [];
 
@@ -347,12 +658,52 @@ async function uploadGitHubChunkedBackup(target: GitHubBackupTarget, bytes: Uint
   await uploadGitHubTextFile(target, path, JSON.stringify(manifest), `${message} manifest (${chunks.length} parts)`);
 }
 
+async function deleteGitHubFileIfExists(target: GitHubBackupTarget, pathValue: string, message: string) {
+  const token = target.token.trim();
+  const owner = target.owner.trim();
+  const repo = normalizeRepoName(target.repo);
+  const branch = target.branch.trim() || 'main';
+  const path = normalizeBackupPath(pathValue);
+  if (!token || !owner || !repo) return;
+
+  let sha = '';
+  try {
+    const existing = await githubApiFetch<GitHubContentResponse>(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/contents/${encodePath(path)}?ref=${encodeURIComponent(branch)}`, token);
+    if (existing.type && existing.type !== 'file') return;
+    sha = existing.sha ?? '';
+  } catch (error) {
+    if (error instanceof GitHubBackupError && error.status === 404) return;
+    throw error;
+  }
+
+  if (!sha) return;
+  await githubApiFetch<GitHubContentResponse>(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/contents/${encodePath(path)}`, token, {
+    method: 'DELETE',
+    body: JSON.stringify({ message, sha, branch })
+  });
+}
+
+async function deleteGitHubBackupContentIfExists(target: GitHubBackupTarget, pathValue: string, message: string) {
+  try {
+    const text = await downloadGitHubBackupTextAtPath(target, pathValue, target.branch.trim() || 'main', '');
+    const parsed = parseJsonRecord(text);
+    if (isLinkBackupChunkManifest(parsed)) {
+      for (const chunk of parsed.chunks) {
+        await deleteGitHubFileIfExists(target, chunk.path, `${message} chunk ${chunk.index + 1}`);
+      }
+    }
+  } catch (error) {
+    if (!(error instanceof GitHubBackupError) || error.status !== 404) throw error;
+  }
+  await deleteGitHubFileIfExists(target, pathValue, message);
+}
+
 async function downloadGitHubBackupTextAtPath(target: GitHubBackupTarget, pathValue: string, ref: string, missingMessage: string) {
   const token = target.token.trim();
   const owner = target.owner.trim();
   const repo = normalizeRepoName(target.repo);
   const normalizedRef = ref.trim() || target.branch.trim() || 'main';
-  const path = pathValue.trim().replace(/^\/+/, '') || 'link-backup.json';
+  const path = normalizeBackupPath(pathValue);
 
   if (!token || !owner || !repo) throw new GitHubBackupError('GitHub 备份配置不完整。');
 
@@ -363,13 +714,9 @@ async function downloadGitHubBackupTextAtPath(target: GitHubBackupTarget, pathVa
   );
 }
 
-async function resolveGitHubBackupText(target: GitHubBackupTarget, text: string, ref: string) {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(text);
-  } catch {
-    return text;
-  }
+async function resolveGitHubBackupText(target: GitHubBackupTarget, text: string, ref: string, options?: GitHubBackupDownloadOptions) {
+  const parsed = parseJsonRecord(text);
+  if (isGitHubIncrementalBackupManifest(parsed)) return await resolveIncrementalBackupText(target, parsed, ref, options);
   if (!isLinkBackupChunkManifest(parsed)) return text;
 
   const chunks = [...parsed.chunks].sort((left, right) => left.index - right.index);
@@ -377,7 +724,7 @@ async function resolveGitHubBackupText(target: GitHubBackupTarget, text: string,
   let offset = 0;
   for (const chunk of chunks) {
     const chunkText = await downloadGitHubBackupTextAtPath(target, chunk.path, ref, `未找到 GitHub 分片备份：${chunk.path}`);
-    const chunkBytes = decodeBytesBase64(chunkText);
+    const chunkBytes = decodeBytesBase64(chunkText, `GitHub 分片备份 ${chunk.path}`);
     if (chunkBytes.byteLength !== chunk.byteLength) throw new GitHubBackupError('GitHub 分片备份大小校验失败。');
     merged.set(chunkBytes, offset);
     offset += chunkBytes.byteLength;
@@ -386,10 +733,150 @@ async function resolveGitHubBackupText(target: GitHubBackupTarget, text: string,
   return new TextDecoder().decode(merged);
 }
 
-export async function downloadGitHubBackup(target: GitHubBackupTarget) {
+async function downloadResolvedGitHubBackupTextAtPath(target: GitHubBackupTarget, pathValue: string, ref: string, missingMessage: string, options?: GitHubBackupDownloadOptions) {
+  const text = await downloadGitHubBackupTextAtPath(target, pathValue, ref, missingMessage);
+  return await resolveGitHubBackupText(target, text, ref, options);
+}
+
+async function resolveIncrementalBackupText(target: GitHubBackupTarget, manifest: GitHubIncrementalBackupManifest, ref: string, options?: GitHubBackupDownloadOptions) {
+  await emitUploadProgress(options, '正在下载 GitHub 增量基线', 30);
+  const baseText = await downloadResolvedGitHubBackupTextAtPath(target, manifest.base.path, ref, `未找到 GitHub 增量基线：${manifest.base.path}`, options);
+  let backup = parseLinkBackupFileText(baseText);
+  const increments = [...manifest.increments].sort((left, right) => left.exportedAt - right.exportedAt);
+
+  for (const [index, entry] of increments.entries()) {
+    const stepPercent = 35 + Math.round(index / Math.max(increments.length, 1) * 35);
+    await emitUploadProgress(options, `正在下载 GitHub 增量 ${index + 1}/${increments.length}`, stepPercent);
+    const deltaText = await downloadResolvedGitHubBackupTextAtPath(target, entry.path, ref, `未找到 GitHub 增量备份：${entry.path}`, options);
+    const delta = parseJsonRecord(deltaText);
+    if (!isGitHubIncrementalBackupDelta(delta)) throw new GitHubBackupError(`GitHub 增量备份格式不正确：${entry.path}`);
+    backup = applyIncrementalDelta(backup, delta);
+  }
+
+  await emitUploadProgress(options, '正在合成 GitHub 增量备份', 75);
+  return stringifyLinkBackupFile(backup);
+}
+
+async function loadRemoteBackupState(target: GitHubBackupTarget): Promise<RemoteBackupState> {
+  const branch = target.branch.trim() || 'main';
+  const rootText = await downloadGitHubBackupTextAtPath(target, target.path, branch, '未找到 GitHub 备份文件内容。');
+  const rootParsed = parseJsonRecord(rootText);
+  const rootChunkPaths = isLinkBackupChunkManifest(rootParsed) ? rootParsed.chunks.map((chunk) => chunk.path) : [];
+  const resolvedText = await resolveGitHubBackupText(target, rootText, branch);
+  const manifest = isGitHubIncrementalBackupManifest(rootParsed) ? rootParsed : undefined;
+  return {
+    text: resolvedText,
+    backup: parseLinkBackupFileText(resolvedText),
+    manifest,
+    rootChunkPaths
+  };
+}
+
+async function cleanupGitHubBackupContents(target: GitHubBackupTarget, paths: string[]) {
+  const uniquePaths = [...new Set(paths.map((path) => path.trim()).filter(Boolean))];
+  for (const path of uniquePaths) {
+    await deleteGitHubBackupContentIfExists(target, path, `Cleanup LINK backup ${path}`);
+  }
+}
+
+function createIncrementalManifest(basePath: string, baseExportedAt: number, increments: GitHubIncrementalBackupEntry[], exportedAt: number): GitHubIncrementalBackupManifest {
+  return {
+    app: 'LINK',
+    backupVersion: 2,
+    incremental: true,
+    exportedAt,
+    base: {
+      path: basePath,
+      exportedAt: baseExportedAt
+    },
+    increments
+  };
+}
+
+export async function uploadGitHubBackup(target: GitHubBackupTarget, content: string, message: string, options: GitHubBackupUploadOptions = {}) {
+  const nextBackup = parseLinkBackupFileText(content);
+  const exportedAt = nextBackup.exportedAt || Date.now();
+  const backupId = createBackupId(exportedAt);
+  const incrementalDir = incrementalDirForPath(target.path);
+  const retainCount = Math.max(1, Math.round(options.retainIncrementalManifests ?? githubIncrementalRetainCount));
+  let remoteState: RemoteBackupState | null = null;
+  let cleanupPaths: string[] = [];
+
+  await emitUploadProgress(options, '正在检查远端增量基线', 5);
+  try {
+    remoteState = await loadRemoteBackupState(target);
+  } catch (error) {
+    if (!(error instanceof GitHubBackupError) || error.status !== 404) throw error;
+  }
+
+  if (!remoteState) {
+    const basePath = `${incrementalDir}/base-${backupId}.json`;
+    await emitUploadProgress(options, '正在上传首个全量基线', 35);
+    await uploadGitHubBackupContent(target, basePath, content, `${message} base`);
+    const manifest = createIncrementalManifest(basePath, nextBackup.exportedAt, [], exportedAt);
+    await emitUploadProgress(options, '正在写入增量入口 manifest', 85);
+    await uploadGitHubBackupContent(target, target.path, JSON.stringify(manifest), `${message} manifest`);
+    await emitUploadProgress(options, '增量备份已完成', 100);
+    return;
+  }
+
+  await emitUploadProgress(options, '正在计算本次增量差异', 25);
+  const delta = createIncrementalDelta(remoteState.backup, nextBackup);
+  let basePath = remoteState.manifest?.base.path ?? `${incrementalDir}/base-${createBackupId(remoteState.backup.exportedAt || Date.now())}.json`;
+  let baseExportedAt = remoteState.manifest?.base.exportedAt ?? remoteState.backup.exportedAt;
+  let increments = remoteState.manifest ? [...remoteState.manifest.increments] : [];
+
+  if (!remoteState.manifest) {
+    await emitUploadProgress(options, '正在迁移旧全量备份为增量基线', 38);
+    await uploadGitHubBackupContent(target, basePath, remoteState.text, `${message} previous base`);
+    cleanupPaths.push(...remoteState.rootChunkPaths);
+  }
+
+  if (delta.changeCount || delta.deletionCount || delta.settingsChanged) {
+    const deltaPath = `${incrementalDir}/delta-${backupId}.json`;
+    const deltaEntry: GitHubIncrementalBackupEntry = {
+      id: backupId,
+      path: deltaPath,
+      exportedAt: delta.exportedAt,
+      baseExportedAt: delta.baseExportedAt,
+      changes: delta.changeCount,
+      deletions: delta.deletionCount,
+      settingsChanged: delta.settingsChanged
+    };
+    await emitUploadProgress(options, `正在上传增量变更（${delta.changeCount} 改 / ${delta.deletionCount} 删）`, 55);
+    const { changeCount: _changeCount, deletionCount: _deletionCount, settingsChanged: _settingsChanged, ...persistableDelta } = delta;
+    await uploadGitHubBackupContent(target, deltaPath, JSON.stringify(persistableDelta), `${message} delta`);
+    increments.push(deltaEntry);
+  } else {
+    await emitUploadProgress(options, '本次没有数据变化，正在刷新 manifest', 65);
+  }
+
+  if (increments.length > retainCount) {
+    const compactBasePath = `${incrementalDir}/base-${backupId}-compact.json`;
+    cleanupPaths.push(basePath, ...increments.map((entry) => entry.path));
+    basePath = compactBasePath;
+    baseExportedAt = nextBackup.exportedAt;
+    increments = [];
+    await emitUploadProgress(options, '增量链过长，正在压缩为新基线', 72);
+    await uploadGitHubBackupContent(target, compactBasePath, content, `${message} compact base`);
+  }
+
+  const manifest = createIncrementalManifest(basePath, baseExportedAt, increments, exportedAt);
+  await emitUploadProgress(options, '正在写入增量入口 manifest', 86);
+  await uploadGitHubBackupContent(target, target.path, JSON.stringify(manifest), `${message} manifest (${increments.length} deltas)`);
+
+  if (cleanupPaths.length) {
+    await emitUploadProgress(options, '正在清理旧增量文件', 94);
+    await cleanupGitHubBackupContents(target, cleanupPaths);
+  }
+
+  await emitUploadProgress(options, '增量备份已完成', 100);
+}
+
+export async function downloadGitHubBackup(target: GitHubBackupTarget, options: GitHubBackupDownloadOptions = {}) {
   const branch = target.branch.trim() || 'main';
   const text = await downloadGitHubBackupTextAtPath(target, target.path, branch, '未找到 GitHub 备份文件内容。');
-  return await resolveGitHubBackupText(target, text, branch);
+  return await resolveGitHubBackupText(target, text, branch, options);
 }
 
 export async function listGitHubBackupHistory(target: GitHubBackupTarget, limit = 3): Promise<GitHubBackupHistoryItem[]> {
@@ -410,15 +897,26 @@ export async function listGitHubBackupHistory(target: GitHubBackupTarget, limit 
   }));
 }
 
-export async function downloadGitHubBackupVersion(target: GitHubBackupTarget, ref: string) {
+export async function downloadGitHubBackupVersion(target: GitHubBackupTarget, ref: string, options: GitHubBackupDownloadOptions = {}) {
   const text = await downloadGitHubBackupTextAtPath(target, target.path, ref, '未找到指定版本的 GitHub 备份文件内容。');
-  return await resolveGitHubBackupText(target, text, ref);
+  return await resolveGitHubBackupText(target, text, ref, options);
 }
 
 export function formatGitHubBackupError(error: unknown) {
   if (error instanceof GitHubBackupError) {
+    if (/GitHub (?:增量|分片)/.test(error.message) && /未找到|不正确|不完整|base64/.test(error.message)) {
+      return `${error.message} 请刷新备份记录后重试；如果仍失败，请先恢复较新的历史版本，或重新完成一次 GitHub 备份来重建增量链。`;
+    }
     if (error.status === 401) return 'GitHub token 无效或已过期，请重新登录或粘贴新 token。';
-    if (error.status === 403) return 'GitHub token 权限不足、API 限流，或浏览器阻止了请求。';
+    if (error.status === 403) {
+      if (error.rateLimitRemaining === '0') {
+        const resetAt = Number(error.rateLimitReset) > 0 ? new Date(Number(error.rateLimitReset) * 1000).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false }) : '';
+        return resetAt ? `GitHub API 主限流已用完，约 ${resetAt} 后再试。` : 'GitHub API 主限流已用完，请稍后再试。';
+      }
+      if (/secondary rate limit|abuse detection|too many requests/i.test(error.message)) return 'GitHub 触发二级限流，请等几分钟后再备份，或降低自动备份频率。';
+      if (/resource not accessible|permission|scope|access/i.test(error.message)) return 'GitHub token 权限不足，请使用允许访问该私有仓库内容的 fine-grained token，或经典 token 的 repo 权限。';
+      return 'GitHub 拒绝了请求，可能是权限不足、限流、网络代理或浏览器拦截。';
+    }
     if (error.status === 404) return '没有找到 GitHub 仓库或备份文件，请先创建私有仓库并完成一次备份。';
     if (error.status === 409) return 'GitHub 仓库还没有可用分支，请先创建私有仓库或检查默认分支。';
     if (error.status === 422) return `GitHub 拒绝了本次操作：${error.message}`;

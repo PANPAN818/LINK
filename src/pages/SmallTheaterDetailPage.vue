@@ -1,11 +1,5 @@
 <template>
   <section v-if="theater" class="screen no-tabs theater-detail-page">
-    <header class="detail-topbar">
-      <button class="detail-title-button" type="button" aria-label="返回小剧场列表" @click="goBack">
-        <h1>{{ theater.title }}</h1>
-      </button>
-    </header>
-
     <iframe class="theater-frame" :title="theater.title" :srcdoc="theater.html" sandbox="allow-scripts"></iframe>
   </section>
 
@@ -52,6 +46,8 @@ function goBack() {
 .theater-detail-page {
   display: flex;
   flex-direction: column;
+  padding-bottom: 0;
+  overflow: hidden;
   background: #0f172a;
 }
 
@@ -94,6 +90,7 @@ function goBack() {
   display: block;
   flex: 1;
   width: 100%;
+  height: 100%;
   min-height: 0;
   border: 0;
   background: #ffffff;

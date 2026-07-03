@@ -234,14 +234,23 @@
           </div>
         </div>
 
-        <div class="location-preview-card">
-          <span aria-hidden="true"><MapPin :size="24" /></span>
-          <div>
-            <strong>{{ locationNameDraft.trim() || '地点名称' }}</strong>
-            <small>{{ locationAddressDraft.trim() || '详细地址可留空' }}</small>
-            <em>{{ locationDistanceDraft.trim() || `距离 ${characterDisplayName} 多远` }}</em>
-          </div>
-        </div>
+        <section class="link-location-card location-preview-card" aria-label="定位预览">
+          <span class="link-location-map" aria-hidden="true">
+            <span class="link-map-road link-map-road-1"></span>
+            <span class="link-map-road link-map-road-2"></span>
+            <span class="link-map-road link-map-road-3"></span>
+            <span class="link-map-road link-map-road-4"></span>
+            <span class="link-map-block link-map-block-1"></span>
+            <span class="link-map-block link-map-block-2"></span>
+            <span class="link-map-block link-map-block-3"></span>
+            <span class="link-map-label link-map-label-top">{{ locationPreviewMapLabel }}</span>
+            <span class="link-map-label link-map-label-mid">{{ locationNameDraft.trim() || '地点名称' }}</span>
+            <span class="link-map-pin link-map-pin-main"></span>
+            <span class="link-map-pin link-map-pin-secondary"></span>
+            <span class="link-map-google"><span>G</span><span>o</span><span>o</span><span>g</span><span>l</span><span>e</span></span>
+          </span>
+          <span class="link-location-address">{{ locationPreviewAddress }}</span>
+        </section>
 
         <label class="location-field">
           <span>地理位置</span>
@@ -272,14 +281,24 @@
           </div>
         </div>
 
-        <div class="transfer-preview-card">
-          <span aria-hidden="true">¥</span>
-          <div>
-            <small>转账金额</small>
-            <strong>¥{{ transferAmountPreview }}</strong>
-            <em>{{ transferNoteDraft.trim() || '等待对方接收或拒绝' }}</em>
-          </div>
-        </div>
+        <section class="link-pay-card transfer-preview-card" aria-label="转账预览">
+          <span class="link-pay-hero" aria-hidden="true">
+            <span class="link-pay-envelope">
+              <span class="link-pay-bill"></span>
+              <span class="link-pay-symbol">$</span>
+            </span>
+          </span>
+          <span class="link-pay-body">
+            <strong>付款（LINK Pay）</strong>
+            <span>{{ transferPreviewSummary }}</span>
+            <span class="link-pay-more">瞭解更多</span>
+          </span>
+          <span class="link-pay-footer">
+            <span class="link-pay-footer-mark" aria-hidden="true">$</span>
+            <span>LINK Pay</span>
+            <span class="link-pay-chevron" aria-hidden="true"></span>
+          </span>
+        </section>
 
         <label class="transfer-field">
           <span>金额</span>
@@ -396,25 +415,45 @@
     </AppModal>
 
     <AppModal v-model="showCardDetailModal" title="卡片详情" :show-header="false" variant="ins">
-      <section v-if="activeCardDetailMessage?.location" class="card-detail-sheet card-detail-sheet-location" :style="detailCardAccentStyle(activeCardDetailMessage)">
-        <div class="card-detail-icon location-detail-icon" aria-hidden="true">
-          <MapPin :size="24" />
-        </div>
-        <div class="card-detail-content">
-          <span>定位</span>
-          <strong>{{ activeCardDetailMessage.location.name }}</strong>
-          <p v-if="activeCardDetailMessage.location.address">{{ activeCardDetailMessage.location.address }}</p>
-          <em>{{ detailLocationDistanceLabel(activeCardDetailMessage) }}</em>
-        </div>
+      <section v-if="activeCardDetailMessage?.location" class="card-detail-sheet card-detail-sheet-location">
+        <section class="link-location-card card-detail-preview-card" aria-label="定位详情">
+          <span class="link-location-map" aria-hidden="true">
+            <span class="link-map-road link-map-road-1"></span>
+            <span class="link-map-road link-map-road-2"></span>
+            <span class="link-map-road link-map-road-3"></span>
+            <span class="link-map-road link-map-road-4"></span>
+            <span class="link-map-block link-map-block-1"></span>
+            <span class="link-map-block link-map-block-2"></span>
+            <span class="link-map-block link-map-block-3"></span>
+            <span class="link-map-label link-map-label-top">{{ detailLocationMapLabel(activeCardDetailMessage) }}</span>
+            <span class="link-map-label link-map-label-mid">{{ activeCardDetailMessage.location.name }}</span>
+            <span class="link-map-pin link-map-pin-main"></span>
+            <span class="link-map-pin link-map-pin-secondary"></span>
+            <span class="link-map-google"><span>G</span><span>o</span><span>o</span><span>g</span><span>l</span><span>e</span></span>
+          </span>
+          <span class="link-location-address">{{ detailLocationAddress(activeCardDetailMessage) }}</span>
+        </section>
+        <p class="card-detail-footnote">{{ detailLocationDistanceLabel(activeCardDetailMessage) }}</p>
       </section>
-      <section v-else-if="activeCardDetailMessage?.transfer" class="card-detail-sheet card-detail-sheet-transfer" :style="detailCardAccentStyle(activeCardDetailMessage)">
-        <div class="card-detail-icon transfer-detail-icon" aria-hidden="true"></div>
-        <div class="card-detail-content">
-          <span>{{ detailTransferTitle(activeCardDetailMessage) }}</span>
-          <strong>¥{{ activeCardDetailMessage.transfer.amount }}</strong>
-          <p>{{ activeCardDetailMessage.transfer.note || '无备注' }}</p>
-          <em>{{ detailTransferStatusLabel(activeCardDetailMessage) }}</em>
-        </div>
+      <section v-else-if="activeCardDetailMessage?.transfer" class="card-detail-sheet card-detail-sheet-transfer">
+        <section class="link-pay-card card-detail-preview-card" aria-label="转账详情">
+          <span class="link-pay-hero" aria-hidden="true">
+            <span class="link-pay-envelope">
+              <span class="link-pay-bill"></span>
+              <span class="link-pay-symbol">$</span>
+            </span>
+          </span>
+          <span class="link-pay-body">
+            <strong>{{ detailLinkPayTitle(activeCardDetailMessage) }}</strong>
+            <span>{{ detailLinkPaySummary(activeCardDetailMessage) }}</span>
+            <span class="link-pay-more">瞭解更多</span>
+          </span>
+          <span class="link-pay-footer">
+            <span class="link-pay-footer-mark" aria-hidden="true">$</span>
+            <span>LINK Pay</span>
+            <span class="link-pay-chevron" aria-hidden="true"></span>
+          </span>
+        </section>
         <div v-if="canRespondDetailTransfer" class="card-detail-actions">
           <button class="secondary-action" type="button" @click="respondToTransferFromDetail('rejected')">拒绝</button>
           <button class="primary-action" type="button" @click="respondToTransferFromDetail('accepted')">接收</button>
@@ -729,6 +768,9 @@ const canSendLocation = computed(() => Boolean(locationNameDraft.value.trim() &&
 const normalizedTransferAmount = computed(() => transferAmountDraft.value.replace(/[￥¥,\s]/g, '').trim());
 const transferAmountPreview = computed(() => normalizedTransferAmount.value || '0.00');
 const canSendTransfer = computed(() => /^\d+(?:\.\d{1,2})?$/.test(normalizedTransferAmount.value) && Number(normalizedTransferAmount.value) > 0);
+const locationPreviewAddress = computed(() => locationAddressDraft.value.trim() || locationNameDraft.value.trim() || '详细地址可留空');
+const locationPreviewMapLabel = computed(() => createLinkMapLabel(locationPreviewAddress.value, locationNameDraft.value.trim() || '地点名称'));
+const transferPreviewSummary = computed(() => `您将付款 ¥${transferAmountPreview.value}。（收款方：${characterDisplayName.value}）`);
 const chatActionLocked = computed(() => currentConversationReplying.value);
 const stickerRecommendationBase = computed(() => {
   if (!chatSettings.value.stickerSuggestionsEnabled) return [];
@@ -1458,8 +1500,17 @@ function detailLocationDistanceLabel(message: ChatMessage) {
     : `距离你 ${message.location?.distance ?? ''}`;
 }
 
-function detailTransferTitle(message: ChatMessage) {
-  return message.sender === 'user' ? '转账给对方' : '转账给你';
+function createLinkMapLabel(address: string, fallback: string) {
+  const match = address.match(/([^市区县]+(?:街|路|巷|道)\d*[^\s,，。]*)/);
+  return match?.[1] || fallback || '目前位置';
+}
+
+function detailLocationAddress(message: ChatMessage) {
+  return message.location?.address?.trim() || message.location?.name || '位置';
+}
+
+function detailLocationMapLabel(message: ChatMessage) {
+  return createLinkMapLabel(detailLocationAddress(message), message.location?.name || '目前位置');
 }
 
 function detailTransferStatusLabel(message: ChatMessage) {
@@ -1468,20 +1519,16 @@ function detailTransferStatusLabel(message: ChatMessage) {
   return message.sender === 'user' ? '等待对方处理' : '等待你处理';
 }
 
-function detailCardAccentStyle(message: ChatMessage) {
-  if (message.sender === 'user') {
-    return {
-      '--card-detail-accent-bg': chatSettings.value.appearance.userBubbleColor,
-      '--card-detail-accent-fg': chatSettings.value.appearance.userTextColor
-    };
-  }
-  if (message.sender === 'char') {
-    return {
-      '--card-detail-accent-bg': chatSettings.value.appearance.characterBubbleColor,
-      '--card-detail-accent-fg': chatSettings.value.appearance.characterTextColor
-    };
-  }
-  return {};
+function detailLinkPayTitle(message: ChatMessage) {
+  return message.sender === 'user' ? '付款（LINK Pay）' : '接收（LINK Pay）';
+}
+
+function detailLinkPaySummary(message: ChatMessage) {
+  const amount = message.transfer?.amount ?? '0.00';
+  const direction = message.sender === 'user'
+    ? `您已付款 ¥${amount}。（收款方：${characterDisplayName.value}）`
+    : `您已收到 ¥${amount}。（来自：${characterDisplayName.value}）`;
+  return `${direction} ${detailTransferStatusLabel(message)}`;
 }
 
 function openCardDetail(message: ChatMessage) {
@@ -2100,61 +2147,378 @@ onBeforeUnmount(() => {
   overflow-wrap: anywhere;
 }
 
-.transfer-preview-card {
+.link-location-card {
   display: grid;
-  grid-template-columns: 58px minmax(0, 1fr);
+  grid-template-rows: 82px minmax(34px, auto);
   min-width: 0;
   overflow: hidden;
-  border-radius: 14px;
-  background: #ffffff;
-  color: #202329;
-  box-shadow: 0 8px 26px rgba(37, 31, 37, 0.08);
+  border-radius: 10px;
+  background: #76e776;
+  color: #111111;
 }
 
-.transfer-preview-card > span {
-  display: grid;
-  place-items: center;
-  min-height: 84px;
-  background: linear-gradient(135deg, #f3f4f6, #d9dde2);
-  color: #202329;
-  font-size: 25px;
-  font-weight: 950;
-}
-
-.transfer-preview-card div {
-  display: grid;
-  align-content: center;
-  gap: 4px;
+.link-location-map {
+  position: relative;
   min-width: 0;
-  padding: 11px 12px;
+  min-height: 82px;
+  overflow: hidden;
+  background:
+    linear-gradient(112deg, transparent 0 58%, rgba(216, 219, 222, 0.62) 59% 100%),
+    linear-gradient(164deg, rgba(255, 255, 255, 0.94) 0 7%, transparent 8% 100%),
+    #f0f1f3;
 }
 
-.transfer-preview-card small,
-.transfer-preview-card strong,
-.transfer-preview-card em {
+.link-map-road {
+  position: absolute;
+  display: block;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 0 0 1px rgba(222, 225, 229, 0.86);
+}
+
+.link-map-road-1 {
+  left: -15px;
+  top: 17px;
+  width: 124px;
+  height: 9px;
+  transform: rotate(-27deg);
+}
+
+.link-map-road-2 {
+  right: -14px;
+  top: 24px;
+  width: 112px;
+  height: 9px;
+  transform: rotate(12deg);
+}
+
+.link-map-road-3 {
+  left: 44px;
+  top: 45px;
+  width: 108px;
+  height: 9px;
+  transform: rotate(-38deg);
+}
+
+.link-map-road-4 {
+  left: 112px;
+  top: 35px;
+  width: 116px;
+  height: 9px;
+  transform: rotate(82deg);
+}
+
+.link-map-block {
+  position: absolute;
+  display: block;
+  border: 1px solid rgba(222, 225, 229, 0.9);
+  border-radius: 3px;
+  background: rgba(246, 247, 248, 0.88);
+}
+
+.link-map-block-1 {
+  left: 12px;
+  top: 2px;
+  width: 49px;
+  height: 30px;
+  transform: rotate(14deg);
+}
+
+.link-map-block-2 {
+  right: 15px;
+  top: 0;
+  width: 64px;
+  height: 35px;
+  transform: rotate(-6deg);
+}
+
+.link-map-block-3 {
+  right: -5px;
+  bottom: 5px;
+  width: 64px;
+  height: 35px;
+  transform: rotate(-18deg);
+}
+
+.link-map-label {
+  position: absolute;
+  z-index: 2;
+  max-width: 98px;
   overflow: hidden;
+  color: rgba(70, 74, 82, 0.76);
+  font-size: 10px;
+  font-weight: 580;
+  line-height: 1;
   text-overflow: ellipsis;
   white-space: nowrap;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.88);
 }
 
-.transfer-preview-card small {
-  color: #60646b;
-  font-size: 12px;
-  font-weight: 860;
+.link-map-label-top {
+  right: 27px;
+  top: 11px;
 }
 
-.transfer-preview-card strong {
-  color: #202329;
-  font-size: 22px;
+.link-map-label-mid {
+  left: 78px;
+  top: 42px;
+  max-width: 74px;
+}
+
+.link-map-pin {
+  position: absolute;
+  z-index: 3;
+  display: block;
+  width: 21px;
+  height: 21px;
+  border-radius: 50% 50% 50% 0;
+  background: #ef4c43;
+  transform: rotate(-45deg);
+  box-shadow: 0 1px 4px rgba(17, 17, 17, 0.2);
+}
+
+.link-map-pin::after {
+  position: absolute;
+  left: 6px;
+  top: 6px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #ffffff;
+  content: '';
+}
+
+.link-map-pin-main {
+  left: 93px;
+  top: 37px;
+}
+
+.link-map-pin-secondary {
+  right: 8px;
+  bottom: 12px;
+  width: 18px;
+  height: 18px;
+  background: #5f7180;
+}
+
+.link-map-pin-secondary::after {
+  left: 5px;
+  top: 5px;
+  width: 8px;
+  height: 8px;
+}
+
+.link-map-google {
+  position: absolute;
+  left: 8px;
+  bottom: 7px;
+  z-index: 4;
+  display: inline-flex;
+  align-items: baseline;
+  font-family: Arial, sans-serif;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: -1px;
+  line-height: 1;
+}
+
+.link-map-google span:nth-child(1),
+.link-map-google span:nth-child(4) {
+  color: #4285f4;
+}
+
+.link-map-google span:nth-child(2),
+.link-map-google span:nth-child(6) {
+  color: #db4437;
+}
+
+.link-map-google span:nth-child(3) {
+  color: #f4b400;
+}
+
+.link-map-google span:nth-child(5) {
+  color: #0f9d58;
+}
+
+.link-location-address {
+  display: block;
+  min-width: 0;
+  min-height: 34px;
+  padding: 7px 10px 8px;
+  background: #76e776;
+  color: rgba(35, 58, 42, 0.72);
+  font-size: 10px;
+  font-weight: 430;
+  line-height: 1.35;
+  white-space: normal;
+  word-break: break-word;
+}
+
+.link-pay-card {
+  display: grid;
+  grid-template-rows: 82px auto 28px;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid rgba(17, 17, 17, 0.08);
+  border-radius: 10px;
+  background: #ffffff;
+  color: #111111;
+}
+
+.link-pay-hero {
+  display: grid;
+  place-items: center;
+  min-height: 82px;
+  background: #04c755;
+}
+
+.link-pay-envelope {
+  position: relative;
+  width: 62px;
+  height: 40px;
+  border: 2px solid #111111;
+  background: #ffffff;
+}
+
+.link-pay-envelope::before,
+.link-pay-envelope::after {
+  position: absolute;
+  bottom: -2px;
+  width: 42px;
+  height: 2px;
+  background: #111111;
+  content: '';
+  transform-origin: bottom center;
+}
+
+.link-pay-envelope::before {
+  left: -4px;
+  transform: rotate(31deg);
+}
+
+.link-pay-envelope::after {
+  right: -4px;
+  transform: rotate(-31deg);
+}
+
+.link-pay-bill {
+  position: absolute;
+  left: 9px;
+  top: -19px;
+  width: 44px;
+  height: 28px;
+  border: 2px solid #111111;
+  background: #ffffff;
+  clip-path: polygon(0 18%, 50% 0, 100% 18%, 100% 100%, 0 100%);
+}
+
+.link-pay-bill::before,
+.link-pay-bill::after {
+  position: absolute;
+  top: 7px;
+  width: 5px;
+  height: 5px;
+  border-top: 2px solid #111111;
+  content: '';
+}
+
+.link-pay-bill::before {
+  left: 7px;
+  border-left: 2px solid #111111;
+}
+
+.link-pay-bill::after {
+  right: 7px;
+  border-right: 2px solid #111111;
+}
+
+.link-pay-symbol {
+  position: absolute;
+  left: 50%;
+  top: -7px;
+  z-index: 2;
+  color: #04c755;
+  font-size: 15px;
   font-weight: 950;
-  line-height: 1.1;
+  line-height: 1;
+  transform: translateX(-50%);
 }
 
-.transfer-preview-card em {
-  color: #68717a;
-  font-size: 12px;
-  font-style: normal;
+.link-pay-body {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 9px 10px 10px;
+  border-bottom: 1px solid #eeeeee;
+  background: #ffffff;
+}
+
+.link-pay-body strong {
+  color: #101010;
+  font-size: 11px;
+  font-weight: 900;
+  line-height: 1.2;
+}
+
+.link-pay-body > span:not(.link-pay-more) {
+  color: #777777;
+  font-size: 10px;
+  font-weight: 520;
+  line-height: 1.35;
+  white-space: normal;
+  word-break: break-word;
+}
+
+.link-pay-more {
+  display: grid;
+  place-items: center;
+  min-height: 24px;
+  margin-top: 5px;
+  border-radius: 6px;
+  background: #f1f1f1;
+  color: #111111;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.link-pay-footer {
+  display: grid;
+  grid-template-columns: 17px minmax(0, 1fr) 7px;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  min-height: 28px;
+  padding: 0 8px;
+  background: #ffffff;
+  color: #777777;
+  font-size: 11px;
   font-weight: 760;
+}
+
+.link-pay-footer-mark {
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #04c755;
+  color: #ffffff;
+  font-size: 10px;
+  font-weight: 900;
+}
+
+.link-pay-chevron {
+  width: 6px;
+  height: 6px;
+  border-top: 2px solid #c6c6c6;
+  border-right: 2px solid #c6c6c6;
+  transform: rotate(45deg);
+}
+
+.transfer-preview-card,
+.card-detail-preview-card {
+  justify-self: center;
+  width: min(176px, 100%);
 }
 
 .transfer-field,
@@ -2246,57 +2610,8 @@ onBeforeUnmount(() => {
 }
 
 .location-preview-card {
-  display: grid;
-  grid-template-columns: 58px minmax(0, 1fr);
-  min-width: 0;
-  overflow: hidden;
-  border-radius: 14px;
-  background: #ffffff;
-  color: #202329;
-  box-shadow: 0 8px 26px rgba(37, 31, 37, 0.08);
-}
-
-.location-preview-card > span {
-  display: grid;
-  place-items: center;
-  min-height: 76px;
-  background: linear-gradient(135deg, #f0f1f3, #e3e5e8);
-  color: #30343a;
-}
-
-.location-preview-card div {
-  display: grid;
-  align-content: center;
-  gap: 4px;
-  min-width: 0;
-  padding: 11px 12px;
-}
-
-.location-preview-card strong,
-.location-preview-card small,
-.location-preview-card em {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.location-preview-card strong {
-  font-size: 14px;
-  font-weight: 900;
-  line-height: 1.25;
-}
-
-.location-preview-card small {
-  color: #68717a;
-  font-size: 12px;
-  font-weight: 760;
-}
-
-.location-preview-card em {
-  color: #30343a;
-  font-size: 12px;
-  font-style: normal;
-  font-weight: 900;
+  justify-self: center;
+  width: min(176px, 100%);
 }
 
 .location-field {
@@ -2748,81 +3063,40 @@ onBeforeUnmount(() => {
 
 .card-detail-sheet {
   display: grid;
-  grid-template-columns: 58px minmax(0, 1fr);
-  gap: 0;
-  overflow: hidden;
-  border: 1px solid #e6e8eb;
-  border-radius: 16px;
-  background: #ffffff;
-  color: #202329;
-  box-shadow: 0 8px 20px rgba(17, 20, 24, 0.06);
-}
-
-.card-detail-icon {
-  display: grid;
-  place-items: center;
-  min-height: 96px;
-  background: var(--card-detail-accent-bg, linear-gradient(135deg, #f0f1f3, #e2e4e7));
-  color: var(--card-detail-accent-fg, #30343a);
-  font-size: 18px;
-  font-weight: 950;
-}
-
-.card-detail-content {
-  display: grid;
-  align-content: center;
-  gap: 6px;
+  justify-items: center;
+  gap: 8px;
   min-width: 0;
-  padding: 12px;
-}
-
-.card-detail-content span {
-  color: #5f6670;
-  font-size: 11px;
-  font-weight: 860;
-}
-
-.card-detail-content strong {
+  background: transparent;
   color: #202329;
-  font-size: 17px;
-  font-weight: 950;
-  line-height: 1.15;
-  overflow-wrap: anywhere;
 }
 
-.card-detail-content p {
+.card-detail-footnote {
+  justify-self: center;
+  width: min(176px, 100%);
   margin: 0;
-  color: #69717b;
-  font-size: 12px;
-  font-weight: 760;
-  line-height: 1.45;
-  overflow-wrap: anywhere;
-  white-space: pre-wrap;
-}
-
-.card-detail-content em {
-  justify-self: start;
-  max-width: 100%;
-  padding: 3px 8px;
-  border-radius: 999px;
+  padding: 7px 9px;
+  border-radius: 9px;
   background: #eef0f2;
   color: #5f6670;
   font-size: 11px;
-  font-style: normal;
   font-weight: 860;
+  line-height: 1.3;
+  text-align: center;
 }
 
 .card-detail-actions {
-  grid-column: 2;
-  display: flex;
-  justify-content: flex-end;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
   gap: 8px;
-  padding: 0 12px 12px 0;
+  width: min(176px, 100%);
+  padding: 0;
 }
 
 .card-detail-actions button {
-  min-width: 62px;
-  min-height: 38px;
+  min-width: 0;
+  min-height: 34px;
+  border-radius: 9px;
+  font-size: 12px;
 }
 
 .card-detail-actions .primary-action {

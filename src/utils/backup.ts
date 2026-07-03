@@ -23,7 +23,7 @@ export interface LinkBackupChunkManifest {
   }>;
 }
 
-const snapshotArrayKeys: Array<keyof Omit<AppSnapshot, 'settings'>> = [
+export const linkBackupSnapshotArrayKeys: Array<keyof Omit<AppSnapshot, 'settings'>> = [
   'users',
   'characters',
   'conversations',
@@ -79,11 +79,21 @@ function sanitizeImageCandidateForBackup<T extends ChatImageCandidate | VoomImag
   };
 }
 
+function sanitizeActiveImageCandidatesForBackup<T extends ChatImageCandidate | VoomImageCandidate>(candidates: T[] | undefined, activeImage: string | undefined) {
+  const normalizedActiveImage = String(activeImage ?? '').trim();
+  if (!normalizedActiveImage) return undefined;
+  return candidates
+    ?.filter((candidate) => candidate.image.trim() === normalizedActiveImage)
+    .map((candidate) => sanitizeImageCandidateForBackup(candidate))
+    .filter((candidate) => candidate.image);
+}
+
 function sanitizeChatImageForBackup(image: ChatImageAttachment): ChatImageAttachment {
+  const url = stripLargeInlineAsset(image.url);
   return {
     ...image,
-    url: stripLargeInlineAsset(image.url),
-    candidates: image.candidates?.map((candidate) => sanitizeImageCandidateForBackup(candidate)).filter((candidate) => candidate.image)
+    url,
+    candidates: sanitizeActiveImageCandidatesForBackup(image.candidates, url)
   };
 }
 
@@ -119,11 +129,12 @@ function sanitizeStickerForBackup(sticker: Sticker): Sticker {
 }
 
 function sanitizeVoomPostForBackup(post: VoomPost): VoomPost {
+  const image = stripLargeInlineAsset(post.image);
   return {
     ...post,
     authorAvatar: stripLargeInlineAsset(post.authorAvatar),
-    image: stripLargeInlineAsset(post.image),
-    imageCandidates: post.imageCandidates?.map((candidate) => sanitizeImageCandidateForBackup(candidate)).filter((candidate) => candidate.image)
+    image,
+    imageCandidates: sanitizeActiveImageCandidatesForBackup(post.imageCandidates, image)
   };
 }
 
@@ -157,9 +168,14 @@ function sanitizeSettingsForBackup(settings: AppSettings): AppSettings {
     githubBackup: {
       ...settings.githubBackup,
       enabled: false,
-      token: '',
       lastBackupStatus: 'idle',
-      lastBackupError: ''
+      lastBackupError: '',
+      progress: {
+        phase: 'idle',
+        label: '',
+        percent: 0,
+        updatedAt: 0
+      }
     },
     imageOpenAi: {
       ...settings.imageOpenAi,
@@ -181,9 +197,12 @@ function sanitizeSnapshotForBackup(snapshot: AppSnapshot): AppSnapshot {
   const safeSnapshot = cloneSnapshot(snapshot);
   safeSnapshot.messages = safeSnapshot.messages.map((message) => sanitizeMessageForBackup(message));
   safeSnapshot.voomPosts = safeSnapshot.voomPosts.map((post) => sanitizeVoomPostForBackup(post));
+  const activeVoomImages = new Set(safeSnapshot.voomPosts.map((post) => post.image?.trim()).filter(Boolean));
   safeSnapshot.worldBooks = safeSnapshot.worldBooks.map((entry) => sanitizeWorldBookForBackup(entry));
   safeSnapshot.stickers = safeSnapshot.stickers.map((sticker) => sanitizeStickerForBackup(sticker));
-  safeSnapshot.generatedImages = safeSnapshot.generatedImages.map((record) => sanitizeGeneratedImageForBackup(record)).filter((record) => record.imageUrl);
+  safeSnapshot.generatedImages = safeSnapshot.generatedImages
+    .map((record) => sanitizeGeneratedImageForBackup(record))
+    .filter((record) => record.imageUrl && (record.source !== 'voom' || activeVoomImages.has(record.imageUrl.trim())));
   safeSnapshot.favorites = (safeSnapshot.favorites ?? []).map((record) => sanitizeFavoriteForBackup(record));
   safeSnapshot.settings = sanitizeSettingsForBackup(safeSnapshot.settings);
   return safeSnapshot;
@@ -197,7 +216,7 @@ function normalizeBackupSnapshot(value: unknown): AppSnapshot {
     settings: isRecord(value.settings) ? value.settings : {}
   };
 
-  for (const key of snapshotArrayKeys) {
+  for (const key of linkBackupSnapshotArrayKeys) {
     snapshot[key] = Array.isArray(value[key]) ? value[key] : [];
   }
 

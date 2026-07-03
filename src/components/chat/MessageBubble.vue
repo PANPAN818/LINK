@@ -47,24 +47,41 @@
             </div>
           </template>
           <template v-else-if="message.location">
-            <section class="location-message" :style="cardAccentStyle" aria-label="定位消息">
-              <span class="location-map" aria-hidden="true">
-                <MapPin :size="22" />
+            <section class="line-location-card" aria-label="定位消息">
+              <span class="line-location-map" aria-hidden="true">
+                <span class="line-map-road line-map-road-1"></span>
+                <span class="line-map-road line-map-road-2"></span>
+                <span class="line-map-road line-map-road-3"></span>
+                <span class="line-map-road line-map-road-4"></span>
+                <span class="line-map-block line-map-block-1"></span>
+                <span class="line-map-block line-map-block-2"></span>
+                <span class="line-map-block line-map-block-3"></span>
+                <span class="line-map-label line-map-label-top">{{ lineLocationMapLabel }}</span>
+                <span class="line-map-label line-map-label-mid">{{ message.location.name }}</span>
+                <span class="line-map-pin line-map-pin-main"></span>
+                <span class="line-map-pin line-map-pin-secondary"></span>
+                <span class="line-map-google"><span>G</span><span>o</span><span>o</span><span>g</span><span>l</span><span>e</span></span>
               </span>
-              <span class="location-copy">
-                <strong>{{ message.location.name }}</strong>
-                <span v-if="message.location.address">{{ message.location.address }}</span>
-                <small>{{ locationDistanceLabel }}</small>
-              </span>
+              <span class="line-location-address">{{ lineLocationAddress }}</span>
             </section>
           </template>
           <template v-else-if="message.transfer">
-            <section class="transfer-message" :class="`transfer-message--${message.transfer.status}`" :style="cardAccentStyle" aria-label="转账消息">
-              <span class="transfer-mark" aria-hidden="true"></span>
-              <span class="transfer-copy">
-                <span class="transfer-title">{{ transferTitle }}</span>
-                <strong>¥{{ message.transfer.amount }}</strong>
-                <span class="transfer-note" :aria-hidden="!message.transfer.note">{{ message.transfer.note || ' ' }}</span>
+            <section class="line-pay-card" :class="`line-pay-card--${message.transfer.status}`" aria-label="转账消息">
+              <span class="line-pay-hero" aria-hidden="true">
+                <span class="line-pay-envelope">
+                  <span class="line-pay-bill"></span>
+                  <span class="line-pay-symbol">$</span>
+                </span>
+              </span>
+              <span class="line-pay-body">
+                <strong>{{ linePayTitle }}</strong>
+                <span>{{ linePaySummary }}</span>
+                <button class="line-pay-more" type="button" tabindex="-1">瞭解更多</button>
+              </span>
+              <span class="line-pay-footer">
+                <span class="line-pay-footer-mark" aria-hidden="true">$</span>
+                <span>LINK Pay</span>
+                <span class="line-pay-chevron" aria-hidden="true"></span>
               </span>
             </section>
           </template>
@@ -170,7 +187,7 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
-import { DoorOpen, LoaderCircle, MapPin, Pause, Play, Quote, X } from 'lucide-vue-next';
+import { DoorOpen, LoaderCircle, Pause, Play, Quote, X } from 'lucide-vue-next';
 import AppModal from '@/components/common/AppModal.vue';
 import type { CharacterProfile, ChatAppearanceSettings, ChatImageCandidate, ChatMessage, UserProfile } from '@/types/domain';
 import { useAppStore } from '@/stores/appStore';
@@ -382,22 +399,6 @@ const bubbleStyle = computed(() => {
   return {};
 });
 
-const cardAccentStyle = computed(() => {
-  if (props.message.sender === 'user') {
-    return {
-      '--message-card-accent-bg': props.appearance.userBubbleColor,
-      '--message-card-accent-fg': props.appearance.userTextColor
-    };
-  }
-  if (props.message.sender === 'char') {
-    return {
-      '--message-card-accent-bg': props.appearance.characterBubbleColor,
-      '--message-card-accent-fg': props.appearance.characterTextColor
-    };
-  }
-  return {};
-});
-
 const imageCardStyle = computed(() => {
   const image = props.message.image;
   if (!image?.width || !image.height) return { '--chat-image-ratio': '1 / 1' };
@@ -432,10 +433,18 @@ const imageViewerAspectRatio = computed(() => {
   return '1 / 1';
 });
 const imageViewerStyle = computed(() => ({ '--chat-viewer-ratio': imageViewerAspectRatio.value }));
-const locationDistanceLabel = computed(() => (props.message.sender === 'user'
-  ? `距离对方 ${props.message.location?.distance ?? ''}`
-  : `距离你 ${props.message.location?.distance ?? ''}`));
-const transferTitle = computed(() => (props.message.sender === 'user' ? '转账给对方' : '转账给你'));
+const lineLocationAddress = computed(() => props.message.location?.address?.trim() || props.message.location?.name || '位置');
+const lineLocationMapLabel = computed(() => {
+  const address = props.message.location?.address?.trim() || props.message.location?.name || '';
+  const match = address.match(/([^市区县]+(?:街|路|巷|道)\d*[^\s,，。]*)/);
+  return match?.[1] || props.message.location?.name || '目前位置';
+});
+const linePayTitle = computed(() => (props.message.sender === 'user' ? '付款（LINK Pay）' : '接收（LINK Pay）'));
+const linePaySummary = computed(() => {
+  const amount = props.message.transfer?.amount ?? '';
+  if (props.message.sender === 'user') return `您已付款 ¥${amount}。（收款方：${characterDisplayName.value}）`;
+  return `您已收到 ¥${amount}。（来自：${characterDisplayName.value}）`;
+});
 const offlineInvitationStatusLabel = computed(() => ({
   pending: '要进入线下模式继续这一幕吗？',
   accepted: '已进入线下模块',
@@ -1003,26 +1012,25 @@ onBeforeUnmount(stopVoicePlayback);
   box-shadow: 0 8px 24px rgba(17, 20, 24, 0.08);
 }
 
-.bubble.location {
-  min-width: min(210px, 62vw);
+.bubble.location,
+.bubble.transfer {
+  width: min(176px, 51vw);
+  min-width: min(158px, 46vw);
   padding: 0;
   overflow: hidden;
-  border-radius: 16px;
-  background: #ffffff;
-  color: #202329;
-  border: 1px solid #e6e8eb;
-  box-shadow: 0 8px 20px rgba(17, 20, 24, 0.06);
+  border-radius: 10px;
+  color: #111111;
+  box-shadow: none;
+}
+
+.bubble.location {
+  background: transparent;
+  border: 0;
 }
 
 .bubble.transfer {
-  min-width: min(218px, 68vw);
-  padding: 0;
-  overflow: hidden;
-  border-radius: 16px;
   background: #ffffff;
-  color: #202329;
-  border: 1px solid #e6e8eb;
-  box-shadow: 0 8px 20px rgba(17, 20, 24, 0.06);
+  border: 1px solid rgba(17, 17, 17, 0.08);
 }
 
 .bubble.offlineInvitation {
@@ -1042,8 +1050,7 @@ onBeforeUnmount(stopVoicePlayback);
 .message-row.char .bubble.transfer,
 .message-row.char .bubble.offlineInvitation,
 .message-row.system .bubble.offlineInvitation {
-  background: #ffffff;
-  color: #202329;
+  color: #111111;
 }
 
 .offline-invitation-message {
@@ -1104,106 +1111,371 @@ onBeforeUnmount(stopVoicePlayback);
   color: #202329;
 }
 
-.location-message {
+.line-location-card {
   display: grid;
-  grid-template-columns: 58px minmax(0, 1fr);
+  grid-template-rows: 82px minmax(34px, auto);
   min-width: 0;
-  height: 70px;
-  min-height: 70px;
-}
-
-.location-map {
-  display: grid;
-  place-items: center;
-  background: var(--message-card-accent-bg, linear-gradient(135deg, #f0f1f3, #e2e4e7));
-  color: var(--message-card-accent-fg, #30343a);
-}
-
-.location-copy {
-  display: grid;
-  align-content: center;
-  gap: 3px;
-  min-width: 0;
-  padding: 10px 11px;
-}
-
-.location-copy strong,
-.location-copy span,
-.location-copy small {
   overflow: hidden;
+  border-radius: inherit;
+  background: #76e776;
+}
+
+.line-location-map {
+  position: relative;
+  min-width: 0;
+  min-height: 82px;
+  overflow: hidden;
+  background:
+    linear-gradient(112deg, transparent 0 58%, rgba(216, 219, 222, 0.62) 59% 100%),
+    linear-gradient(164deg, rgba(255, 255, 255, 0.94) 0 7%, transparent 8% 100%),
+    #f0f1f3;
+}
+
+.line-map-road {
+  position: absolute;
+  display: block;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 0 0 1px rgba(222, 225, 229, 0.86);
+}
+
+.line-map-road-1 {
+  left: -15px;
+  top: 17px;
+  width: 124px;
+  height: 9px;
+  transform: rotate(-27deg);
+}
+
+.line-map-road-2 {
+  right: -14px;
+  top: 24px;
+  width: 112px;
+  height: 9px;
+  transform: rotate(12deg);
+}
+
+.line-map-road-3 {
+  left: 44px;
+  top: 45px;
+  width: 108px;
+  height: 9px;
+  transform: rotate(-38deg);
+}
+
+.line-map-road-4 {
+  left: 112px;
+  top: 35px;
+  width: 116px;
+  height: 9px;
+  transform: rotate(82deg);
+}
+
+.line-map-block {
+  position: absolute;
+  display: block;
+  border: 1px solid rgba(222, 225, 229, 0.9);
+  border-radius: 3px;
+  background: rgba(246, 247, 248, 0.88);
+}
+
+.line-map-block-1 {
+  left: 12px;
+  top: 2px;
+  width: 49px;
+  height: 30px;
+  transform: rotate(14deg);
+}
+
+.line-map-block-2 {
+  right: 15px;
+  top: 0;
+  width: 64px;
+  height: 35px;
+  transform: rotate(-6deg);
+}
+
+.line-map-block-3 {
+  right: -5px;
+  bottom: 5px;
+  width: 64px;
+  height: 35px;
+  transform: rotate(-18deg);
+}
+
+.line-map-label {
+  position: absolute;
+  z-index: 2;
+  max-width: 98px;
+  overflow: hidden;
+  color: rgba(70, 74, 82, 0.76);
+  font-size: 10px;
+  font-weight: 580;
+  line-height: 1;
   text-overflow: ellipsis;
   white-space: nowrap;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.88);
 }
 
-.location-copy strong {
-  color: #202329;
-  font-size: 13px;
-  font-weight: 900;
-  line-height: 1.25;
+.line-map-label-top {
+  right: 27px;
+  top: 11px;
 }
 
-.location-copy span {
-  color: #69717b;
-  font-size: 11px;
+.line-map-label-mid {
+  left: 78px;
+  top: 42px;
+  max-width: 74px;
+}
+
+.line-map-pin {
+  position: absolute;
+  z-index: 3;
+  display: block;
+  width: 21px;
+  height: 21px;
+  border-radius: 50% 50% 50% 0;
+  background: #ef4c43;
+  transform: rotate(-45deg);
+  box-shadow: 0 1px 4px rgba(17, 17, 17, 0.2);
+}
+
+.line-map-pin::after {
+  position: absolute;
+  left: 6px;
+  top: 6px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #ffffff;
+  content: '';
+}
+
+.line-map-pin-main {
+  left: 93px;
+  top: 37px;
+}
+
+.line-map-pin-secondary {
+  right: 8px;
+  bottom: 12px;
+  width: 18px;
+  height: 18px;
+  background: #5f7180;
+}
+
+.line-map-pin-secondary::after {
+  left: 5px;
+  top: 5px;
+  width: 8px;
+  height: 8px;
+}
+
+.line-map-google {
+  position: absolute;
+  left: 8px;
+  bottom: 7px;
+  z-index: 4;
+  display: inline-flex;
+  align-items: baseline;
+  font-family: Arial, sans-serif;
+  font-size: 14px;
   font-weight: 700;
+  letter-spacing: -1px;
+  line-height: 1;
 }
 
-.location-copy small {
-  color: #30343a;
-  font-size: 11px;
-  font-weight: 860;
+.line-map-google span:nth-child(1),
+.line-map-google span:nth-child(4) {
+  color: #4285f4;
 }
 
-.transfer-message {
-  display: grid;
-  grid-template-columns: 58px minmax(0, 1fr);
+.line-map-google span:nth-child(2),
+.line-map-google span:nth-child(6) {
+  color: #db4437;
+}
+
+.line-map-google span:nth-child(3) {
+  color: #f4b400;
+}
+
+.line-map-google span:nth-child(5) {
+  color: #0f9d58;
+}
+
+.line-location-address {
+  display: block;
   min-width: 0;
-  height: 70px;
-  min-height: 70px;
+  min-height: 34px;
+  padding: 7px 10px 8px;
+  background: #76e776;
+  color: rgba(35, 58, 42, 0.72);
+  font-size: 10px;
+  font-weight: 430;
+  line-height: 1.35;
+  white-space: normal;
+  word-break: break-word;
 }
 
-.transfer-mark {
+.line-pay-card {
+  display: grid;
+  grid-template-rows: 82px auto 28px;
+  min-width: 0;
+  overflow: hidden;
+  border-radius: inherit;
+  background: #ffffff;
+}
+
+.line-pay-hero {
   display: grid;
   place-items: center;
-  background: var(--message-card-accent-bg, linear-gradient(135deg, #f0f1f3, #e2e4e7));
-  color: var(--message-card-accent-fg, #30343a);
+  min-height: 82px;
+  background: #04c755;
 }
 
-.transfer-copy {
-  display: grid;
-  grid-template-rows: auto auto auto;
-  align-content: center;
-  gap: 2px;
-  min-width: 0;
-  min-height: 70px;
-  padding: 8px 10px;
+.line-pay-envelope {
+  position: relative;
+  width: 62px;
+  height: 40px;
+  border: 2px solid #111111;
+  background: #ffffff;
 }
 
-.transfer-title,
-.transfer-copy strong,
-.transfer-note {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.line-pay-envelope::before,
+.line-pay-envelope::after {
+  position: absolute;
+  bottom: -2px;
+  width: 42px;
+  height: 2px;
+  background: #111111;
+  content: '';
+  transform-origin: bottom center;
 }
 
-.transfer-title {
-  color: #5f6670;
-  font-size: 11px;
-  font-weight: 860;
+.line-pay-envelope::before {
+  left: -4px;
+  transform: rotate(31deg);
 }
 
-.transfer-copy strong {
-  color: #202329;
+.line-pay-envelope::after {
+  right: -4px;
+  transform: rotate(-31deg);
+}
+
+.line-pay-bill {
+  position: absolute;
+  left: 9px;
+  top: -19px;
+  width: 44px;
+  height: 28px;
+  border: 2px solid #111111;
+  background: #ffffff;
+  clip-path: polygon(0 18%, 50% 0, 100% 18%, 100% 100%, 0 100%);
+}
+
+.line-pay-bill::before,
+.line-pay-bill::after {
+  position: absolute;
+  top: 7px;
+  width: 5px;
+  height: 5px;
+  border-top: 2px solid #111111;
+  content: '';
+}
+
+.line-pay-bill::before {
+  left: 7px;
+  border-left: 2px solid #111111;
+}
+
+.line-pay-bill::after {
+  right: 7px;
+  border-right: 2px solid #111111;
+}
+
+.line-pay-symbol {
+  position: absolute;
+  left: 50%;
+  top: -7px;
+  z-index: 2;
+  color: #04c755;
   font-size: 15px;
   font-weight: 950;
-  line-height: 1.08;
+  line-height: 1;
+  transform: translateX(-50%);
 }
 
-.transfer-note {
-  color: #69717b;
+.line-pay-body {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 9px 10px 10px;
+  border-bottom: 1px solid #eeeeee;
+  background: #ffffff;
+}
+
+.line-pay-body strong {
+  color: #101010;
+  font-size: 11px;
+  font-weight: 900;
+  line-height: 1.2;
+}
+
+.line-pay-body > span {
+  color: #777777;
+  font-size: 10px;
+  font-weight: 520;
+  line-height: 1.35;
+  white-space: normal;
+  word-break: break-word;
+}
+
+.line-pay-more {
+  display: grid;
+  place-items: center;
+  min-height: 24px;
+  margin-top: 5px;
+  border: 0;
+  border-radius: 6px;
+  background: #f1f1f1;
+  color: #111111;
+  font-size: 11px;
+  font-weight: 900;
+  pointer-events: none;
+}
+
+.line-pay-footer {
+  display: grid;
+  grid-template-columns: 17px minmax(0, 1fr) 7px;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  min-height: 28px;
+  padding: 0 8px;
+  background: #ffffff;
+  color: #777777;
   font-size: 11px;
   font-weight: 760;
+}
+
+.line-pay-footer-mark {
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #04c755;
+  color: #ffffff;
+  font-size: 10px;
+  font-weight: 900;
+}
+
+.line-pay-chevron {
+  width: 6px;
+  height: 6px;
+  border-top: 2px solid #c6c6c6;
+  border-right: 2px solid #c6c6c6;
+  transform: rotate(45deg);
 }
 
 .voice-message {

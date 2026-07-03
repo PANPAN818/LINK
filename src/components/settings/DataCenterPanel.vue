@@ -34,7 +34,7 @@
 
       <button class="secondary-action wide-action" type="button" :disabled="Boolean(githubBusy)" @click="openGitHubLogin">
         <Github :size="16" />
-        <span>GitHub 登录</span>
+        <span>GitHub 一键登录</span>
       </button>
 
       <label class="field">
@@ -147,7 +147,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { CloudUpload, Download, Github, Lock } from 'lucide-vue-next';
-import { buildGitHubLoginUrl, ensureGitHubBackupRepository, fetchGitHubViewer, formatGitHubBackupError, getGitHubOAuthWorkerOrigin } from '@/services/githubBackup';
+import { buildGitHubLoginUrl, ensureGitHubBackupRepository, fetchGitHubViewer, findGitHubBackupRepository, formatGitHubBackupError, getGitHubOAuthWorkerOrigin } from '@/services/githubBackup';
 import { useAppStore } from '@/stores/appStore';
 import type { AppSettings, GitHubBackupHistoryRecord, GitHubBackupSettings } from '@/types/domain';
 import { createBackupArchiveFilename, downloadLinkBackupArchive, parseLinkBackupBlob } from '@/utils/backup';
@@ -251,8 +251,9 @@ function normalizedInterval() {
 }
 
 function buildGitHubDraft(overrides: Partial<GitHubBackupSettings> = {}): GitHubBackupSettings {
+  const currentGitHubSettings = store.settings?.githubBackup ?? githubSettings.value;
   return {
-    ...githubSettings.value,
+    ...currentGitHubSettings,
     token: githubToken.value.trim(),
     owner: ownerDraft.value.trim().replace(/^@/, ''),
     repo: repoDraft.value.trim() || 'link-private-backups',
@@ -265,8 +266,9 @@ function buildGitHubDraft(overrides: Partial<GitHubBackupSettings> = {}): GitHub
 }
 
 async function saveGitHubDraft(overrides: Partial<GitHubBackupSettings> = {}) {
+  const currentSettings = store.settings ?? props.settings;
   await store.saveSettings({
-    ...props.settings,
+    ...currentSettings,
     githubBackup: buildGitHubDraft(overrides)
   });
 }
@@ -311,7 +313,9 @@ async function exportBackup() {
   localFeedback.value = '';
 
   try {
-    const backup = await store.createBackupFile();
+    const backup = await store.createBackupFile((label, percent) => {
+      setLocalFeedback(`${label} ${Math.round(percent)}%`);
+    });
     downloadLinkBackupArchive(backup, createBackupArchiveFilename(props.userId));
     setLocalFeedback('压缩备份已导出。');
   } catch (error) {
@@ -350,10 +354,10 @@ function openGitHubLogin() {
   const login = buildGitHubLoginUrl();
   githubLoginWindow = window.open(login.url, 'link-github-oauth', 'width=480,height=720');
   setGitHubFeedback(login.mode === 'worker'
-    ? '已打开 GitHub 授权页，授权完成后会自动创建私有仓库并完成首次备份。'
+    ? '已打开 GitHub 授权页，授权完成后会自动查找已有备份；找不到时才创建私有仓库。'
     : login.mode === 'oauth'
       ? '已打开 GitHub 授权页。静态前端仍需要后端回调来自动换取 token。'
-      : '已打开 GitHub token 页面。创建后把 token 粘贴回来即可继续自动创建私有仓库。');
+      : '已打开 GitHub token 页面。创建后把 token 粘贴回来，点右侧图标会自动查找已有备份。');
 }
 
 async function handleGitHubOAuthMessage(event: MessageEvent) {
@@ -385,6 +389,45 @@ async function completeGitHubOAuthSetup(message: GitHubOAuthMessage) {
   enabledDraft.value = true;
 
   try {
+    setGitHubFeedback('GitHub 已授权，正在自动查找已有 LINK 备份...');
+    const discoveredBackup = await findGitHubBackupRepository({
+      token: message.token,
+      owner: message.owner,
+      preferredRepo: repoDraft.value,
+      preferredPath: pathDraft.value
+    });
+
+    if (discoveredBackup) {
+      ownerDraft.value = discoveredBackup.owner;
+      repoDraft.value = discoveredBackup.repo;
+      branchDraft.value = discoveredBackup.branch || branchDraft.value;
+      pathDraft.value = discoveredBackup.path;
+      await saveGitHubDraft({
+        token: message.token,
+        owner: discoveredBackup.owner,
+        repo: discoveredBackup.repo,
+        branch: discoveredBackup.branch || branchDraft.value,
+        path: discoveredBackup.path,
+        enabled: true,
+        lastBackupStatus: 'idle',
+        lastBackupError: ''
+      });
+      const history = await store.syncGitHubBackupHistory();
+      const latest = history[0];
+      githubLoginWindow?.close();
+      await saveGitHubDraft({
+        pendingRestoreSha: latest?.sha ?? '',
+        pendingRestoreAt: latest?.committedAt ?? 0
+      });
+      if (latest && window.confirm(`已找到 ${discoveredBackup.owner}/${discoveredBackup.repo} 的 GitHub 备份，要立即导入到当前设备吗？`)) {
+        await store.importGitHubBackup(latest.sha);
+        setGitHubFeedback(`已从 ${discoveredBackup.owner}/${discoveredBackup.repo} 导入 GitHub 备份。`);
+        return;
+      }
+      setGitHubFeedback(`已自动连接 ${discoveredBackup.owner}/${discoveredBackup.repo}，可点“立即恢复”或“导入 GitHub 备份”。`);
+      return;
+    }
+
     const repository = await ensureGitHubBackupRepository(buildGitHubDraft({
       token: message.token,
       owner: message.owner,
@@ -418,7 +461,7 @@ async function completeGitHubOAuthSetup(message: GitHubOAuthMessage) {
       return;
     }
     await store.runGitHubBackup('manual');
-    setGitHubFeedback(`已连接 ${repository.owner}/${repository.repo}，并完成首次备份。`);
+    setGitHubFeedback(`没有找到已有 LINK 备份，已创建 ${repository.owner}/${repository.repo} 并完成首次备份。`);
   } catch (error) {
     setGitHubFeedback(formatGitHubBackupError(error), 'error');
   } finally {
@@ -433,9 +476,33 @@ async function connectGitHub() {
   try {
     const viewer = await fetchGitHubViewer(githubToken.value);
     ownerDraft.value = viewer.login;
+    setGitHubFeedback('已连接 GitHub，正在自动查找已有 LINK 备份...');
+    const discoveredBackup = await findGitHubBackupRepository({
+      token: githubToken.value,
+      owner: viewer.login,
+      preferredRepo: repoDraft.value,
+      preferredPath: pathDraft.value
+    });
+    if (discoveredBackup) {
+      ownerDraft.value = discoveredBackup.owner;
+      repoDraft.value = discoveredBackup.repo;
+      branchDraft.value = discoveredBackup.branch || branchDraft.value;
+      pathDraft.value = discoveredBackup.path;
+      await saveGitHubDraft({
+        owner: discoveredBackup.owner,
+        repo: discoveredBackup.repo,
+        branch: discoveredBackup.branch || branchDraft.value,
+        path: discoveredBackup.path,
+        lastBackupStatus: 'idle',
+        lastBackupError: ''
+      });
+      await refreshGitHubHistory();
+      setGitHubFeedback(`已自动连接 ${discoveredBackup.owner}/${discoveredBackup.repo}，可直接导入 GitHub 备份。`);
+      return;
+    }
     await saveGitHubDraft({ owner: viewer.login, lastBackupStatus: 'idle', lastBackupError: '' });
     await refreshGitHubHistory();
-    setGitHubFeedback(`已连接 ${viewer.login}。`);
+    setGitHubFeedback(`已连接 ${viewer.login}，但没有在私有仓库中找到 LINK 备份。`);
   } catch (error) {
     setGitHubFeedback(formatGitHubBackupError(error), 'error');
   } finally {
