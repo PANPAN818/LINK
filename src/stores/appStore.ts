@@ -538,12 +538,12 @@ export const useAppStore = defineStore('app', () => {
     users.value = snapshot.users;
     characters.value = snapshot.characters;
     conversations.value = snapshot.conversations;
-    messages.value = snapshot.messages;
-    voomPosts.value = snapshot.voomPosts;
+    messages.value = snapshot.messages.map((message) => normalizeStoredMessageIdentityReferences(message));
+    voomPosts.value = snapshot.voomPosts.map((post) => normalizeStoredVoomPostIdentityReferences(post));
     smallTheaterTopics.value = snapshot.smallTheaterTopics ?? [];
-    smallTheaters.value = snapshot.smallTheaters ?? [];
+    smallTheaters.value = normalizeStoredSmallTheaters(snapshot.smallTheaters ?? []);
     musicFavoriteTracks.value = snapshot.musicFavoriteTracks ?? [];
-    musicCommentThreads.value = snapshot.musicCommentThreads ?? [];
+    musicCommentThreads.value = normalizeStoredMusicCommentThreads(snapshot.musicCommentThreads ?? []);
     worldBooks.value = snapshot.worldBooks;
     stickerGroups.value = snapshot.stickerGroups;
     stickers.value = snapshot.stickers;
@@ -566,21 +566,39 @@ export const useAppStore = defineStore('app', () => {
     const fallbackUserId = snapshot.settings.activeUserId || snapshot.users[0]?.id || '';
     characters.value = snapshot.characters.map((entry) => normalizeCharacterProfile(entry, fallbackUserId));
     conversations.value = snapshot.conversations;
-    messages.value = snapshot.messages;
-    voomPosts.value = snapshot.voomPosts;
+    messages.value = snapshot.messages.map((message) => normalizeStoredMessageIdentityReferences(message));
+    voomPosts.value = snapshot.voomPosts.map((post) => normalizeStoredVoomPostIdentityReferences(post));
     smallTheaterTopics.value = snapshot.smallTheaterTopics ?? [];
-    smallTheaters.value = snapshot.smallTheaters ?? [];
+    smallTheaters.value = normalizeStoredSmallTheaters(snapshot.smallTheaters ?? []);
     musicFavoriteTracks.value = snapshot.musicFavoriteTracks ?? [];
-    musicCommentThreads.value = snapshot.musicCommentThreads ?? [];
+    musicCommentThreads.value = normalizeStoredMusicCommentThreads(snapshot.musicCommentThreads ?? []);
     worldBooks.value = snapshot.worldBooks;
     const stickerLibrary = normalizeStickerLibrary(snapshot.stickerGroups, snapshot.stickers);
     stickerGroups.value = stickerLibrary.groups;
     stickers.value = stickerLibrary.stickers;
+    favorites.value = normalizeFavorites(snapshot.favorites ?? []);
     if (stickerLibrary.removedGroupIds.length || stickerLibrary.removedStickerIds.length) {
       await Promise.all([
         ...stickerLibrary.removedGroupIds.map((groupId) => deleteEntity('stickerGroups', groupId)),
         ...stickerLibrary.removedStickerIds.map((stickerId) => deleteEntity('stickers', stickerId)),
         ...stickerLibrary.stickers.map((sticker) => putEntity('stickers', sticker))
+      ]);
+    }
+    const changedIdentityMessages = messages.value.filter((message, index) => message !== snapshot.messages[index]);
+    const changedIdentityPosts = voomPosts.value.filter((post, index) => post !== snapshot.voomPosts[index]);
+    const rawSmallTheaters = snapshot.smallTheaters ?? [];
+    const changedIdentityTheaters = smallTheaters.value.filter((theater, index) => theater !== rawSmallTheaters[index]);
+    const rawMusicThreads = snapshot.musicCommentThreads ?? [];
+    const changedIdentityMusicThreads = musicCommentThreads.value.filter((thread, index) => thread !== rawMusicThreads[index]);
+    const rawFavorites = snapshot.favorites ?? [];
+    const changedIdentityFavorites = favorites.value.filter((favorite, index) => JSON.stringify(favorite) !== JSON.stringify(rawFavorites[index]));
+    if (changedIdentityMessages.length || changedIdentityPosts.length || changedIdentityTheaters.length || changedIdentityMusicThreads.length || changedIdentityFavorites.length) {
+      await Promise.all([
+        ...changedIdentityMessages.map((message) => putEntity('messages', message)),
+        ...changedIdentityPosts.map((post) => putEntity('voomPosts', createPersistableVoomPost(post))),
+        ...changedIdentityTheaters.map((theater) => putEntity('smallTheaters', theater)),
+        ...changedIdentityMusicThreads.map((thread) => putEntity('musicCommentThreads', thread)),
+        ...changedIdentityFavorites.map((favorite) => putEntity('favorites', favorite))
       ]);
     }
     conversationSettings.value = snapshot.conversationSettings.map((entry) => normalizeConversationSettings({
@@ -595,7 +613,7 @@ export const useAppStore = defineStore('app', () => {
     })));
     conversationMemoryAtoms.value = [];
     generatedImages.value = normalizeGeneratedImages(snapshot.generatedImages ?? []);
-    favorites.value = normalizeFavorites(snapshot.favorites ?? []);
+    favorites.value = normalizeFavorites(favorites.value);
     settings.value = normalizeAppSettings({
       ...snapshot.settings,
       activeUserId: snapshot.settings.activeUserId || snapshot.users[0]?.id || ''
@@ -1007,6 +1025,100 @@ export const useAppStore = defineStore('app', () => {
     }) ?? null;
   }
 
+  function voomAiNameForIdentity(authorName = '', authorId = '') {
+    const normalizedAuthorId = authorId.trim();
+    const normalizedAuthorName = authorName.trim().toLocaleLowerCase();
+    const character = characters.value.find((entry) => {
+      if (normalizedAuthorId && entry.id === normalizedAuthorId) return true;
+      return [entry.id, entry.nickname, entry.name, getCharacterAiName(entry), getCharacterVoomAuthorName(entry)]
+        .map((name) => name.trim().toLocaleLowerCase())
+        .includes(normalizedAuthorName);
+    });
+    if (character) return getCharacterAiName(character);
+    const matchedUser = users.value.find((entry) => {
+      if (normalizedAuthorId && entry.id === normalizedAuthorId) return true;
+      return [entry.id, getUserDisplayName(entry), getUserVoomAuthorName(entry), getUserAiName(entry)]
+        .map((name) => name.trim().toLocaleLowerCase())
+        .includes(normalizedAuthorName);
+    });
+    return matchedUser ? getUserAiName(matchedUser) : authorName;
+  }
+
+  function escapeRegExp(value: string) {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
+  function canonicalizeKnownIdentityTextForConversation(content: string, conversationId: string) {
+    const conversation = conversationById(conversationId);
+    const character = conversation ? characterById(conversation.charId) : null;
+    const boundUser = conversation ? userById(conversation.userId) : null;
+    const rules = createConversationSummaryIdentityRules(boundUser ?? user.value, character);
+    return rules.reduce((text, rule) => rule.aliases.reduce((nextText, alias) => {
+      if (alias.length < 2) return nextText;
+      return nextText.replace(new RegExp(escapeRegExp(alias), 'g'), rule.canonicalName);
+    }, text), content);
+  }
+
+  function normalizeStoredMessageIdentityReferences(message: ChatMessage) {
+    const quoteAuthorName = message.quote?.sender === 'user'
+      ? voomAiNameForIdentity(message.quote.authorName, conversationById(message.conversationId)?.userId)
+      : message.quote?.sender === 'char'
+        ? voomAiNameForIdentity(message.quote.authorName, conversationById(message.conversationId)?.charId)
+        : message.quote?.authorName;
+    const nextQuote = message.quote && quoteAuthorName && quoteAuthorName !== message.quote.authorName
+      ? { ...message.quote, authorName: quoteAuthorName }
+      : message.quote;
+    const nextContent = message.sender === 'system'
+      ? canonicalizeKnownIdentityTextForConversation(message.content, message.conversationId)
+      : message.content;
+    return nextQuote !== message.quote || nextContent !== message.content
+      ? { ...message, content: nextContent, quote: nextQuote }
+      : message;
+  }
+
+  function normalizeStoredVoomPostIdentityReferences(post: VoomPost) {
+    const postConversation = conversationForVoomPost(post);
+    const postCharacter = characterById(post.charId) ?? (postConversation ? characterById(postConversation.charId) : null);
+    const postUser = post.userId ? userById(post.userId) : null;
+    const authorName = postCharacter
+      ? getCharacterAiName(postCharacter)
+      : postUser
+        ? getUserAiName(postUser)
+        : voomAiNameForIdentity(post.authorName, post.userId || post.charId);
+    const likes = post.likes.map((like) => voomAiNameForIdentity(like)).filter(Boolean);
+    const comments = post.comments.map((comment) => {
+      const nextAuthorName = voomAiNameForIdentity(comment.authorName, comment.authorId);
+      return nextAuthorName === comment.authorName ? comment : { ...comment, authorName: nextAuthorName };
+    });
+    return authorName !== post.authorName
+      || likes.length !== post.likes.length
+      || likes.some((like, index) => like !== post.likes[index])
+      || comments.some((comment, index) => comment !== post.comments[index])
+      ? { ...post, authorName, likes, comments }
+      : post;
+  }
+
+  function normalizeStoredMusicCommentThreads(threads: MusicCommentThread[]) {
+    return threads.map((thread) => {
+      let changed = false;
+      const comments = thread.comments.map((comment) => {
+        const nextAuthorName = voomAiNameForIdentity(comment.authorName, comment.authorId);
+        if (nextAuthorName === comment.authorName) return comment;
+        changed = true;
+        return { ...comment, authorName: nextAuthorName };
+      });
+      return changed ? { ...thread, comments } : thread;
+    });
+  }
+
+  function normalizeStoredSmallTheaters(theaters: SmallTheater[]) {
+    return theaters.map((theater) => {
+      const character = characterById(theater.charId) ?? (theater.conversationId ? characterById(conversationById(theater.conversationId)?.charId ?? '') : null);
+      const authorName = character ? getCharacterAiName(character) : voomAiNameForIdentity(theater.authorName, theater.charId);
+      return authorName !== theater.authorName ? { ...theater, authorName } : theater;
+    });
+  }
+
   function voomCommentAiAuthorName(comment: VoomComment) {
     const character = characterForVoomComment(comment);
     if (character) return getCharacterAiName(character);
@@ -1032,7 +1144,8 @@ export const useAppStore = defineStore('app', () => {
   }
 
   function voomAiAuthorNameForPost(post: VoomPost) {
-    const character = characterById(post.charId);
+    const postConversation = conversationForVoomPost(post);
+    const character = characterById(post.charId) ?? (postConversation ? characterById(postConversation.charId) : null);
     if (character) return getCharacterAiName(character);
     const postUser = post.userId ? userById(post.userId) : null;
     return postUser ? getUserAiName(postUser) : post.authorName;
@@ -1080,7 +1193,8 @@ export const useAppStore = defineStore('app', () => {
   }
 
   function formatVoomLikeEvent(likes: string[], authorName: string) {
-    return `【VOOM】${likes.join('、')} 赞了 ${authorName} 的动态。`;
+    const likeNames = likes.map((like) => voomAiNameForIdentity(like)).filter(Boolean);
+    return `【VOOM】${likeNames.join('、')} 赞了 ${voomAiNameForIdentity(authorName)} 的动态。`;
   }
 
   function createPersistableVoomPost(post: VoomPost): VoomPost {
@@ -1094,6 +1208,53 @@ export const useAppStore = defineStore('app', () => {
       comments: rawPost.comments.map((comment) => ({ ...toRaw(comment) })),
       likes: [...rawPost.likes]
     };
+  }
+
+  async function syncCharacterAvatarReferences(character: CharacterProfile) {
+    const characterId = character.id;
+    const avatar = character.avatar;
+    const changedPosts: VoomPost[] = [];
+    const changedFavorites: FavoriteMessageRecord[] = [];
+    const changedTheaters: SmallTheater[] = [];
+
+    voomPosts.value = voomPosts.value.map((post) => {
+      if (post.authorType === 'user' || post.charId !== characterId || post.authorAvatar === avatar) return post;
+      const nextPost = { ...post, authorAvatar: avatar };
+      changedPosts.push(nextPost);
+      return nextPost;
+    });
+
+    favorites.value = favorites.value.map((favorite) => {
+      const favoriteConversation = conversationById(favorite.conversationId);
+      const belongsToCharacter = favorite.characterId === characterId || favoriteConversation?.charId === characterId;
+      if (!belongsToCharacter) return favorite;
+
+      const nextAuthorAvatar = favorite.sender === 'char' ? avatar : favorite.authorAvatar;
+      if (favorite.characterAvatar === avatar && favorite.authorAvatar === nextAuthorAvatar) return favorite;
+
+      const nextFavorite = {
+        ...favorite,
+        authorAvatar: nextAuthorAvatar,
+        characterAvatar: avatar
+      };
+      changedFavorites.push(nextFavorite);
+      return nextFavorite;
+    });
+
+    smallTheaters.value = smallTheaters.value.map((theater) => {
+      if (theater.charId !== characterId || theater.authorAvatar === avatar) return theater;
+      const nextTheater = { ...theater, authorAvatar: avatar };
+      changedTheaters.push(nextTheater);
+      return nextTheater;
+    });
+
+    if (!changedPosts.length && !changedFavorites.length && !changedTheaters.length) return;
+
+    await Promise.all([
+      ...changedPosts.map((post) => putEntity('voomPosts', createPersistableVoomPost(post))),
+      ...changedFavorites.map((favorite) => putEntity('favorites', toRaw(favorite))),
+      ...changedTheaters.map((theater) => putEntity('smallTheaters', toRaw(theater)))
+    ]);
   }
 
   function createVoomImageCandidate(input: Omit<VoomImageCandidate, 'id' | 'createdAt'> & Partial<Pick<VoomImageCandidate, 'id' | 'createdAt'>>): VoomImageCandidate {
@@ -1361,13 +1522,28 @@ export const useAppStore = defineStore('app', () => {
   function normalizeFavorites(entries: FavoriteMessageRecord[]) {
     return entries
       .filter((entry) => entry?.id && entry.sourceMessageId && entry.message)
-      .map((entry) => ({
-        ...entry,
-        kind: favoriteKindForMessage(entry.message),
-        summary: entry.summary?.trim() || messageReadableContent(entry.message),
-        messageCreatedAt: Number.isFinite(entry.messageCreatedAt) ? entry.messageCreatedAt : entry.message.createdAt,
-        favoritedAt: Number.isFinite(entry.favoritedAt) ? entry.favoritedAt : Date.now()
-      }))
+      .map((entry) => {
+        const conversation = conversationById(entry.conversationId);
+        const character = entry.characterId ? characterById(entry.characterId) : conversation ? characterById(conversation.charId) : null;
+        const boundUser = entry.userId ? userById(entry.userId) : conversation ? userById(conversation.userId) : null;
+        const message = normalizeStoredMessageIdentityReferences(entry.message);
+        const authorName = entry.sender === 'char'
+          ? character ? getCharacterAiName(character) : voomAiNameForIdentity(entry.authorName, entry.characterId)
+          : entry.sender === 'user'
+            ? boundUser ? getUserAiName(boundUser) : voomAiNameForIdentity(entry.authorName, entry.userId)
+            : '系统';
+        return {
+          ...entry,
+          authorName,
+          characterName: character ? getCharacterAiName(character) : entry.characterName ? voomAiNameForIdentity(entry.characterName, entry.characterId) : undefined,
+          userName: boundUser ? getUserAiName(boundUser) : entry.userName ? voomAiNameForIdentity(entry.userName, entry.userId) : undefined,
+          message,
+          kind: favoriteKindForMessage(message),
+          summary: entry.summary?.trim() || messageReadableContent(message),
+          messageCreatedAt: Number.isFinite(entry.messageCreatedAt) ? entry.messageCreatedAt : message.createdAt,
+          favoritedAt: Number.isFinite(entry.favoritedAt) ? entry.favoritedAt : Date.now()
+        };
+      })
       .sort((left, right) => right.favoritedAt - left.favoritedAt);
   }
 
@@ -1428,7 +1604,7 @@ export const useAppStore = defineStore('app', () => {
       characterName: character ? getCharacterAiName(character) : undefined,
       characterAvatar: character?.avatar,
       userId: boundUser?.id,
-      userName: boundUser?.nickname || boundUser?.name,
+      userName: boundUser ? getUserAiName(boundUser) : undefined,
       userAvatar: boundUser?.avatar,
       summary: messageReadableContent(message),
       message: toRaw(message),
@@ -1774,7 +1950,14 @@ export const useAppStore = defineStore('app', () => {
 
   async function saveVisualProfile(nextProfile: VisualProfile) {
     if (!user.value) return;
-    await saveUserProfile({ ...user.value, profile: normalizeVisualProfile(nextProfile, user.value) });
+    await saveUserProfile({
+      ...user.value,
+      profile: normalizeVisualProfile({
+        ...nextProfile,
+        nickname: user.value.nickname,
+        bio: user.value.signature
+      }, user.value)
+    });
   }
 
   async function saveCharacter(nextCharacter: CharacterProfile, options: { profileHistorySource?: ProfileHistorySource } = {}) {
@@ -1815,6 +1998,7 @@ export const useAppStore = defineStore('app', () => {
     }
 
     await putEntity('characters', normalizedCharacter);
+    await syncCharacterAvatarReferences(normalizedCharacter);
 
     const linkedConversation = conversations.value.find((conversation) => conversation.charId === normalizedCharacter.id);
     if (linkedConversation) {
@@ -1835,6 +2019,7 @@ export const useAppStore = defineStore('app', () => {
     if (index >= 0) characters.value[index] = normalizedCharacter;
     else characters.value.push(normalizedCharacter);
     await putEntity('characters', normalizedCharacter);
+    await syncCharacterAvatarReferences(normalizedCharacter);
   }
 
   async function updateCharacterMindState(characterId: string, lines: unknown, conversationId: string, options: { replyBatchId?: string } = {}) {
@@ -2461,13 +2646,32 @@ export const useAppStore = defineStore('app', () => {
   }
 
   async function createBackupFile() {
-    return createLinkBackupFile(await loadSnapshot());
+    if (!ready.value) await hydrate();
+    const snapshot = await loadSnapshot();
+    return createLinkBackupFile({
+      ...snapshot,
+      messages: snapshot.messages.map((message) => normalizeStoredMessageIdentityReferences(message)),
+      voomPosts: snapshot.voomPosts.map((post) => normalizeStoredVoomPostIdentityReferences(post)),
+      smallTheaters: normalizeStoredSmallTheaters(snapshot.smallTheaters ?? []),
+      musicCommentThreads: normalizeStoredMusicCommentThreads(snapshot.musicCommentThreads ?? []),
+      favorites: normalizeFavorites(snapshot.favorites ?? [])
+    });
   }
 
   async function importBackupSnapshot(snapshot: AppSnapshot) {
     const normalizedSnapshot = keepDeviceGitHubBackupSettings(normalizeSnapshotForRestore(snapshot));
-    await replaceSnapshot(normalizedSnapshot);
     applySnapshotToStore(normalizedSnapshot);
+    await replaceSnapshot({
+      ...normalizedSnapshot,
+      users: users.value,
+      characters: characters.value,
+      messages: messages.value,
+      voomPosts: voomPosts.value,
+      musicCommentThreads: musicCommentThreads.value,
+      smallTheaters: smallTheaters.value,
+      favorites: favorites.value,
+      settings: settings.value ?? normalizedSnapshot.settings
+    });
     void refreshEnabledVendorModels();
   }
 
@@ -4454,7 +4658,7 @@ export const useAppStore = defineStore('app', () => {
       userId: author.id,
       visibility,
       visibleCharacterIds: targetCharacters.map((character) => character.id),
-      authorName: getUserVoomAuthorName(author),
+      authorName: getUserAiName(author),
       authorAvatar: author.avatar,
       content,
       image: image || undefined,
@@ -4512,14 +4716,15 @@ export const useAppStore = defineStore('app', () => {
         settings.value ?? undefined,
         modelOverride
       );
+      const characterAiName = getCharacterAiName(character);
       const characterVoomAuthorName = getCharacterVoomAuthorName(character);
-      const characterAuthorAliases = new Set([character.id, character.name, character.nickname, getCharacterAiName(character), characterVoomAuthorName]
+      const characterAuthorAliases = new Set([character.id, character.name, character.nickname, characterAiName, characterVoomAuthorName]
         .map((name) => name.trim().toLocaleLowerCase())
         .filter(Boolean));
-      const post: VoomPost = { ...moment, id: createId('voom'), conversationId: conversation.id, authorName: characterVoomAuthorName, authorAvatar: character.avatar, createdAt: Date.now() };
+      const post: VoomPost = { ...moment, id: createId('voom'), conversationId: conversation.id, authorName: characterAiName, authorAvatar: character.avatar, createdAt: Date.now() };
       post.comments = post.comments.map((comment, index) => ({
         ...comment,
-        authorName: characterAuthorAliases.has(comment.authorName.trim().toLocaleLowerCase()) ? characterVoomAuthorName : comment.authorName,
+        authorName: characterAuthorAliases.has(comment.authorName.trim().toLocaleLowerCase()) ? characterAiName : comment.authorName,
         authorId: characterAuthorAliases.has(comment.authorName.trim().toLocaleLowerCase()) ? character.id : comment.authorId,
         createdAt: post.createdAt + post.likes.length + index + 1
       }));
@@ -4725,7 +4930,7 @@ export const useAppStore = defineStore('app', () => {
         conversationId: conversation.id,
         topicId: selectedTopic.id,
         topicTitle: selectedTopic.title,
-        authorName: getCharacterVoomAuthorName(character),
+        authorName: getCharacterAiName(character),
         authorAvatar: character.avatar,
         title: result.title,
         summary: result.summary,
@@ -5111,7 +5316,7 @@ export const useAppStore = defineStore('app', () => {
     const currentUser = user.value;
     const comment: VoomComment = {
       id: createId('comment'),
-      authorName: getUserVoomAuthorName(currentUser),
+      authorName: getUserAiName(currentUser),
       authorId: currentUser?.id,
       content: trimmedContent,
       parentId: parentId || undefined,
@@ -5137,16 +5342,19 @@ export const useAppStore = defineStore('app', () => {
 
   async function toggleVoomLike(postId: string) {
     const post = voomPosts.value.find((entry) => entry.id === postId);
-    const currentUserName = getUserVoomAuthorName(user.value);
+    const currentUserName = getUserAiName(user.value);
     if (!post) return;
+    const currentUserLikeKeys = new Set([getUserAiName(user.value), getUserVoomAuthorName(user.value), getUserDisplayName(user.value)]
+      .map((name) => name.trim().toLocaleLowerCase())
+      .filter(Boolean));
+    const wasLiked = post.likes.some((name) => currentUserLikeKeys.has(name.trim().toLocaleLowerCase()));
 
-    const likes = post.likes.includes(currentUserName)
-      ? post.likes.filter((name) => name !== currentUserName)
+    const likes = wasLiked
+      ? post.likes.filter((name) => !currentUserLikeKeys.has(name.trim().toLocaleLowerCase()))
       : [...post.likes, currentUserName];
 
     const targetConversations = conversationsForVoomPost(post);
-    const authorName = voomAuthorNameForPost(post);
-    const wasLiked = post.likes.includes(currentUserName);
+    const authorName = voomAiAuthorNameForPost(post);
     await saveVoomPost({
       ...post,
       conversationId: post.conversationId || targetConversations[0]?.id,
@@ -5205,7 +5413,8 @@ export const useAppStore = defineStore('app', () => {
         .filter(Boolean);
       const userComments = post.comments
         .filter((comment) => comment.authorId === boundUser.id || boundUserAuthorKeys.includes(comment.authorName.trim().toLocaleLowerCase()))
-        .slice(-4);
+        .slice(-4)
+        .map((comment) => ({ ...comment, authorName: getUserAiName(boundUser), authorId: boundUser.id }));
       const aiPost: VoomPost = {
         ...post,
         authorName: voomAiAuthorNameForPost(post),
@@ -5238,13 +5447,14 @@ export const useAppStore = defineStore('app', () => {
       const existingCommentIds = new Set(latestPost.comments.map((comment) => comment.id));
       const generatedIds = replies.map(() => createId('comment'));
       const generatedIdByDraftId = new Map(replies.flatMap((reply, index) => reply.draftId ? [[reply.draftId, generatedIds[index]]] : []));
+      const characterAiName = getCharacterAiName(character);
       const characterVoomAuthorName = getCharacterVoomAuthorName(character);
-      const characterAuthorAliases = new Set([character.id, character.nickname, character.name, getCharacterAiName(character), post.authorName, characterVoomAuthorName]
+      const characterAuthorAliases = new Set([character.id, character.nickname, character.name, characterAiName, post.authorName, characterVoomAuthorName]
         .map((name) => name.trim().toLocaleLowerCase())
         .filter(Boolean));
       const replyAuthorNameForIndex = (index: number) => {
         const authorName = replies[index]?.authorName.trim() ?? '';
-        return characterAuthorAliases.has(authorName.toLocaleLowerCase()) ? characterVoomAuthorName : authorName;
+        return characterAuthorAliases.has(authorName.toLocaleLowerCase()) ? characterAiName : authorName;
       };
       const replyParentName = (parentId: string) => {
         const existingComment = latestPost.comments.find((comment) => comment.id === parentId);

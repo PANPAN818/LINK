@@ -259,7 +259,6 @@ import type { CharacterProfile, VoomPost, VoomPostVisibility } from '@/types/dom
 import { getCharacterDisplayName, getCharacterVoomAuthorName, getCharacterVoomDisplayName } from '@/utils/character';
 import { getUserDisplayName, getUserVoomAuthorName } from '@/utils/profile';
 import { readChatImageFile } from '@/utils/imageFile';
-import { getCharacterVisualProfile } from '@/utils/profile';
 import { getSelectedImageModelOption } from '@/utils/settings';
 
 const store = useAppStore();
@@ -380,7 +379,7 @@ function voomAuthorNameForPost(post: VoomPost) {
 }
 
 function voomCharacterAvatar(character: CharacterProfile) {
-  return character.avatar || getCharacterVisualProfile(character)?.avatar;
+  return character.avatar;
 }
 
 function voomAuthorAvatarForPost(post: VoomPost) {

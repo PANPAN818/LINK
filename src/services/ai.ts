@@ -1,8 +1,8 @@
 import { unzipSync } from 'fflate';
 import type { ApiVendor, AppSettings, CharacterProfile, ConversationTimeAwarenessSettings, GenerateReplyInput, ImageProviderType, MusicComment, MusicTrack, NovelAiModelOption, PollinationsModelOption, PromptContext, SmallTheater, SmallTheaterTopic, UserProfile, VoomComment, VoomFrequency, VoomPost } from '@/types/domain';
 import { createId } from '@/utils/id';
-import { getCharacterAiName, getCharacterVoomAuthorName } from '@/utils/character';
-import { getUserAiName, getUserVoomAuthorName } from '@/utils/profile';
+import { getCharacterAiName } from '@/utils/character';
+import { getUserAiName } from '@/utils/profile';
 import { defaultNovelAiModels, defaultPollinationsModels, getResolvedApiConfig, getResolvedOpenAiImageConfig, novelAiOfficialApiUrl, novelAiProxyApiUrl } from '@/utils/settings';
 import { estimateTokenCount } from '@/utils/memory';
 import { getStickerDisplayImageUrl } from '@/utils/stickers';
@@ -2059,18 +2059,17 @@ export async function generateRoleplayReply(input: GenerateReplyInput): Promise<
 export async function generateVoomPost(context: PromptContext, settings?: AppSettings, modelOverride = ''): Promise<Omit<VoomPost, 'id' | 'createdAt'>> {
   const { content, contentTranslation, imageDescription, likes, comments } = await generateVoomPayload(context, settings, modelOverride);
   const characterName = getCharacterAiName(context.character);
-  const characterVoomAuthorName = getCharacterVoomAuthorName(context.character);
-  const characterAuthorAliases = new Set([context.character.id, context.character.name, context.character.nickname, characterName, characterVoomAuthorName]
+  const characterAuthorAliases = new Set([context.character.id, context.character.name, context.character.nickname, characterName]
     .map((name) => name.trim().toLocaleLowerCase())
     .filter(Boolean));
   const resolvedComments = resolveInitialVoomComments(comments).map((comment) => characterAuthorAliases.has(comment.authorName.trim().toLocaleLowerCase())
-    ? { ...comment, authorName: characterVoomAuthorName, authorId: context.character.id }
+    ? { ...comment, authorName: characterName, authorId: context.character.id }
     : comment);
 
   return {
     charId: context.character.id,
     conversationId: context.messages[0]?.conversationId,
-    authorName: characterVoomAuthorName,
+    authorName: characterName,
     authorAvatar: context.character.avatar,
     content,
     contentTranslation,
@@ -2197,7 +2196,7 @@ function normalizeUserVoomComments(input: unknown, targetCharacters: CharacterPr
       : [];
   const characterAliases = new Map<string, CharacterProfile>();
   for (const character of targetCharacters) {
-    [character.id, character.name, character.nickname, getCharacterAiName(character), getCharacterVoomAuthorName(character)]
+    [character.id, character.name, character.nickname, getCharacterAiName(character)]
       .map((name) => name.trim().toLocaleLowerCase())
       .filter(Boolean)
       .forEach((name) => characterAliases.set(name, character));
@@ -2215,9 +2214,9 @@ function normalizeUserVoomComments(input: unknown, targetCharacters: CharacterPr
     const character = characterAliases.get(requestedAuthorId.toLocaleLowerCase()) ?? characterAliases.get(requestedAuthorName.toLocaleLowerCase());
     const fallbackCharacter = !requestedAuthorName ? targetCharacters[candidates.length % targetCharacters.length] : undefined;
     const authorName = character
-      ? getCharacterVoomAuthorName(character)
+      ? getCharacterAiName(character)
       : fallbackCharacter
-        ? getCharacterVoomAuthorName(fallbackCharacter)
+        ? getCharacterAiName(fallbackCharacter)
         : requestedAuthorName;
     if (!authorName) continue;
 
@@ -2269,7 +2268,6 @@ export async function generateUserVoomComments(input: {
     .map((character) => [
       `id: ${character.id}`,
       `角色真名: ${getCharacterAiName(character)}`,
-      `主页网名: ${getCharacterVoomAuthorName(character)}`,
       `主页签名: ${character.signature || '无'}`,
       `角色设定: ${character.description || '无'}`
     ].join('；'))
@@ -2278,7 +2276,6 @@ export async function generateUserVoomComments(input: {
     '你要模拟 LINK VOOM 里，用户可见角色以及这些角色社交圈 NPC 看到用户动态后的自然评论区。只输出 JSON，不要输出 JSON 以外的文字。',
     timeAwarenessPrompt,
     `用户真名：${getUserAiName(input.author)}`,
-    `用户主页网名：${getUserVoomAuthorName(input.author)}`,
     `用户设定：${input.author.description || '无'}`,
     includeTimeContext && input.createdAt ? `用户动态发布时间：${formatVoomContextTime(input.createdAt)}` : '',
     `用户动态正文：\n${input.content}`,
@@ -2287,11 +2284,11 @@ export async function generateUserVoomComments(input: {
     `输出格式：
 {
   "comments": [
-    { "id": "c1", "authorId": "可见角色 id；NPC 留空", "authorName": "NPC 网名或角色主页网名", "content": "评论内容", "contentTranslation": "如 content 不是普通话，则给普通话译文；否则留空", "parentId": "被回复的本次评论 id；直接评论则留空" },
-    { "id": "c2", "authorName": "NPC 网名", "content": "回复内容", "contentTranslation": "如 content 不是普通话，则给普通话译文；否则留空", "parentId": "c1" }
+    { "id": "c1", "authorId": "可见角色 id；NPC 留空", "authorName": "角色真名或真实感 NPC 名", "content": "评论内容", "contentTranslation": "如 content 不是普通话，则给普通话译文；否则留空", "parentId": "被回复的本次评论 id；直接评论则留空" },
+    { "id": "c2", "authorName": "真实感 NPC 名", "content": "回复内容", "contentTranslation": "如 content 不是普通话，则给普通话译文；否则留空", "parentId": "c1" }
   ]
 }`,
-    '要求：1. 输出 6-15 条；2. authorId 可以来自可见角色，NPC 则不要填 authorId，必须填写具体 authorName；3. NPC 可以来自可见角色自己的设定、社交圈、朋友同事家人粉丝或参考上下文内容生成，如果没有提及则可以根据世界线合理拓展相应NPC；4. parentId 留空表示直接评论用户动态，填写本次前面输出的 id 表示回复那条评论；5. 可以让角色回复 NPC，也可以让 NPC 回复角色或其他 NPC，但不要代替用户本人评论；6. 评论要短、自然、有社交软件感，不要解释设定；7. 不要使用“NPC”“朋友A”“路人”这类占位名；8. contentTranslation 规则：外语、粤语都要翻译成自然现代简体普通话；不要加“翻译：”前缀。'
+    '要求：1. 输出 6-15 条；2. authorId 可以来自可见角色，凡是可见角色本人发言，authorName 必须写该角色真名；NPC 则不要填 authorId，必须填写具体 authorName；3. NPC 可以来自可见角色自己的设定、社交圈、朋友同事家人粉丝或参考上下文内容生成，如果没有提及则可以根据世界线合理拓展相应NPC；4. parentId 留空表示直接评论用户动态，填写本次前面输出的 id 表示回复那条评论；5. 可以让角色回复 NPC，也可以让 NPC 回复角色或其他 NPC，但不要代替用户本人评论；6. 评论要短、自然、有社交软件感，不要解释设定；7. 不要使用“NPC”“朋友A”“路人”这类占位名；8. 用户和可见角色只能使用真名，不得使用网名、昵称、备注或主页名；9. contentTranslation 规则：外语、粤语都要翻译成自然现代简体普通话；不要加“翻译：”前缀。'
   ].filter(Boolean).join('\n\n');
 
   const apiReply = await callTextApi(input.settings, prompt, input.modelOverride);
@@ -2303,7 +2300,7 @@ export async function generateUserVoomComments(input: {
     const content = apiReply.trim();
     const character = input.targetCharacters[0];
     return content && character
-      ? [{ authorName: getCharacterVoomAuthorName(character), authorId: character.id, content }]
+      ? [{ authorName: getCharacterAiName(character), authorId: character.id, content }]
       : [];
   }
 }
@@ -2321,7 +2318,7 @@ export async function generateVoomCommentReplies(input: {
   const postBelongsToUser = input.post.authorType === 'user';
   const targetComments = input.userComments.length ? input.userComments : input.post.comments.slice(-2);
   const includeTimeContext = shouldIncludeVoomTimeContext(input.context.timeAwareness);
-  const blockedAuthorNames = [getUserVoomAuthorName(input.context.boundUser), getUserAiName(input.context.boundUser), getUserVoomAuthorName(input.context.user), getUserAiName(input.context.user)]
+  const blockedAuthorNames = [getUserAiName(input.context.boundUser), getUserAiName(input.context.user)]
     .map((name) => name.trim())
     .filter(Boolean);
   const prompt = [
@@ -2340,10 +2337,10 @@ export async function generateVoomCommentReplies(input: {
 {
   "replies": [
     { "id": "r1", "authorName": "${fallbackAuthorName}", "content": "回复内容", "contentTranslation": "如 content 不是普通话，则给普通话译文；否则留空", "parentId": "被回复评论ID，可留空" },
-    { "id": "r2", "authorName": "NPC网名", "content": "自然评论或回复", "contentTranslation": "如 content 不是中文，则给普通话译文；否则留空", "parentId": "已有评论ID或本次前面输出的id，可留空" }
+    { "id": "r2", "authorName": "真实感 NPC 名", "content": "自然评论或回复", "contentTranslation": "如 content 不是中文，则给普通话译文；否则留空", "parentId": "已有评论ID或本次前面输出的id，可留空" }
   ]
 }`,
-    '要求：1. 输出 6-15 条；2. authorName 可以是当前执行角色真名，也可以是符合社交圈边界的真实感 NPC 网名；3. 角色可以回复用户或其他人的评论，NPC 也可以发新评论、回复角色或互相回复；4. parentId 留空表示新评论，填写已有评论 ID 或本次前面输出的 id 表示回复；5. 不要代替用户发言，不要使用“NPC”“路人”“朋友A”这类占位名；6. 内容像真实社交软件评论区，短、自然、有上下文，不要解释设定；7. contentTranslation 规则：外语、粤语都要翻译成简体普通话；不要加“翻译：”前缀。'
+    '要求：1. 输出 6-15 条；2. authorName 可以是当前执行角色真名，也可以是符合社交圈边界的真实感 NPC 名；3. 凡是用户或已有角色，只能用真名指代，不得使用网名、昵称、备注或主页名；4. 角色可以回复用户或其他人的评论，NPC 也可以发新评论、回复角色或互相回复；5. parentId 留空表示新评论，填写已有评论 ID 或本次前面输出的 id 表示回复；6. 不要代替用户发言，不要使用“NPC”“路人”“朋友A”这类占位名；7. 内容像真实社交软件评论区，短、自然、有上下文，不要解释设定；8. contentTranslation 规则：外语、粤语都要翻译成简体普通话；不要加“翻译：”前缀。'
   ].join('\n\n');
 
   const apiReply = await callTextApi(input.settings, prompt, input.modelOverride);
@@ -2375,9 +2372,15 @@ function formatMusicTrackPrompt(track: MusicTrack) {
   ].join('\n');
 }
 
-function formatMusicCommentPromptLine(comment: MusicComment) {
+function musicCommentPromptAuthorName(comment: MusicComment, input: { user: UserProfile; characters: CharacterProfile[] }) {
+  if (comment.authorType === 'user' || comment.authorId === input.user.id) return getUserAiName(input.user);
+  const character = comment.authorId ? input.characters.find((entry) => entry.id === comment.authorId) : undefined;
+  return character ? getCharacterAiName(character) : comment.authorName;
+}
+
+function formatMusicCommentPromptLine(comment: MusicComment, input: { user: UserProfile; characters: CharacterProfile[] }) {
   const replyText = comment.parentId ? ` 回复 ${comment.parentId}` : '';
-  return `${comment.id}｜${comment.authorName}${replyText}：${comment.content}`;
+  return `${comment.id}｜${musicCommentPromptAuthorName(comment, input)}${replyText}：${comment.content}`;
 }
 
 function normalizeMusicComments(value: unknown, input: { user: UserProfile; characters: CharacterProfile[]; existingComments: MusicComment[] }) {
@@ -2405,8 +2408,8 @@ function normalizeMusicComments(value: unknown, input: { user: UserProfile; char
     const authorId = String(record.authorId ?? record.characterId ?? '').trim();
     const character = authorId ? characterById.get(authorId) : undefined;
     const authorType = character ? 'character' : 'passerby';
-    const fallbackName = character ? getCharacterVoomAuthorName(character) : `听友${Math.floor(1000 + Math.random() * 9000)}`;
-    const authorName = String(record.authorName ?? record.name ?? fallbackName).trim() || fallbackName;
+    const fallbackName = character ? getCharacterAiName(character) : `听友${Math.floor(1000 + Math.random() * 9000)}`;
+    const authorName = character ? fallbackName : String(record.authorName ?? record.name ?? fallbackName).trim() || fallbackName;
     const rawParentId = String(record.parentId ?? record.replyTo ?? '').trim();
     const parentId = existingCommentIds.has(rawParentId)
       ? rawParentId
@@ -2445,7 +2448,6 @@ export async function generateMusicCommentThread(input: {
     ? boundCharacters.map((character) => [
       `id: ${character.id}`,
       `角色真名: ${getCharacterAiName(character)}`,
-      `主页网名: ${getCharacterVoomAuthorName(character)}`,
       `签名: ${character.signature || '无'}`,
       `设定: ${character.description || '无'}`
     ].join('；')).join('\n')
@@ -2453,18 +2455,17 @@ export async function generateMusicCommentThread(input: {
   const prompt = [
     '你要为 LINK 音乐页生成一个独立的歌曲评论区。它不是线上聊天、线下 RP 或 VOOM 会话，不要写入任何聊天事件。只输出 JSON，不要输出 JSON 以外的文字。',
     `当前用户真名：${getUserAiName(input.user)}（不要代替该用户发评论）`,
-    `当前用户主页网名：${getUserVoomAuthorName(input.user)}`,
     `歌曲信息：\n${formatMusicTrackPrompt(input.track)}`,
     `该用户账号绑定的角色：\n${characterText}`,
-    existingComments.length ? `已有评论区：\n${existingComments.map(formatMusicCommentPromptLine).join('\n')}` : '已有评论区：暂无。',
+    existingComments.length ? `已有评论区：\n${existingComments.map((comment) => formatMusicCommentPromptLine(comment, input)).join('\n')}` : '已有评论区：暂无。',
     input.mode === 'expand' ? '任务：在已有评论区基础上追加新的评论和回复，延续上下文。' : '任务：生成一版新的完整评论区，可包含一级评论和互相回复。',
     `输出格式：
 {
   "comments": [
-    { "id": "c1", "authorId": "绑定角色id，可留空", "authorName": "角色昵称或真实感听友名", "content": "评论内容", "contentTranslation": "如需翻译则填写，否则留空", "parentId": "回复的已有评论ID或本次前面输出的id，可留空" }
+    { "id": "c1", "authorId": "绑定角色id，可留空", "authorName": "角色真名或真实感听友名", "content": "评论内容", "contentTranslation": "如需翻译则填写，否则留空", "parentId": "回复的已有评论ID或本次前面输出的id，可留空" }
   ]
 }`,
-    '要求：1. 输出 6-15 条；2. 至少包含 2 条该用户绑定角色的评论或回复，角色 authorId 必须来自绑定角色；3. 其余可以是有真实感的路人听友；4. 可以回复任意已有评论或本次前面评论；5. 不要使用“NPC”“路人A”“朋友A”这类占位名；6. 语气像音乐 App 评论区，短、自然、有情绪和梗，但不要刷屏；7. contentTranslation 规则：外语、粤语都要翻译成自然现代简体普通话，不要加“翻译：”前缀。'
+    '要求：1. 输出 6-15 条；2. 至少包含 2 条该用户绑定角色的评论或回复，角色 authorId 必须来自绑定角色，且角色 authorName 必须写真名；3. 其余可以是有真实感的路人听友；4. 可以回复任意已有评论或本次前面评论；5. 用户和绑定角色只能使用真名，不得使用网名、昵称、备注或主页名；6. 不要使用“NPC”“路人A”“朋友A”这类占位名；7. 语气像音乐 App 评论区，短、自然、有情绪和梗，但不要刷屏；8. contentTranslation 规则：外语、粤语都要翻译成自然现代简体普通话，不要加“翻译：”前缀。'
   ].join('\n\n');
 
   const apiReply = await callTextApi(input.settings, prompt, input.modelOverride);
@@ -2510,13 +2511,12 @@ function renderConversationSummaryIdentityPrompt(rules: ConversationSummaryIdent
 
   return [
     '人物称谓统一规则（最高优先级）：',
-    '1. 用户和角色的真名是唯一人物标识；网名、昵称、社交主页名、handle 只是别名，不得写成独立人物。',
+    '1. 用户和角色的真名是唯一人物标识。',
     '2. plot、echo、Markdown 角色表的“名字”列、mermaid graph 节点和关系边都必须只使用真名。',
-    '3. 看到下列别名时，全部改写为对应真名；不要把别名保留为另一个人物：',
+    '3. 看到非真名称呼时，全部改写为对应真名；不要把它保留为另一个人物：',
     ...normalizedRules.map((rule) => {
       const roleLabel = rule.role === 'user' ? '用户' : '角色';
-      const aliasText = rule.aliases.length ? `；别名/网名/handle：${rule.aliases.join('、')}` : '';
-      return `- ${roleLabel}真名：${rule.canonicalName}${aliasText}`;
+      return `- ${roleLabel}真名：${rule.canonicalName}`;
     })
   ].join('\n');
 }
@@ -2555,16 +2555,17 @@ export async function generateConversationSummary(input: {
   ].join('\n');
   const identityPrompt = renderConversationSummaryIdentityPrompt(input.identityRules);
   const previousSummary = normalizeConversationSummaryIdentityNames(input.previousSummary, input.identityRules);
+  const messages = normalizeConversationSummaryIdentityNames(input.messages, input.identityRules);
   const prompt = [
     basePrompt,
     identityPrompt,
     timeAwarenessPrompt,
     previousSummary ? `已有记忆文本（用于避免重复、衔接时间线和保留伏笔）：\n${previousSummary}` : '已有记忆文本：暂无。',
     includeTimeline && input.timelineContext ? `待总结楼层时间线：\n${input.timelineContext}` : '',
-    `待总结聊天：\n${input.messages}`
+    `待总结聊天：\n${messages}`
   ].filter(Boolean).join('\n\n');
   const apiReply = await callTextApi(input.settings, prompt, input.modelOverride);
-  return normalizeConversationSummaryIdentityNames(apiReply || input.messages.slice(0, 1400), input.identityRules);
+  return normalizeConversationSummaryIdentityNames(apiReply || messages.slice(0, 1400), input.identityRules);
 }
 
 export function shouldAutoGenerateMoment(frequency: VoomFrequency) {

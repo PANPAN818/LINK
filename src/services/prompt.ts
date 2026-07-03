@@ -1,6 +1,7 @@
 import type { ChatMode, ConversationOfflineSettings, OfflinePromptPreset, PromptContext, WorldBookEntry, WorldBookLoreEntry } from '@/types/domain';
 import { normalizeTimeAwarenessSettings, renderTimeAwarenessPrompt } from '@/utils/timeAwareness';
 import { activeOfflineTonePreset, activeOfflineWritingStylePreset, defaultOfflineSettings, normalizeOfflineSettings } from '@/utils/memory';
+import { getCharacterAiName } from '@/utils/character';
 import { getUserAiName } from '@/utils/profile';
 
 export const baseRoleplayPrompt = `你是{{char}}。
@@ -490,7 +491,7 @@ const offlineSelfReviewPrompt = `输出前内部自我检测：
 
 function renderOfflineSettingsPrompt(settings: ConversationOfflineSettings | null | undefined, context: PromptContext) {
   const offlineSettings = normalizeOfflineSettings(settings ?? defaultOfflineSettings);
-  const characterName = context.character.name;
+  const characterName = getCharacterAiName(context.character);
   const userName = getUserAiName(context.boundUser) || getUserAiName(context.user);
   const writingStylePreset = activeOfflineWritingStylePreset(offlineSettings);
   const tonePreset = activeOfflineTonePreset(offlineSettings);
@@ -611,16 +612,66 @@ function entryActivationLabel(entry: WorldBookLoreEntry) {
 }
 
 function replaceWorldBookTokens(value: string, context: PromptContext) {
+  const characterName = getCharacterAiName(context.character);
   const userName = getUserAiName(context.user);
   return value
-    .replace(/\{\{\s*char\s*\}\}/gi, context.character.name)
-    .replace(/<\s*char\s*>/gi, context.character.name)
-    .replace(/\bChar\b/g, context.character.name)
-    .replace(/\bchar\b/g, context.character.name)
+    .replace(/\{\{\s*char\s*\}\}/gi, characterName)
+    .replace(/<\s*char\s*>/gi, characterName)
+    .replace(/\bChar\b/g, characterName)
+    .replace(/\bchar\b/g, characterName)
     .replace(/\{\{\s*user\s*\}\}/gi, userName)
     .replace(/<\s*user\s*>/gi, userName)
     .replace(/\bUser\b/g, userName)
     .replace(/\buser\b/g, userName);
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function uniquePromptIdentityAliases(canonicalName: string, names: Array<string | null | undefined>) {
+  const canonicalKey = canonicalName.trim().toLocaleLowerCase();
+  const seen = new Set<string>();
+  return names
+    .map((name) => String(name ?? '').trim())
+    .filter((name) => {
+      const key = name.toLocaleLowerCase();
+      if (!name || key === canonicalKey || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+}
+
+function normalizePromptIdentityText(value: string, context: PromptContext) {
+  const boundUserName = getUserAiName(context.boundUser) || getUserAiName(context.user);
+  const characterName = getCharacterAiName(context.character);
+  const replacements = [
+    {
+      canonicalName: boundUserName,
+      aliases: uniquePromptIdentityAliases(boundUserName, [
+        context.boundUser.nickname,
+        context.user.nickname,
+        context.boundUser.profile?.nickname,
+        context.user.profile?.nickname,
+        context.boundUser.profile?.handle,
+        context.user.profile?.handle
+      ])
+    },
+    {
+      canonicalName: characterName,
+      aliases: uniquePromptIdentityAliases(characterName, [
+        context.character.nickname,
+        context.character.userNote,
+        context.character.profile?.nickname,
+        context.character.profile?.handle
+      ])
+    }
+  ];
+
+  return replacements.reduce((text, replacement) => replacement.aliases.reduce((nextText, alias) => {
+    if (alias.length < 2) return nextText;
+    return nextText.replace(new RegExp(escapeRegExp(alias), 'g'), replacement.canonicalName);
+  }, text), value);
 }
 
 function renderLoreEntry(book: WorldBookEntry, entry: WorldBookLoreEntry, context: PromptContext) {
@@ -676,6 +727,7 @@ export function buildPrompt(context: PromptContext, options: { includeOnlineChat
   const selectedWorldBooks = selectWorldBooks(context);
   const outputPrompt = context.mode === 'online' ? profileMutationPrompt : offlineReplyOutputPrompt;
   const includeMessageTime = normalizeTimeAwarenessSettings(context.timeAwareness).enabled;
+  const characterName = getCharacterAiName(context.character);
   const userName = getUserAiName(context.user);
   const boundUserName = getUserAiName(context.boundUser);
   const timeAwarenessTimestamp = context.timeAwarenessNow;
@@ -689,12 +741,17 @@ export function buildPrompt(context: PromptContext, options: { includeOnlineChat
       const speaker = message.sender === 'user'
         ? boundUserName
         : message.sender === 'char'
-          ? context.character.name || context.character.nickname
+          ? getCharacterAiName(context.character)
+          : '系统';
+      const quoteAuthorName = message.quote?.sender === 'user'
+        ? boundUserName
+        : message.quote?.sender === 'char'
+          ? getCharacterAiName(context.character)
           : '系统';
       const quoteText = message.quote
-        ? `引用 ${message.quote.authorName}: ${getMessageText(message.quote)}\n`
+        ? `引用 ${quoteAuthorName}: ${normalizePromptIdentityText(getMessageText(message.quote), context)}\n`
         : '';
-      const messageText = getMessageText(message);
+      const messageText = normalizePromptIdentityText(getMessageText(message), context);
       const visualText = message.sticker
         ? `${messageText}${context.stickerVisionEnabled ? '（已随请求附带图片，可直接识图）' : '（识图关闭，仅可读取文字描述）'}`
         : messageText;
@@ -705,7 +762,7 @@ export function buildPrompt(context: PromptContext, options: { includeOnlineChat
 
   return [
     replaceTokens(`${baseRoleplayPrompt}\n\n${strictRoleplayRules}\n\n${outputPrompt}`, {
-      '{{char}}': context.character.name,
+      '{{char}}': characterName,
       '{{char_nickname}}': context.character.nickname,
       '{{char_signature}}': context.character.signature,
       '{{char_description}}': context.character.description,
@@ -721,7 +778,7 @@ export function buildPrompt(context: PromptContext, options: { includeOnlineChat
     context.mode === 'online' && options.includeOnlineStickerSemantics !== false ? onlineStickerSemanticsPrompt : '',
     context.mode === 'online' && context.narrationModeEnabled
       ? replaceTokens(narrationModePrompt, {
-          '{{char}}': context.character.name,
+          '{{char}}': characterName,
           '{{user}}': userName
         })
       : '',
@@ -732,9 +789,9 @@ export function buildPrompt(context: PromptContext, options: { includeOnlineChat
     includeMessageTime
       ? '时间判定规则：最近对话里的“发送时间”只表示那条历史消息实际发出的时间。回复时先以“现实时间感知”里的当前时间判断现在，再根据历史发送时间推算已经过去多久；不要把最后一条用户消息的发送时间当作当前时间。'
       : '',
-    `当前对话总结：\n${context.conversationSummary || '暂无总结。'}`,
-    `记忆手册：\n${context.memorySummary || '暂无记忆手册。'}`,
-    `世界书：\n${renderWorldBooks(selectedWorldBooks, context) || '无启用条目。'}`,
+    `当前对话总结：\n${normalizePromptIdentityText(context.conversationSummary || '暂无总结。', context)}`,
+    `记忆手册：\n${normalizePromptIdentityText(context.memorySummary || '暂无记忆手册。', context)}`,
+    `世界书：\n${normalizePromptIdentityText(renderWorldBooks(selectedWorldBooks, context) || '无启用条目。', context)}`,
     context.mode === 'online'
       ? 'Sticker / 图片 / 语音 / 定位 / 转账规则：用户发送 Sticker 时，文字描述是用户提供的贴纸含义。用户发送真实图片时，若本次请求附带图片，你可以观察图片内容；用户发送文字描述卡片时，必须理解为“用户发送了一张图片，图片内容为描述文本”，虽然没有真实图片文件，也要按图片内容参与对话。用户或角色发送语音时，必须理解为对方用语音消息说出了对应文字内容，不要把它当成普通打字消息；角色也可以在合适时用 voice 项主动发送语音条。用户发送定位时，必须理解为用户把自己的当前位置发给了你，并告知了用户与角色之间的距离；角色也可以在合适时用 location 项主动发送自己的定位。用户发送转账时，必须理解为用户确实向你发起了对应金额的转账；你可以在后续按角色意愿接收或拒绝。角色也可以在合适时用 transfer 项主动向用户转账，等待用户接收或拒绝。若未附带真实图片，不要臆造描述之外的图片细节。'
       : '',
@@ -761,6 +818,6 @@ function renderRecentVoomTopicReminderPrompt(context: PromptContext) {
 }
 
 export function buildMomentPrompt(context: PromptContext) {
-  const characterName = context.character.name || context.character.nickname || '角色';
-  return `${buildPrompt(context, { includeOnlineChatPunctuation: false, includeOnlineStickerSemantics: false, includeOnlineRoutineCare: false, includeAvailableStickers: false })}\n\n${renderRecentVoomTopicReminderPrompt(context)}\n\n现在生成角色要发布的一条 LINK VOOM（朋友圈、动态），以及这条动态自然产生的点赞和评论区。只输出 JSON，不要输出 Markdown，不要输出 JSON 以外的任何文字。\n\n本次 VOOM 作者固定是：${characterName}（角色ID：${context.character.id}）。所有点赞和评论区 NPC 都只能来自这个角色自己的社交圈。\n\n格式：\n{\n  "content": "朋友圈正文",\n  "contentTranslation": "只在 content 是非中文外语或粤语时填写简体中文译文，否则留空",\n  "imageDescription": "这条动态会同时发布的一张配图的文字描述",\n  "likes": ["NPC在社交软件上的网名"],\n  "comments": [\n    { "id": "c1", "authorName": "NPC在社交软件上的网名", "content": "评论内容", "contentTranslation": "只在 content 是非中文外语或粤语时填写简体中文译文，否则留空", "parentId": "被回复评论的 id，可留空" },\n    { "id": "c2", "authorName": "${characterName}", "content": "回复内容", "contentTranslation": "", "parentId": "c1" }\n  ]\n}\n\n要求：\n1. content 是角色真正发出去的动态文字，像社交软件朋友圈正文，不要解释设定。\n2. VOOM 必须优先承接当前聊天上下文、最近对话、当前对话总结、记忆手册、现实时间感知和角色刚刚表现出的状态；不能像另一个无关支线突然插入。\n3. 如果最近聊天已经明确角色在某个地点、路上、房间、公司、学校或某个时间段，content 和 imageDescription 必须保持同一时空或给出合理过渡；禁止让角色从 A 地无铺垫瞬移到 B 地。\n4. 除非最近对话或记忆里已经有明确依据，禁止突然写角色已经到达新地点、见了新人物、完成一整段行程、跨到第二天/深夜/清晨。需要移动时，只能写成本轮时间能合理发生的等待、收拾、路上、刚走到附近等连续过程。\n5. 如果当前聊天没有足够事件支撑 VOOM，可以写角色此刻生活里的小切片，但仍要贴合当前时间、角色职业/日程、刚才聊天情绪和已知地点，不要为了换题而强行换背景。\n6. contentTranslation 和每条 comment.contentTranslation 只翻译非中文外语或粤语；中文内容留空。译文必须是自然简体中文，不要加“翻译：”前缀。\n7. imageDescription 是配图画面描述，不是生图提示词，不要写英文标签、相机参数、画质词或模型术语。\n8. 配图内容由角色性格、当前聊天、动态正文、最近经历和生活状态决定，不固定题材；可以是自拍、随手拍、物品、街景、餐食、房间、作业、工作现场等任何合理画面，但必须与 content 的时空连续。\n9. imageDescription 描述“画面里有什么”和“看起来是什么氛围”，注意环境场景、时间、图片视角、角色设定形象，构图组成部分等，控制在 40-140 个中文字符。\n10. likes 和 comments 来自本角色真实社交圈里的 NPC，不要包含{{user}}，也不要使用“NPC”这种占位名字。\n11. comments 控制在 6-15 条，内容要像社交软件评论区里会出现的真实评论；id 是本次评论的临时 id，parentId 留空表示新评论，填写前面某条评论的 id 表示回复该评论。\n12. 角色本人可以回复别人评论；如果 content 写成“回复某某：……”，也必须同时填写对应 parentId，不要只把回复对象写进文字里。\n13. 不要连续重复近期 VOOM 的同一个核心话题；若主题相近，必须因为当前聊天自然延续，并提供新的具体事件、状态变化或细节。`;
+  const characterName = getCharacterAiName(context.character);
+  return `${buildPrompt(context, { includeOnlineChatPunctuation: false, includeOnlineStickerSemantics: false, includeOnlineRoutineCare: false, includeAvailableStickers: false })}\n\n${renderRecentVoomTopicReminderPrompt(context)}\n\n现在生成角色要发布的一条 LINK VOOM（朋友圈、动态），以及这条动态自然产生的点赞和评论区。只输出 JSON，不要输出 Markdown，不要输出 JSON 以外的任何文字。\n\n本次 VOOM 作者固定是：${characterName}（角色ID：${context.character.id}）。所有点赞和评论区 NPC 都只能来自这个角色自己的社交圈。\n\n格式：\n{\n  "content": "朋友圈正文",\n  "contentTranslation": "只在 content 是非中文外语或粤语时填写简体中文译文，否则留空",\n  "imageDescription": "这条动态会同时发布的一张配图的文字描述",\n  "likes": ["真实感 NPC 名"],\n  "comments": [\n    { "id": "c1", "authorName": "真实感 NPC 名", "content": "评论内容", "contentTranslation": "只在 content 是非中文外语或粤语时填写简体中文译文，否则留空", "parentId": "被回复评论的 id，可留空" },\n    { "id": "c2", "authorName": "${characterName}", "content": "回复内容", "contentTranslation": "", "parentId": "c1" }\n  ]\n}\n\n要求：\n1. content 是角色真正发出去的动态文字，像社交软件朋友圈正文，不要解释设定。\n2. VOOM 必须优先承接当前聊天上下文、最近对话、当前对话总结、记忆手册、现实时间感知和角色刚刚表现出的状态；不能像另一个无关支线突然插入。\n3. 如果最近聊天已经明确角色在某个地点、路上、房间、公司、学校或某个时间段，content 和 imageDescription 必须保持同一时空或给出合理过渡；禁止让角色从 A 地无铺垫瞬移到 B 地。\n4. 除非最近对话或记忆里已经有明确依据，禁止突然写角色已经到达新地点、见了新人物、完成一整段行程、跨到第二天/深夜/清晨。需要移动时，只能写成本轮时间能合理发生的等待、收拾、路上、刚走到附近等连续过程。\n5. 如果当前聊天没有足够事件支撑 VOOM，可以写角色此刻生活里的小切片，但仍要贴合当前时间、角色职业/日程、刚才聊天情绪和已知地点，不要为了换题而强行换背景。\n6. contentTranslation 和每条 comment.contentTranslation 只翻译非中文外语或粤语；中文内容留空。译文必须是自然简体中文，不要加“翻译：”前缀。\n7. imageDescription 是配图画面描述，不是生图提示词，不要写英文标签、相机参数、画质词或模型术语。\n8. 配图内容由角色性格、当前聊天、动态正文、最近经历和生活状态决定，不固定题材；可以是自拍、随手拍、物品、街景、餐食、房间、作业、工作现场等任何合理画面，但必须与 content 的时空连续。\n9. imageDescription 描述“画面里有什么”和“看起来是什么氛围”，注意环境场景、时间、图片视角、角色设定形象，构图组成部分等，控制在 40-140 个中文字符。\n10. likes 和 comments 来自本角色真实社交圈里的 NPC，不要包含{{user}}，也不要使用“NPC”这种占位名字。\n11. 用户和已有角色只能使用真名，严禁使用网名、昵称、备注或主页名；角色本人评论时 authorName 必须是 ${characterName}。\n12. comments 控制在 6-15 条，内容要像社交软件评论区里会出现的真实评论；id 是本次评论的临时 id，parentId 留空表示新评论，填写前面某条评论的 id 表示回复该评论。\n13. 角色本人可以回复别人评论；如果 content 写成“回复某某：……”，也必须同时填写对应 parentId，不要只把回复对象写进文字里。\n14. 不要连续重复近期 VOOM 的同一个核心话题；若主题相近，必须因为当前聊天自然延续，并提供新的具体事件、状态变化或细节。`;
 }

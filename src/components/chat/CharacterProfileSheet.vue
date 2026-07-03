@@ -249,7 +249,7 @@ const editorForm = reactive({
   following: ''
 });
 
-const displayAvatar = computed(() => props.character.avatar || visualProfile.value?.avatar);
+const displayAvatar = computed(() => props.character.avatar);
 const sheetBackgroundImage = computed(() => visualProfile.value?.backgroundImage || displayAvatar.value);
 const sheetStyle = computed(() => ({
   color: visualProfile.value?.textColor || '#f5f3f1',

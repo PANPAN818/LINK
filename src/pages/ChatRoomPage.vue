@@ -500,9 +500,10 @@ import UserProfileSheet from '@/components/chat/UserProfileSheet.vue';
 import StickerLibraryModal from '@/components/stickers/StickerLibraryModal.vue';
 import { useAppStore } from '@/stores/appStore';
 import type { CharacterProfile, ChatImageAttachment, ChatLocationAttachment, ChatMessage, ChatMessageQuote, ChatTransferStatus, ChatVoiceAttachment, Sticker, UserProfile } from '@/types/domain';
+import { getCharacterDisplayName } from '@/utils/character';
 import { readChatImageFile } from '@/utils/imageFile';
 import { useKeyboardScrollGuard } from '@/utils/keyboardScrollGuard';
-import { normalizeVisualProfile } from '@/utils/profile';
+import { normalizeUserProfile, normalizeVisualProfile } from '@/utils/profile';
 import { getSelectedImageModelOption } from '@/utils/settings';
 import { recommendStickers } from '@/utils/stickerRecommendations';
 import { isVoomNarrationMessage, mergeVoomLikeMessages } from '@/utils/voomMessages';
@@ -648,7 +649,7 @@ const bottomRestoreDelays = [40, 120, 260, 520];
 
 const conversation = computed(() => store.conversationById(props.id));
 const character = computed(() => (conversation.value ? store.characterById(conversation.value.charId) : undefined));
-const characterDisplayName = computed(() => character.value?.nickname || character.value?.name || '该好友');
+const characterDisplayName = computed(() => character.value ? getCharacterDisplayName(character.value) : '该好友');
 const boundUser = computed(() => {
   const userId = conversation.value?.userId || character.value?.boundUserId || '';
   return userId ? store.userById(userId) ?? null : null;
@@ -661,9 +662,13 @@ const conversationUser = computed(() => {
   return {
     ...user,
     avatar: profile.avatar || user.avatar,
-    nickname: profile.nickname || user.nickname,
-    signature: profile.bio || user.signature,
-    profile
+    nickname: user.nickname,
+    signature: user.signature,
+    profile: normalizeVisualProfile({
+      ...profile,
+      nickname: user.nickname,
+      bio: user.signature
+    }, user)
   };
 });
 const chatSettings = computed(() => store.settingsForConversation(props.id));
@@ -1762,12 +1767,23 @@ async function saveUserProfile(user: UserProfile) {
     return;
   }
 
+  const normalizedUser = normalizeUserProfile({
+    ...boundUser.value,
+    nickname: user.nickname,
+    signature: user.signature
+  });
+
+  await store.saveUserProfile(normalizedUser);
+
   await store.saveCharacter({
     ...character.value,
-    boundUserProfile: normalizeVisualProfile(user.profile, {
-      ...boundUser.value,
-      nickname: user.nickname,
-      signature: user.signature
+    boundUserProfile: normalizeVisualProfile({
+      ...user.profile,
+      nickname: normalizedUser.nickname,
+      bio: normalizedUser.signature
+    }, {
+      ...normalizedUser,
+      avatar: user.avatar || normalizedUser.avatar
     })
   });
 }

@@ -161,9 +161,9 @@ const sheetStyle = computed(() => ({
   '--avatar-border-color': visualProfile.value.avatarBorderColor || '#090c0f',
   backgroundImage: `linear-gradient(180deg, rgba(10, 11, 16, 0.08), rgba(10, 11, 16, 0.5) 58%, rgba(6, 8, 12, 0.94)), url(${JSON.stringify(sheetBackgroundImage.value)})`
 }));
-const displayName = computed(() => props.user.nickname || visualProfile.value.nickname || props.user.name);
+const displayName = computed(() => props.user.nickname || props.user.name);
 const displayAvatar = computed(() => visualProfile.value.avatar || props.user.avatar);
-const displayBio = computed(() => props.user.signature || visualProfile.value.bio);
+const displayBio = computed(() => props.user.signature);
 const recentPosts = computed(() => props.posts
   .filter((post) => post.userId === props.user.id && (post.authorType === 'user' || !post.charId))
   .slice(0, 3));
@@ -203,8 +203,8 @@ function openEditor() {
   editorForm.avatar = profile.avatar || props.user.avatar || '';
   editorForm.textColor = profile.textColor || '#f5f3f1';
   editorForm.avatarBorderColor = profile.avatarBorderColor || '#090c0f';
-  editorForm.nickname = props.user.nickname || profile.nickname || props.user.name || '';
-  editorForm.signature = props.user.signature || profile.bio || '';
+  editorForm.nickname = props.user.nickname || props.user.name || '';
+  editorForm.signature = props.user.signature || '';
   editorForm.posts = String(profile.stats.posts ?? 0);
   editorForm.followers = profile.stats.followers ?? '';
   editorForm.following = String(profile.stats.following ?? 0);
@@ -237,7 +237,7 @@ function saveEditor() {
   const nextPosts = Number.parseInt(editorForm.posts, 10);
   const nextNickname = editorForm.nickname.trim() || props.user.nickname || props.user.name;
   const nextProfileAvatar = editorForm.avatar.trim() || profile.avatar || props.user.avatar;
-  const nextSignature = editorForm.signature.trim() || props.user.signature || profile.bio;
+  const nextSignature = editorForm.signature.trim() || props.user.signature;
 
   emit('save', {
     ...props.user,

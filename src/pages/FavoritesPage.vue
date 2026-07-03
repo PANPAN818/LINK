@@ -23,7 +23,7 @@
         <section v-else class="favorite-timeline" aria-label="收藏时间线">
         <article v-for="item in favoriteItems" :key="item.id" class="favorite-card" :class="`favorite-card--${item.kind}`">
           <header class="favorite-card-head">
-            <img v-if="item.authorAvatar" class="favorite-avatar" :src="item.authorAvatar" :alt="item.authorName" />
+            <img v-if="favoriteAuthorAvatar(item)" class="favorite-avatar" :src="favoriteAuthorAvatar(item)" :alt="item.authorName" />
             <span v-else class="favorite-avatar favorite-avatar--empty">{{ item.authorName.slice(0, 1) }}</span>
             <div>
               <strong>{{ item.authorName }}</strong>
@@ -114,6 +114,12 @@ function cardMeta(item: FavoriteMessageRecord) {
 function transferStatusLabel(item: FavoriteMessageRecord) {
   const status = item.message.transfer?.status ?? 'pending';
   return ({ pending: '等待处理', accepted: '已接收', rejected: '已拒绝' } as const)[status];
+}
+
+function favoriteAuthorAvatar(item: FavoriteMessageRecord) {
+  if (item.sender !== 'char') return item.authorAvatar;
+  const characterId = item.characterId || store.conversationById(item.conversationId)?.charId || '';
+  return store.characterById(characterId)?.avatar || item.authorAvatar;
 }
 
 function formatVoiceDuration(duration: number) {
