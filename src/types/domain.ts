@@ -882,8 +882,11 @@ export interface AppThemeSettings {
   offline: Record<string, never>;
 }
 
+export type FriendsDisplayScope = 'active-user' | 'all-users';
+
 export interface AppSettings {
   activeUserId: string;
+  friendsDisplayScope: FriendsDisplayScope;
   apiEndpoint: string;
   apiKey: string;
   model: string;

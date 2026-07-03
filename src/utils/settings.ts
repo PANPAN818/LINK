@@ -166,6 +166,7 @@ export function createDefaultThemeSettings(): AppThemeSettings {
 
 export const defaultAppSettings: AppSettings = {
   activeUserId: '',
+  friendsDisplayScope: 'active-user',
   apiEndpoint: '',
   apiKey: '',
   model: 'gpt-compatible-model',
@@ -306,6 +307,10 @@ export const defaultAppSettings: AppSettings = {
 function normalizeImageProvider(provider: string | null | undefined): ImageProviderType | '' {
   const normalized = String(provider ?? '').trim();
   return imageProviderOrder.includes(normalized as ImageProviderType) ? normalized as ImageProviderType : '';
+}
+
+function normalizeFriendsDisplayScope(scope: string | null | undefined) {
+  return scope === 'all-users' ? 'all-users' : 'active-user';
 }
 
 function normalizeTtsProvider(provider: string | null | undefined): TtsProviderType | '' {
@@ -1329,6 +1334,7 @@ export function normalizeAppSettings(settings?: Partial<AppSettings> | null): Ap
   return {
     ...normalized,
     activeUserId: String(normalized.activeUserId ?? '').trim(),
+    friendsDisplayScope: normalizeFriendsDisplayScope(normalized.friendsDisplayScope),
     ttsEnabled: true,
     ttsVoice: getTtsVoiceForProvider(normalized),
     ttsPlaybackMode: normalized.ttsPlaybackMode === 'auto' ? 'auto' : 'manual',

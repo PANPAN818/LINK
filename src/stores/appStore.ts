@@ -274,6 +274,9 @@ export const useAppStore = defineStore('app', () => {
     const activeUserId = user.value?.id;
     return activeUserId ? conversations.value.filter((conversation) => conversation.userId === activeUserId) : conversations.value;
   });
+  const displayAllFriends = computed(() => settings.value?.friendsDisplayScope === 'all-users');
+  const charactersForFriendsDisplay = computed(() => displayAllFriends.value ? characters.value : charactersForActiveUser.value);
+  const conversationsForFriendsDisplay = computed(() => displayAllFriends.value ? conversations.value : conversationsForActiveUser.value);
   const sortedConversations = computed(() => [...conversationsForActiveUser.value].sort((a, b) => b.updatedAt - a.updatedAt));
   const sortedVoomPosts = computed(() => [...voomPosts.value].sort((a, b) => b.createdAt - a.createdAt));
   const sortedSmallTheaters = computed(() => [...smallTheaters.value].sort((a, b) => b.createdAt - a.createdAt));
@@ -5512,8 +5515,10 @@ export const useAppStore = defineStore('app', () => {
     accounts,
     characters,
     charactersForActiveUser,
+    charactersForFriendsDisplay,
     conversations,
     conversationsForActiveUser,
+    conversationsForFriendsDisplay,
     sortedConversations,
     unreadConversationCount,
     messages,

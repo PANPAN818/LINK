@@ -4,9 +4,22 @@
       <button class="account-title-button" type="button" aria-label="返回主页" @click="goHome">
         <h1 class="top-title">Account</h1>
       </button>
-      <button class="icon-button" type="button" aria-label="新建账号" @click="createAccount">
-        <Plus :size="24" />
-      </button>
+      <div class="profile-top-actions">
+        <button
+          class="friends-scope-switch"
+          :class="{ all: showAllFriends }"
+          type="button"
+          :aria-label="showAllFriends ? 'Friends 显示所有账号绑定角色' : 'Friends 仅显示当前账号绑定角色'"
+          :aria-pressed="showAllFriends"
+          @click="toggleFriendsDisplayScope"
+        >
+          <span>Mine</span>
+          <span>All</span>
+        </button>
+        <button class="icon-button" type="button" aria-label="新建账号" @click="createAccount">
+          <Plus :size="24" />
+        </button>
+      </div>
     </header>
 
     <main class="profile-content">
@@ -25,7 +38,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { Plus } from 'lucide-vue-next';
 import AccountManagerPanel from '@/components/profile/AccountManagerPanel.vue';
@@ -35,6 +48,7 @@ import type { UserProfile } from '@/types/domain';
 const store = useAppStore();
 const router = useRouter();
 const accountManagerRef = ref<InstanceType<typeof AccountManagerPanel> | null>(null);
+const showAllFriends = computed(() => store.settings?.friendsDisplayScope === 'all-users');
 
 function goHome() {
   void router.push({ name: 'home' });
@@ -64,6 +78,14 @@ async function moveCharacter(payload: { characterId: string; userId: string }) {
 function createAccount() {
   accountManagerRef.value?.createAccount();
 }
+
+async function toggleFriendsDisplayScope() {
+  if (!store.settings) return;
+  await store.saveSettings({
+    ...store.settings,
+    friendsDisplayScope: showAllFriends.value ? 'active-user' : 'all-users'
+  });
+}
 </script>
 
 <style scoped>
@@ -89,5 +111,56 @@ function createAccount() {
 .account-title-button .top-title {
   margin: 0;
   text-align: left;
+}
+
+.profile-top-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.friends-scope-switch {
+  position: relative;
+  display: inline-grid;
+  grid-template-columns: 1fr 1fr;
+  align-items: center;
+  width: 82px;
+  height: 30px;
+  padding: 2px;
+  border: 1px solid rgba(17, 17, 17, 0.08);
+  border-radius: 999px;
+  background: rgba(17, 17, 17, 0.06);
+  color: #7d8087;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.friends-scope-switch::before {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: calc(50% - 2px);
+  height: calc(100% - 4px);
+  border-radius: 999px;
+  background: #ffffff;
+  box-shadow: 0 2px 8px rgba(17, 17, 17, 0.12);
+  transition: transform 0.18s ease;
+}
+
+.friends-scope-switch.all::before {
+  transform: translateX(100%);
+}
+
+.friends-scope-switch span {
+  position: relative;
+  z-index: 1;
+  text-align: center;
+}
+
+.friends-scope-switch:not(.all) span:first-child,
+.friends-scope-switch.all span:last-child {
+  color: #111111;
 }
 </style>

@@ -81,7 +81,7 @@ const filterTabs: Array<{ label: string; value: ChatFilter }> = [
 ];
 
 const friendRows = computed<ChatListRow[]>(() =>
-  store.charactersForActiveUser
+  store.charactersForFriendsDisplay
     .flatMap((character) => {
       const conversation = store.conversations.find((item) => item.charId === character.id && item.userId === character.boundUserId);
       if (!conversation) return [];
@@ -99,7 +99,7 @@ const friendRows = computed<ChatListRow[]>(() =>
 );
 
 const chatRows = computed<ChatListRow[]>(() =>
-  [...store.conversationsForActiveUser].sort((a, b) => b.updatedAt - a.updatedAt).flatMap((conversation) => {
+  [...store.conversationsForFriendsDisplay].sort((a, b) => b.updatedAt - a.updatedAt).flatMap((conversation) => {
     const character = store.characterById(conversation.charId);
     const lastMessage = store.lastMessageForConversation(conversation.id);
     if (!character || !lastMessage) return [];
