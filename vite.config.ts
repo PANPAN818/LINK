@@ -385,7 +385,7 @@ export default defineConfig({
     },
     vue(),
     VitePWA({
-      registerType: 'autoUpdate',
+      registerType: 'prompt',
       includeAssets: ['link-icon.png', 'default-ringtone.mp3', 'link-sw-events.js'],
       manifest: {
         id: base,

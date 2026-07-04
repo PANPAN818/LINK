@@ -128,6 +128,71 @@
           <p v-if="keepAliveAlert" class="keepalive-note">{{ keepAliveAlert }}</p>
         </section>
 
+        <section v-else-if="activeTab === 'updates'" class="app-update-section" aria-label="网站更新">
+          <div class="section-heading-row">
+            <span>Website Update</span>
+            <b>{{ appUpdatePhaseLabel }}</b>
+          </div>
+
+          <article class="app-update-console" :class="[`is-${appUpdateStatus.phase}`, { 'is-ready': canInstallAppUpdate }]">
+            <header class="app-update-console-head">
+              <div class="app-update-title-copy">
+                <small>{{ appUpdateRuntimeLabel }}</small>
+                <strong>网站版本更新</strong>
+                <span>{{ appUpdateCheckedLabel }}</span>
+              </div>
+
+              <span class="app-update-badge">{{ appUpdatePhaseLabel }}</span>
+            </header>
+
+            <div class="app-update-summary">
+              <strong>{{ appUpdateStatus.message }}</strong>
+              <span>{{ appUpdateStatus.detail }}</span>
+            </div>
+
+            <div class="app-update-flow" aria-label="更新状态">
+              <span :class="['app-update-step', { active: appUpdateStatus.registrationReady, muted: !appUpdateStatus.supported }]">
+                <Cloud :size="16" />
+                <b>更新服务</b>
+                <small>{{ appUpdateWorkerLabel }}</small>
+              </span>
+              <span :class="['app-update-step', { active: appUpdateStatus.hasWaitingWorker || appUpdateStatus.hasInstallingWorker }]">
+                <Download :size="16" />
+                <b>资源包</b>
+                <small>{{ appUpdatePackageLabel }}</small>
+              </span>
+              <span :class="['app-update-step', { active: appUpdateStatus.controlled, warn: appUpdateStatus.phase === 'error' }]">
+                <Smartphone :size="16" />
+                <b>当前页面</b>
+                <small>{{ appUpdateClientLabel }}</small>
+              </span>
+            </div>
+          </article>
+
+          <div class="app-update-actions" aria-label="更新操作">
+            <button class="app-update-action primary" type="button" :disabled="!canCheckAppUpdate" @click="runAppUpdateCheck">
+              <RefreshCw :size="16" :class="{ spin: appUpdateStatus.phase === 'checking' }" />
+              <span>
+                <b>检查并下载</b>
+                <small>{{ appUpdateDownloadHint }}</small>
+              </span>
+            </button>
+            <button class="app-update-action" type="button" :disabled="!canInstallAppUpdate" @click="runAppUpdateInstall">
+              <CheckCircle2 :size="16" />
+              <span>
+                <b>安装并重载</b>
+                <small>{{ canInstallAppUpdate ? '新版本就绪' : '等待下载' }}</small>
+              </span>
+            </button>
+          </div>
+
+          <p class="app-update-note" :class="{ warn: appUpdateStatus.phase === 'error' || appUpdateStatus.phase === 'unsupported' }">
+            <AlertCircle v-if="appUpdateStatus.phase === 'error' || appUpdateStatus.phase === 'unsupported'" :size="14" />
+            <CheckCircle2 v-else :size="14" />
+            <span>{{ appUpdateBrowserNote }}</span>
+          </p>
+        </section>
+
         <section v-else class="ringtone-content" :class="{ 'is-muted': !ringtoneSettings.enabled }" aria-label="铃声内容">
           <section class="global-section" aria-label="全局铃声">
             <div class="section-heading-row">
@@ -229,7 +294,8 @@
 <script setup lang="ts">
 import { computed, defineComponent, h, onBeforeUnmount, onMounted, ref, type PropType } from 'vue';
 import { useRouter } from 'vue-router';
-import { BatteryCharging, BellRing, Clapperboard, LoaderCircle, MessageCircle, Music2, Power, RadioTower, RotateCcw, ShieldCheck, Undo2, Upload, Volume2, VolumeX } from 'lucide-vue-next';
+import { AlertCircle, BatteryCharging, BellRing, CheckCircle2, Clapperboard, Cloud, Download, LoaderCircle, MessageCircle, Music2, Power, RadioTower, RefreshCw, RotateCcw, ShieldCheck, Smartphone, Undo2, Upload, Volume2, VolumeX } from 'lucide-vue-next';
+import { checkForAppUpdate, getAppUpdateStatus, installDownloadedAppUpdate, refreshAppUpdateStatus, subscribeAppUpdateStatus, type AppUpdateStatus } from '@/services/appUpdate';
 import { getKeepAliveStatus, requestKeepAliveNotificationPermission, startKeepAlive, stopKeepAlive, subscribeKeepAliveStatus, type KeepAliveRuntimeStatus } from '@/services/keepAlive';
 import { useAppStore } from '@/stores/appStore';
 import type { AppKeepAliveSettings, AppRingtoneSettings, RingtoneAsset, RingtoneEventType } from '@/types/domain';
@@ -238,7 +304,7 @@ import { createId } from '@/utils/id';
 import { createDefaultRingtoneSettings, normalizeAppSettings, normalizeKeepAliveSettings, normalizeRingtoneSettings, ringtoneEventTypes } from '@/utils/settings';
 
 type RingtoneScope = 'global' | 'character';
-type RingtoneTab = 'keepalive' | 'ringtones';
+type RingtoneTab = 'keepalive' | 'ringtones' | 'updates';
 
 const audioAccept = 'audio/*,.mp3,.mpeg,.mpga,.m4a,.aac,.wav,.wave,.ogg,.oga,.opus,.webm,.flac,.caf,.aif,.aiff';
 const supportedAudioExtensions = ['mp3', 'mpeg', 'mpga', 'm4a', 'aac', 'wav', 'wave', 'ogg', 'oga', 'opus', 'webm', 'flac', 'caf', 'aif', 'aiff'];
@@ -268,7 +334,8 @@ const eventMeta = {
 
 const tabs = [
   { id: 'keepalive' as RingtoneTab, shortLabel: 'Keep', icon: BatteryCharging },
-  { id: 'ringtones' as RingtoneTab, shortLabel: 'Rings', icon: Music2 }
+  { id: 'ringtones' as RingtoneTab, shortLabel: 'Rings', icon: Music2 },
+  { id: 'updates' as RingtoneTab, shortLabel: 'Update', icon: Download }
 ] as const;
 
 const RingtoneCardIcon = defineComponent({
@@ -291,7 +358,10 @@ const activeTab = ref<RingtoneTab>('keepalive');
 const importError = ref('');
 const notificationAuthMessage = ref('');
 const keepAliveStatus = ref<KeepAliveRuntimeStatus>(getKeepAliveStatus());
+const appUpdateStatus = ref<AppUpdateStatus>(getAppUpdateStatus());
+const appUpdateBusy = ref(false);
 let unsubscribeKeepAliveStatus: (() => void) | null = null;
+let unsubscribeAppUpdateStatus: (() => void) | null = null;
 
 const activeTabMeta = computed(() => tabs.find((tab) => tab.id === activeTab.value) ?? tabs[0]);
 const keepAliveSettings = computed(() => normalizeKeepAliveSettings(store.settings?.keepAlive));
@@ -334,16 +404,59 @@ const keepAliveAlert = computed(() => {
   if (keepAliveStatus.value.notificationPermission === 'denied') return '系统通知权限已拒绝，角色事件仍会播放铃声。';
   return '';
 });
+const appUpdatePhaseLabel = computed(() => {
+  const phaseLabels: Record<AppUpdateStatus['phase'], string> = {
+    idle: '准备',
+    checking: '检查中',
+    latest: '已最新',
+    downloaded: '可安装',
+    updated: '安装中',
+    unsupported: '不可用',
+    error: '错误'
+  };
+  return phaseLabels[appUpdateStatus.value.phase];
+});
+const appUpdateRuntimeLabel = computed(() => import.meta.env.PROD ? 'PWA' : 'Dev');
+const appUpdateCheckedLabel = computed(() => formatUpdateTime(appUpdateStatus.value.lastCheckedAt));
+const appUpdateWorkerLabel = computed(() => {
+  if (!appUpdateStatus.value.supported) return '不可用';
+  if (appUpdateStatus.value.registrationReady) return 'Service Worker';
+  return '启动中';
+});
+const appUpdatePackageLabel = computed(() => {
+  if (appUpdateStatus.value.hasWaitingWorker) return '已下载';
+  if (appUpdateStatus.value.hasInstallingWorker || appUpdateStatus.value.phase === 'checking') return '下载中';
+  if (appUpdateStatus.value.phase === 'latest') return '已最新';
+  return '待检查';
+});
+const appUpdateClientLabel = computed(() => appUpdateStatus.value.controlled ? 'PWA 缓存' : '浏览器直连');
+const canCheckAppUpdate = computed(() => appUpdateStatus.value.supported && appUpdateStatus.value.phase !== 'checking' && !appUpdateBusy.value);
+const canInstallAppUpdate = computed(() => appUpdateStatus.value.hasWaitingWorker && !appUpdateBusy.value);
+const appUpdateDownloadHint = computed(() => {
+  if (appUpdateStatus.value.phase === 'checking') return '正在连接服务器';
+  if (!appUpdateStatus.value.supported) return import.meta.env.PROD ? '当前浏览器不可用' : '生产环境可用';
+  return '手动拉取最新资源';
+});
+const appUpdateBrowserNote = computed(() => {
+  if (!import.meta.env.PROD) return '开发服务器会禁用 Service Worker；请用 npm run build 后的预览或线上 HTTPS 地址测试真实更新。';
+  if (!appUpdateStatus.value.supported) return '只有支持 Service Worker 的安全上下文浏览器可以执行网页热更新。';
+  return '检查会下载新资源；安装只会在新版本完整进入等待状态后启用。';
+});
 
 onMounted(() => {
   void store.hydrate();
   unsubscribeKeepAliveStatus = subscribeKeepAliveStatus((nextStatus) => {
     keepAliveStatus.value = nextStatus;
   });
+  unsubscribeAppUpdateStatus = subscribeAppUpdateStatus((nextStatus) => {
+    appUpdateStatus.value = nextStatus;
+  });
+  void refreshAppUpdateStatus();
 });
 
 onBeforeUnmount(() => {
   unsubscribeKeepAliveStatus?.();
+  unsubscribeAppUpdateStatus?.();
 });
 
 function goBack() {
@@ -356,6 +469,31 @@ function goBack() {
 
 function openTab(tab: RingtoneTab) {
   activeTab.value = tab;
+}
+
+function formatUpdateTime(timestamp: number) {
+  if (!timestamp) return '尚未检查';
+  return `上次检查 ${new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit' }).format(timestamp)}`;
+}
+
+async function runAppUpdateCheck() {
+  if (!canCheckAppUpdate.value) return;
+  appUpdateBusy.value = true;
+  try {
+    await checkForAppUpdate();
+  } finally {
+    appUpdateBusy.value = false;
+  }
+}
+
+async function runAppUpdateInstall() {
+  if (!canInstallAppUpdate.value) return;
+  appUpdateBusy.value = true;
+  try {
+    await installDownloadedAppUpdate();
+  } finally {
+    appUpdateBusy.value = false;
+  }
 }
 
 function cloneAsset(asset: RingtoneAsset): RingtoneAsset {
@@ -656,7 +794,7 @@ async function resetCharacter(characterId: string, eventType: RingtoneEventType)
   z-index: 20;
   display: grid;
   flex: 0 0 auto;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 4px;
   padding: 8px calc(12px + var(--safe-right)) calc(10px + var(--safe-bottom)) calc(12px + var(--safe-left));
   border-top: 1px solid rgba(17, 17, 17, 0.05);
@@ -703,6 +841,7 @@ async function resetCharacter(characterId: string, eventType: RingtoneEventType)
 
 .global-section,
 .keepalive-section,
+.app-update-section,
 .character-section {
   display: grid;
   gap: 12px;
@@ -1038,6 +1177,238 @@ async function resetCharacter(characterId: string, eventType: RingtoneEventType)
   font-weight: 800;
   line-height: 1.45;
   overflow-wrap: anywhere;
+}
+
+.app-update-console {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid rgba(17, 17, 17, 0.05);
+  border-radius: 20px;
+  background: rgba(250, 251, 250, 0.94);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.86), 0 12px 28px rgba(16, 24, 20, 0.055);
+  overflow: hidden;
+}
+
+.app-update-console.is-downloaded,
+.app-update-console.is-ready {
+  border-color: rgba(6, 199, 85, 0.16);
+  background: #f2faf5;
+}
+
+.app-update-console.is-error,
+.app-update-console.is-unsupported {
+  border-color: rgba(239, 68, 90, 0.11);
+  background: #fff8f9;
+}
+
+.app-update-console-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.app-update-title-copy {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.app-update-title-copy small {
+  color: #138046;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.app-update-title-copy strong {
+  overflow: hidden;
+  color: #151a17;
+  font-size: 16px;
+  font-weight: 950;
+  line-height: 1.18;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-update-title-copy span {
+  overflow: hidden;
+  color: #6f7773;
+  font-size: 11px;
+  font-weight: 760;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-update-badge {
+  flex: 0 0 auto;
+  min-width: 50px;
+  padding: 6px 9px;
+  border-radius: 999px;
+  background: #eef8f2;
+  color: #138046;
+  font-size: 10px;
+  font-weight: 950;
+  line-height: 1;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.app-update-console.is-error .app-update-badge,
+.app-update-console.is-unsupported .app-update-badge {
+  background: #fff0f2;
+  color: #b51f36;
+}
+
+.app-update-summary {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  padding: 12px;
+  border-radius: 16px;
+  background: #ffffff;
+  box-shadow: inset 0 0 0 1px rgba(17, 17, 17, 0.04);
+}
+
+.app-update-summary strong {
+  color: #1b201d;
+  font-size: 13px;
+  font-weight: 950;
+  line-height: 1.25;
+}
+
+.app-update-summary span {
+  color: #69716d;
+  font-size: 11px;
+  font-weight: 760;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.app-update-flow,
+.app-update-actions {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.app-update-actions {
+  grid-template-columns: 1fr;
+}
+
+.app-update-action,
+.app-update-step {
+  display: grid;
+  align-items: center;
+  min-width: 0;
+  color: #737b77;
+  box-shadow: inset 0 0 0 1px rgba(17, 17, 17, 0.035);
+}
+
+.app-update-action {
+  grid-template-columns: 34px minmax(0, 1fr);
+  gap: 9px;
+  min-height: 54px;
+  padding: 10px 12px;
+  border-radius: 17px;
+  background: rgba(247, 248, 247, 0.94);
+  text-align: left;
+}
+
+.app-update-action.primary {
+  background: #eef8f2;
+  color: #138046;
+}
+
+.app-update-action:disabled {
+  color: #a9b0ac;
+  background: rgba(247, 248, 247, 0.72);
+}
+
+.app-update-action span,
+.app-update-step small {
+  display: grid;
+  min-width: 0;
+}
+
+.app-update-action b,
+.app-update-action small,
+.app-update-step b,
+.app-update-step small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-update-action b,
+.app-update-step b {
+  color: #202722;
+  font-size: 12px;
+  font-weight: 950;
+}
+
+.app-update-action small,
+.app-update-step small {
+  color: #8b938f;
+  font-size: 10px;
+  font-weight: 850;
+}
+
+.app-update-action.primary small {
+  color: #138046;
+}
+
+.app-update-step {
+  grid-template-columns: 30px minmax(60px, auto) minmax(0, 1fr);
+  gap: 8px;
+  min-height: 40px;
+  padding: 8px 10px;
+  border-radius: 14px;
+  background: #ffffff;
+}
+
+.app-update-step.active {
+  background: #eef8f2;
+  color: #138046;
+}
+
+.app-update-step.warn {
+  background: #fff3f5;
+  color: #b51f36;
+}
+
+.app-update-step.muted {
+  color: #b0b7b3;
+}
+
+.app-update-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: #f7f8f7;
+  color: #737b77;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.app-update-note.warn {
+  background: #fff3f5;
+  color: #b51f36;
+}
+
+.app-update-note svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
 }
 
 .keepalive-dashboard {
