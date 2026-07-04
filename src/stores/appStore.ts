@@ -4894,7 +4894,7 @@ export const useAppStore = defineStore('app', () => {
     return true;
   }
 
-  async function regenerateLatestReply(conversationId: string) {
+  async function regenerateLatestReply(conversationId: string, options: { replyInstruction?: string } = {}) {
     const conversation = conversationById(conversationId);
     if (!conversation || isConversationReplying(conversationId)) return false;
 
@@ -4944,7 +4944,7 @@ export const useAppStore = defineStore('app', () => {
         replyVariantIndex: message.replyVariantIndex ?? 0,
         replyVariantState: 'inactive' as const
       })));
-      await requestRoleplayReply(conversationId, { replyVariantGroupId, replyVariantIndex: nextVariantIndex });
+      await requestRoleplayReply(conversationId, { replyVariantGroupId, replyVariantIndex: nextVariantIndex, replyInstruction: options.replyInstruction });
       return true;
     }
 
@@ -4952,7 +4952,7 @@ export const useAppStore = defineStore('app', () => {
     const removedMessageIds = messagesToRemove.map((message) => message.id);
     await deleteMessages(messagesToRemove.map((message) => message.id));
 
-    await requestRoleplayReply(conversationId, { excludeSourceMessageIds: removedMessageIds });
+    await requestRoleplayReply(conversationId, { excludeSourceMessageIds: removedMessageIds, replyInstruction: options.replyInstruction });
     return true;
   }
 

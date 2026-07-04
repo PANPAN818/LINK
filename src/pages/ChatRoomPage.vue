@@ -225,6 +225,22 @@
       </section>
     </AppModal>
 
+    <AppModal v-model="showRegeneratePrompt" title="重新回复引导" :show-header="false" variant="ins">
+      <form class="regenerate-prompt-sheet" @submit.prevent="confirmRegenerateReply">
+        <span>重新回复</span>
+        <h3>引导这次回复</h3>
+        <p>可以写剧情方向、禁止事项或语气要求；留空会按当前上下文直接重新生成。</p>
+        <label>
+          <span>可选引导</span>
+          <textarea v-model="regeneratePromptDraft" maxlength="600" rows="5" placeholder="例如：往暧昧拉扯走；不要让角色立刻服软；禁止出现道歉。"></textarea>
+        </label>
+        <div class="regenerate-prompt-actions">
+          <button class="secondary-action" type="button" @click="showRegeneratePrompt = false">取消</button>
+          <button class="primary-action" type="submit" :disabled="currentConversationReplying">重新回复</button>
+        </div>
+      </form>
+    </AppModal>
+
     <AppModal v-model="showLocationPanel" title="发送定位" :show-header="false" variant="ins">
       <section class="location-send-panel">
         <div class="location-panel-head">
@@ -607,6 +623,7 @@ const route = useRoute();
 const showProfile = ref(false);
 const showUserProfile = ref(false);
 const showActionMenu = ref(false);
+const showRegeneratePrompt = ref(false);
 const showModelSwitch = ref(false);
 const showOfflineConfirm = ref(false);
 const showStickers = ref(false);
@@ -660,6 +677,7 @@ const locationDistanceDraft = ref('');
 const transferAmountDraft = ref('');
 const transferNoteDraft = ref('');
 const narrationDraft = ref('');
+const regeneratePromptDraft = ref('');
 const recordedVoiceDraft = ref<Pick<ChatVoiceAttachment, 'audioUrl' | 'duration' | 'mimeType'> | null>(null);
 const recordingVoice = ref(false);
 const recordingStartedAt = ref(0);
@@ -1778,13 +1796,27 @@ function openChatSearch() {
   void router.push({ name: 'chat-search', params: { id: props.id } });
 }
 
-async function regenerateReply() {
+function regenerateReply() {
   if (currentConversationReplying.value) {
     store.showConfigAlert('正在生成回复，请等待当前生成完成。', '正在生成');
     return;
   }
   showActionMenu.value = false;
-  await store.regenerateLatestReply(props.id);
+  regeneratePromptDraft.value = '';
+  showRegeneratePrompt.value = true;
+}
+
+function regenerateReplyInstruction() {
+  const instruction = regeneratePromptDraft.value.trim();
+  if (!instruction) return undefined;
+  return `本次是用户点击“重新回复”要求重新生成上一条线上回复。请优先遵守以下额外引导，同时继续遵守角色设定、聊天规则和边界：${instruction}`;
+}
+
+async function confirmRegenerateReply() {
+  if (currentConversationReplying.value) return;
+  const replyInstruction = regenerateReplyInstruction();
+  showRegeneratePrompt.value = false;
+  await store.regenerateLatestReply(props.id, { replyInstruction });
 }
 
 function openGobangPlaceholder() {
@@ -3130,6 +3162,69 @@ onBeforeUnmount(() => {
 }
 
 .delete-confirm-actions button {
+  min-height: 38px;
+}
+
+.regenerate-prompt-sheet {
+  display: grid;
+  gap: 10px;
+  color: #202329;
+}
+
+.regenerate-prompt-sheet > span {
+  color: #6a7079;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.regenerate-prompt-sheet h3,
+.regenerate-prompt-sheet p {
+  margin: 0;
+}
+
+.regenerate-prompt-sheet h3 {
+  font-size: 16px;
+  font-weight: 900;
+}
+
+.regenerate-prompt-sheet p {
+  color: #646a72;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.regenerate-prompt-sheet label {
+  display: grid;
+  gap: 7px;
+}
+
+.regenerate-prompt-sheet label span {
+  color: #4f565f;
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.regenerate-prompt-sheet textarea {
+  width: 100%;
+  min-height: 118px;
+  resize: vertical;
+  padding: 10px;
+  border: 1px solid rgba(20, 20, 20, 0.08);
+  border-radius: 10px;
+  outline: 0;
+  background: rgba(255, 255, 255, 0.86);
+  color: #202329;
+  font: inherit;
+  line-height: 1.5;
+}
+
+.regenerate-prompt-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.regenerate-prompt-actions button {
   min-height: 38px;
 }
 

@@ -426,7 +426,7 @@ function renderOfflinePsychologyInstruction(enabled: boolean, characterName: str
   }
   return `心理描写：
 正文中必须插入 2 至 4 段独立的${characterName}心理描写，每段约 50 字。
-格式固定为：*心理描写具体内容*
+格式固定为：*具体心理内容*。星号内部只能写心理内容本身，禁止写“心理描写：”“内心：”“想法：”等标签。
 心理活动必须符合${characterName}当下的性格逻辑、认知水平与情感状态。
 每段心理都必须是对${userName}某个具体行为、某句话、某个停顿或某个可见神态的即时反应；可以是解读、困惑、否认、心动、戒备，也可以是${characterName}自己都辨不明的混沌情绪。
 拒绝套路化内心独白。心理描写要短、准、有局限，不能全知全能，不能看透${userName}的全部想法，不能预知未来。

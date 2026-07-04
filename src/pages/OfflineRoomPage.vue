@@ -111,7 +111,10 @@
 
     <footer class="offline-dock">
       <div class="offline-toolbar">
-        <button class="tool-button" type="button" :disabled="!canRegenerate || currentConversationReplying" @click="regenerateLatestReply">
+        <button class="tool-button" type="button" :disabled="currentConversationReplying" @click="continueOfflineChapter">
+          <span>继续</span>
+        </button>
+        <button class="tool-button" type="button" :disabled="!canRegenerate || currentConversationReplying" @click="openRegeneratePromptDialog">
           <span>重回</span>
         </button>
         <button class="tool-button tool-button--danger" type="button" :class="{ active: truncateDeleteMode }" :disabled="!chapterFloors.length" @click="toggleTruncateDeleteMode">
@@ -168,6 +171,22 @@
       </form>
     </div>
 
+    <div v-if="showRegeneratePromptDialog" class="regenerate-prompt-backdrop" role="dialog" aria-modal="true" aria-label="重回引导" @click.self="closeRegeneratePromptDialog">
+      <form class="regenerate-prompt-sheet" @submit.prevent="confirmRegeneratePrompt">
+        <span>重回引导</span>
+        <h2>重新生成这一章</h2>
+        <p>可以写剧情方向、禁止事项或语气要求；留空会按当前上下文直接重新生成。</p>
+        <label>
+          <span>可选引导</span>
+          <textarea v-model="regeneratePromptDraft" maxlength="600" rows="5" placeholder="例如：往暧昧拉扯走；不要让角色立刻服软；禁止替用户做决定。"></textarea>
+        </label>
+        <div class="regenerate-prompt-actions">
+          <button type="button" @click="closeRegeneratePromptDialog">取消</button>
+          <button type="submit" :disabled="currentConversationReplying">重回</button>
+        </div>
+      </form>
+    </div>
+
     <div v-if="pendingDelete" class="delete-confirm-backdrop" role="dialog" aria-modal="true" @click.self="cancelPendingDelete">
       <section class="delete-confirm-sheet">
         <span>删除确认</span>
@@ -209,7 +228,9 @@ const route = useRoute();
 const draft = ref('');
 const truncateDeleteMode = ref(false);
 const showJumpDialog = ref(false);
+const showRegeneratePromptDialog = ref(false);
 const jumpFloorDraft = ref('1');
+const regeneratePromptDraft = ref('');
 const showMemoryPanel = ref(false);
 const selectedReplyOptionIds = ref<Record<string, string>>({});
 const selectedPlotChoiceKey = ref('');
@@ -451,6 +472,10 @@ function floorSenderName(floor: ChapterFloor) {
   return '事件';
 }
 
+function displayInnerVoiceText(content: string) {
+  return content.replace(/^\s*心理描写[：:]\s*/, '');
+}
+
 function parseStyledContentSegments(content: string): ContentSegment[] {
   const segments: ContentSegment[] = [];
   const pattern = /(\*([^*]+)\*|“[^”]+”)/g;
@@ -463,7 +488,7 @@ function parseStyledContentSegments(content: string): ContentSegment[] {
     }
     const isInnerVoice = match[0].startsWith('*');
     segments.push({
-      text: isInnerVoice ? match[2] : match[0],
+      text: isInnerVoice ? displayInnerVoiceText(match[2]) : match[0],
       innerVoice: isInnerVoice,
       dialogue: !isInnerVoice
     });
@@ -681,12 +706,32 @@ function openJumpDialog() {
   if (!chapterFloors.value.length) return;
   jumpFloorDraft.value = String(chapterFloors.value[currentFloorIndex()]?.floorNumber ?? 1);
   truncateDeleteMode.value = false;
+  showRegeneratePromptDialog.value = false;
   showJumpDialog.value = true;
   cancelFloorEdit();
 }
 
 function closeJumpDialog() {
   showJumpDialog.value = false;
+}
+
+function openRegeneratePromptDialog() {
+  if (!canRegenerate.value || currentConversationReplying.value) return;
+  regeneratePromptDraft.value = '';
+  truncateDeleteMode.value = false;
+  showJumpDialog.value = false;
+  cancelFloorEdit();
+  showRegeneratePromptDialog.value = true;
+}
+
+function closeRegeneratePromptDialog() {
+  showRegeneratePromptDialog.value = false;
+}
+
+function regeneratePromptInstruction() {
+  const instruction = regeneratePromptDraft.value.trim();
+  if (!instruction) return undefined;
+  return `本次是用户点击“重回”要求重新生成上一段线下章节。请优先遵守以下额外引导，同时继续遵守角色设定、线下规则和禁止替用户做关键决定的边界：${instruction}`;
 }
 
 function confirmFloorJump() {
@@ -744,6 +789,8 @@ watch(() => props.id, (id) => {
   truncateDeleteMode.value = false;
   showJumpDialog.value = false;
   jumpFloorDraft.value = '1';
+  showRegeneratePromptDialog.value = false;
+  regeneratePromptDraft.value = '';
   selectedReplyOptionIds.value = {};
   cancelFloorEdit();
   pendingDelete.value = null;
@@ -794,11 +841,32 @@ async function send() {
   await jumpToLatestCharacterFloor(previousCharacterFloorId);
 }
 
-async function regenerateLatestReply() {
+async function continueOfflineChapter() {
+  if (currentConversationReplying.value) return;
+  const previousCharacterFloorId = latestCharacterFloor()?.id ?? '';
+  releaseKeyboardScrollGuard();
+  draft.value = '';
+  truncateDeleteMode.value = false;
+  showJumpDialog.value = false;
+  cancelFloorEdit();
+  await store.requestRoleplayReply(props.id, {
+    replyInstruction: '用户点击了线下页面的“继续”按钮，没有输入新的行动或对白。请直接承接最近线下章节、记忆和当前氛围，续写下一章节正文；不要替用户发言或添加用户未表达的新决定。'
+  });
+  await jumpToLatestCharacterFloor(previousCharacterFloorId);
+}
+
+async function regenerateLatestReply(replyInstruction?: string) {
   if (!canRegenerate.value) return;
   const previousCharacterFloorId = latestCharacterFloor()?.id ?? '';
-  await store.regenerateLatestReply(props.id);
+  await store.regenerateLatestReply(props.id, { replyInstruction });
   await jumpToLatestCharacterFloor(previousCharacterFloorId);
+}
+
+async function confirmRegeneratePrompt() {
+  if (currentConversationReplying.value) return;
+  const replyInstruction = regeneratePromptInstruction();
+  closeRegeneratePromptDialog();
+  await regenerateLatestReply(replyInstruction);
 }
 
 function openOfflineSettings() {
@@ -1290,7 +1358,7 @@ async function exitOffline() {
 
 .offline-toolbar {
   display: grid;
-  grid-template-columns: repeat(2, minmax(40px, 1fr)) repeat(5, 34px);
+  grid-template-columns: repeat(3, minmax(40px, 1fr)) repeat(5, 34px);
   gap: 6px;
 }
 
@@ -1380,7 +1448,8 @@ async function exitOffline() {
   cursor: default;
 }
 
-.floor-jump-backdrop {
+.floor-jump-backdrop,
+.regenerate-prompt-backdrop {
   position: fixed;
   inset: 0;
   z-index: 44;
@@ -1392,7 +1461,8 @@ async function exitOffline() {
   backdrop-filter: blur(14px);
 }
 
-.floor-jump-sheet {
+.floor-jump-sheet,
+.regenerate-prompt-sheet {
   display: grid;
   gap: 12px;
   width: min(100%, 360px);
@@ -1403,7 +1473,8 @@ async function exitOffline() {
   box-shadow: 0 22px 52px rgba(79, 58, 72, 0.2);
 }
 
-.floor-jump-sheet > span {
+.floor-jump-sheet > span,
+.regenerate-prompt-sheet > span {
   color: #b28b99;
   font-size: 10px;
   font-weight: 950;
@@ -1412,36 +1483,43 @@ async function exitOffline() {
 }
 
 .floor-jump-sheet h2,
-.floor-jump-sheet p {
+.floor-jump-sheet p,
+.regenerate-prompt-sheet h2,
+.regenerate-prompt-sheet p {
   margin: 0;
 }
 
-.floor-jump-sheet h2 {
+.floor-jump-sheet h2,
+.regenerate-prompt-sheet h2 {
   color: #211d21;
   font-size: 18px;
   font-weight: 950;
   line-height: 1.2;
 }
 
-.floor-jump-sheet p {
+.floor-jump-sheet p,
+.regenerate-prompt-sheet p {
   color: #8f858c;
   font-size: 12px;
   font-weight: 760;
   line-height: 1.45;
 }
 
-.floor-jump-sheet label {
+.floor-jump-sheet label,
+.regenerate-prompt-sheet label {
   display: grid;
   gap: 7px;
 }
 
-.floor-jump-sheet label span {
+.floor-jump-sheet label span,
+.regenerate-prompt-sheet label span {
   color: #695d65;
   font-size: 11px;
   font-weight: 900;
 }
 
-.floor-jump-sheet input {
+.floor-jump-sheet input,
+.regenerate-prompt-sheet textarea {
   min-height: 44px;
   padding: 9px 11px;
   border: 1px solid rgba(182, 154, 166, 0.22);
@@ -1453,13 +1531,23 @@ async function exitOffline() {
   font-weight: 900;
 }
 
-.floor-jump-actions {
+.regenerate-prompt-sheet textarea {
+  min-height: 118px;
+  resize: vertical;
+  font-size: 14px;
+  font-weight: 760;
+  line-height: 1.5;
+}
+
+.floor-jump-actions,
+.regenerate-prompt-actions {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
 }
 
-.floor-jump-actions button {
+.floor-jump-actions button,
+.regenerate-prompt-actions button {
   min-height: 38px;
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.74);
@@ -1468,9 +1556,15 @@ async function exitOffline() {
   font-weight: 900;
 }
 
-.floor-jump-actions button:last-child {
+.floor-jump-actions button:last-child,
+.regenerate-prompt-actions button:last-child {
   background: #262126;
   color: #ffffff;
+}
+
+.regenerate-prompt-actions button:disabled {
+  opacity: 0.42;
+  cursor: default;
 }
 
 .delete-confirm-backdrop {
