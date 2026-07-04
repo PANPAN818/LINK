@@ -558,6 +558,15 @@ function getMessageText(message: Pick<PromptContext['messages'][number], 'conten
   if (message.transfer) {
     const senderText = message.sender === 'user' ? '用户' : '角色';
     const receiverText = message.sender === 'user' ? '角色' : '用户';
+    if (message.transfer.responseToMessageId) {
+      const decisionText = message.transfer.status === 'accepted'
+        ? '接收'
+        : message.transfer.status === 'rejected'
+          ? '拒绝'
+          : '回应';
+      const noteText = message.transfer.note ? `，备注为“${message.transfer.note}”` : '';
+      return `${senderText}发送了一条转账回执：${senderText}已${decisionText}${receiverText}发起的转账（对应转账消息 ${message.transfer.responseToMessageId}），金额 ¥${message.transfer.amount}${noteText}。`;
+    }
     const statusText = {
       pending: `${receiverText}尚未接收或拒绝`,
       accepted: `${receiverText}已接收`,

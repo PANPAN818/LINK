@@ -26,6 +26,7 @@
         :can-quote="canQuoteMessage(message)"
         @apply-image="applyChatImageCandidate"
         @accept-offline-invitation="acceptOfflineInvitation(message)"
+        @accept-transfer="respondToTransfer(message.id, 'accepted')"
         @busy-action="store.showConfigAlert"
         @long-press="openMessageActions"
         @open-card-detail="openCardDetail"
@@ -34,6 +35,7 @@
         @quote-message="quoteMessage"
         @regenerate-image="regenerateChatImage"
         @reject-offline-invitation="rejectOfflineInvitation(message)"
+        @reject-transfer="respondToTransfer(message.id, 'rejected')"
         @toggle-select="toggleMessageSelection(message)"
       />
       <div v-if="currentConversationReplying" class="typing-indicator">
@@ -297,23 +299,20 @@
           </div>
         </div>
 
-        <section class="link-pay-card transfer-preview-card" aria-label="转账预览">
-          <span class="link-pay-hero" aria-hidden="true">
-            <span class="link-pay-envelope">
-              <span class="link-pay-bill"></span>
-              <span class="link-pay-symbol">$</span>
+        <section class="transfer-compose-preview" aria-label="转账预览">
+          <span class="transfer-compose-head">
+            <span class="transfer-compose-brand">
+              <span aria-hidden="true">¥</span>
+              <span>LINK Pay</span>
             </span>
+            <span>待发送</span>
           </span>
-          <span class="link-pay-body">
-            <strong>付款（LINK Pay）</strong>
-            <span>{{ transferPreviewSummary }}</span>
-            <span class="link-pay-more">瞭解更多</span>
+          <span class="transfer-compose-main">
+            <small>转账给</small>
+            <strong>¥{{ transferAmountPreview }}</strong>
+            <span>{{ characterDisplayName }}</span>
           </span>
-          <span class="link-pay-footer">
-            <span class="link-pay-footer-mark" aria-hidden="true">$</span>
-            <span>LINK Pay</span>
-            <span class="link-pay-chevron" aria-hidden="true"></span>
-          </span>
+          <span class="transfer-compose-note">{{ transferPreviewSummary }}</span>
         </section>
 
         <label class="transfer-field">
@@ -416,7 +415,7 @@
           <label class="transfer-field">
             <span>处理状态</span>
             <select v-model="editTransferStatusDraft">
-              <option value="pending">待处理</option>
+              <option v-if="!activeMessageTransferIsReceipt" value="pending">待处理</option>
               <option value="accepted">已接收</option>
               <option value="rejected">已拒绝</option>
             </select>
@@ -432,7 +431,7 @@
 
     <AppModal v-model="showCardDetailModal" title="卡片详情" :show-header="false" variant="ins">
       <section v-if="activeCardDetailMessage?.location" class="card-detail-sheet card-detail-sheet-location">
-        <section class="link-location-card card-detail-preview-card" aria-label="定位详情">
+        <section class="link-location-card card-detail-preview-card card-detail-location-card" aria-label="定位详情">
           <span class="link-location-map" aria-hidden="true">
             <span class="link-map-road link-map-road-1"></span>
             <span class="link-map-road link-map-road-2"></span>
@@ -447,33 +446,55 @@
             <span class="link-map-pin link-map-pin-secondary"></span>
             <span class="link-map-google"><span>G</span><span>o</span><span>o</span><span>g</span><span>l</span><span>e</span></span>
           </span>
-          <span class="link-location-address">{{ detailLocationAddress(activeCardDetailMessage) }}</span>
+          <span class="link-location-body">
+            <span class="link-location-kicker">Location</span>
+            <strong>{{ detailLocationName(activeCardDetailMessage) }}</strong>
+            <span class="link-location-detail-address">{{ detailLocationAddress(activeCardDetailMessage) }}</span>
+          </span>
+          <span class="link-location-footer">
+            <span class="link-location-footer-mark" aria-hidden="true"></span>
+            <span>{{ detailLocationDistanceLabel(activeCardDetailMessage) }}</span>
+            <span class="link-location-chevron" aria-hidden="true"></span>
+          </span>
         </section>
-        <p class="card-detail-footnote">{{ detailLocationDistanceLabel(activeCardDetailMessage) }}</p>
       </section>
       <section v-else-if="activeCardDetailMessage?.transfer" class="card-detail-sheet card-detail-sheet-transfer">
-        <section class="link-pay-card card-detail-preview-card" aria-label="转账详情">
-          <span class="link-pay-hero" aria-hidden="true">
-            <span class="link-pay-envelope">
-              <span class="link-pay-bill"></span>
-              <span class="link-pay-symbol">$</span>
-            </span>
-          </span>
-          <span class="link-pay-body">
-            <strong>{{ detailLinkPayTitle(activeCardDetailMessage) }}</strong>
-            <span>{{ detailLinkPaySummary(activeCardDetailMessage) }}</span>
-            <span class="link-pay-more">瞭解更多</span>
-          </span>
-          <span class="link-pay-footer">
-            <span class="link-pay-footer-mark" aria-hidden="true">$</span>
-            <span>LINK Pay</span>
-            <span class="link-pay-chevron" aria-hidden="true"></span>
+        <section v-if="detailLinkPayIsReceipt(activeCardDetailMessage)" class="transfer-detail-receipt" :class="`transfer-detail-receipt--${activeCardDetailMessage.transfer.status}`" aria-label="转账回执详情">
+          <span class="transfer-detail-receipt-icon" aria-hidden="true">{{ detailReceiptIcon(activeCardDetailMessage) }}</span>
+          <span class="transfer-detail-receipt-copy">
+            <small>转账回执</small>
+            <strong>{{ detailReceiptTitle(activeCardDetailMessage) }}</strong>
+            <span>{{ detailReceiptMeta(activeCardDetailMessage) }}</span>
           </span>
         </section>
-        <div v-if="canRespondDetailTransfer" class="card-detail-actions">
-          <button class="secondary-action" type="button" @click="respondToTransferFromDetail('rejected')">拒绝</button>
-          <button class="primary-action" type="button" @click="respondToTransferFromDetail('accepted')">接收</button>
-        </div>
+        <section v-else class="transfer-detail-card" :class="`transfer-detail-card--${activeCardDetailMessage.transfer.status}`" aria-label="转账详情">
+          <span class="transfer-detail-head">
+            <span class="transfer-detail-brand">
+              <span aria-hidden="true">¥</span>
+              <span>LINK Pay</span>
+            </span>
+            <span>{{ detailTransferStatusLabel(activeCardDetailMessage) }}</span>
+          </span>
+          <span class="transfer-detail-hero">
+            <small>{{ detailTransferDirectionLabel(activeCardDetailMessage) }}</small>
+            <strong>¥{{ detailLinkPayAmount(activeCardDetailMessage) }}</strong>
+            <span>{{ detailLinkPayTitle(activeCardDetailMessage) }}</span>
+          </span>
+          <dl class="transfer-detail-meta">
+            <div>
+              <dt>{{ detailTransferCounterpartyTerm(activeCardDetailMessage) }}</dt>
+              <dd>{{ characterDisplayName }}</dd>
+            </div>
+            <div v-if="detailTransferNoteRaw(activeCardDetailMessage)">
+              <dt>备注</dt>
+              <dd>{{ detailTransferNoteRaw(activeCardDetailMessage) }}</dd>
+            </div>
+          </dl>
+          <div v-if="canRespondDetailTransfer" class="transfer-detail-actions">
+            <button class="transfer-detail-action transfer-detail-action--reject" type="button" @click="respondToTransferFromDetail('rejected')">拒绝</button>
+            <button class="transfer-detail-action transfer-detail-action--accept" type="button" @click="respondToTransferFromDetail('accepted')">接收</button>
+          </div>
+        </section>
       </section>
     </AppModal>
 
@@ -760,9 +781,10 @@ const selectedMessageCount = computed(() => selectedMessageIds.value.length);
 const hasUnreadMindState = computed(() => Boolean(character.value?.mindState?.lines.length
   && character.value.mindState.updatedAt > character.value.mindState.readAt));
 const activeMessageIsSynthetic = computed(() => Boolean(activeMessage.value?.id.includes('__')));
+const activeMessageTransferIsReceipt = computed(() => Boolean(activeMessage.value?.transfer?.responseToMessageId));
 const canRecallActiveMessage = computed(() => Boolean(activeMessage.value && activeMessage.value.sender === 'user' && !activeMessageIsSynthetic.value));
 const canQuoteActiveMessage = computed(() => Boolean(activeMessage.value && canQuoteMessage(activeMessage.value)));
-const canEditActiveMessage = computed(() => Boolean(activeMessage.value && !activeMessageIsSynthetic.value));
+const canEditActiveMessage = computed(() => Boolean(activeMessage.value && !activeMessageIsSynthetic.value && !activeMessageTransferIsReceipt.value));
 const isActiveMessageFavorited = computed(() => Boolean(activeMessage.value && store.isMessageFavorited(activeMessage.value.id)));
 const canRegenerateActiveVoice = computed(() => Boolean(activeMessage.value?.sender === 'char'
   && activeMessage.value.voice?.transcript.trim()
@@ -788,7 +810,7 @@ const transferAmountPreview = computed(() => normalizedTransferAmount.value || '
 const canSendTransfer = computed(() => /^\d+(?:\.\d{1,2})?$/.test(normalizedTransferAmount.value) && Number(normalizedTransferAmount.value) > 0);
 const locationPreviewAddress = computed(() => locationAddressDraft.value.trim() || locationNameDraft.value.trim() || '详细地址可留空');
 const locationPreviewMapLabel = computed(() => createLinkMapLabel(locationPreviewAddress.value, locationNameDraft.value.trim() || '地点名称'));
-const transferPreviewSummary = computed(() => `您将付款 ¥${transferAmountPreview.value}。（收款方：${characterDisplayName.value}）`);
+const transferPreviewSummary = computed(() => transferNoteDraft.value.trim() || '添加备注后会随转账一起显示');
 const chatActionLocked = computed(() => currentConversationReplying.value);
 const stickerRecommendationBase = computed(() => {
   if (!chatSettings.value.stickerSuggestionsEnabled) return [];
@@ -809,7 +831,9 @@ const canSaveEditedMessage = computed(() => {
   const message = activeMessage.value;
   if (!message) return false;
   if (message.location) return Boolean(editLocationNameDraft.value.trim() && editLocationDistanceDraft.value.trim());
-  if (message.transfer) return /^\d+(?:\.\d{1,2})?$/.test(normalizedEditTransferAmount.value) && Number(normalizedEditTransferAmount.value) > 0;
+  if (message.transfer) return /^\d+(?:\.\d{1,2})?$/.test(normalizedEditTransferAmount.value)
+    && Number(normalizedEditTransferAmount.value) > 0
+    && (!activeMessageTransferIsReceipt.value || editTransferStatusDraft.value !== 'pending');
   return Boolean(editDraft.value.trim());
 });
 const { captureKeyboardScrollAnchor, releaseKeyboardScrollGuard, startKeyboardScrollGuard, stopKeyboardScrollGuard } = useKeyboardScrollGuard(messageListRef);
@@ -1129,13 +1153,16 @@ async function sendTransferMessage() {
 }
 
 async function respondToTransfer(messageId: string, status: Exclude<ChatTransferStatus, 'pending'>) {
-  await store.updateTransferStatus(messageId, status, 'user');
+  return store.updateTransferStatus(messageId, status, 'user');
 }
 
 async function respondToTransferFromDetail(status: Exclude<ChatTransferStatus, 'pending'>) {
   const message = activeCardDetailMessage.value;
   if (!message?.transfer) return;
-  await respondToTransfer(message.id, status);
+  const updatedMessage = await respondToTransfer(message.id, status);
+  if (!updatedMessage) return;
+  showCardDetailModal.value = false;
+  await scrollMessagesToBottom();
 }
 
 async function rejectOfflineInvitation(message: ChatMessage) {
@@ -1496,7 +1523,7 @@ function messageActionText(message: ChatMessage) {
   if (message.image) return `[图片] ${message.image.description}`;
   if (message.voice) return `[语音] ${message.voice.transcript}`;
   if (message.location) return `[定位] ${[message.location.name, message.location.address, message.location.distance].filter(Boolean).join(' · ')}`;
-  if (message.transfer) return `[转账] ¥${message.transfer.amount} · ${message.transfer.status === 'pending' ? '待处理' : message.transfer.status === 'accepted' ? '已接收' : '已拒绝'}`;
+  if (message.transfer) return `${message.transfer.responseToMessageId ? '[转账回执]' : '[转账]'} ¥${message.transfer.amount} · ${message.transfer.status === 'pending' ? '待处理' : message.transfer.status === 'accepted' ? '已接收' : '已拒绝'}`;
   return message.content;
 }
 
@@ -1513,9 +1540,10 @@ function quoteMessage(message: ChatMessage) {
 }
 
 function detailLocationDistanceLabel(message: ChatMessage) {
+  const distance = message.location?.distance.trim() || '未知';
   return message.sender === 'user'
-    ? `距离对方 ${message.location?.distance ?? ''}`
-    : `距离你 ${message.location?.distance ?? ''}`;
+    ? `距离对方 ${distance}`
+    : `距离你 ${distance}`;
 }
 
 function createLinkMapLabel(address: string, fallback: string) {
@@ -1524,29 +1552,75 @@ function createLinkMapLabel(address: string, fallback: string) {
 }
 
 function detailLocationAddress(message: ChatMessage) {
-  return message.location?.address?.trim() || message.location?.name || '位置';
+  return message.location?.address?.trim() || '未填写详细地址';
+}
+
+function detailLocationName(message: ChatMessage) {
+  return message.location?.name.trim() || '地点名称';
 }
 
 function detailLocationMapLabel(message: ChatMessage) {
-  return createLinkMapLabel(detailLocationAddress(message), message.location?.name || '目前位置');
+  return createLinkMapLabel(message.location?.address?.trim() || detailLocationName(message), detailLocationName(message));
 }
 
 function detailTransferStatusLabel(message: ChatMessage) {
-  if (message.transfer?.status === 'accepted') return message.sender === 'user' ? '对方已接收' : '你已接收';
-  if (message.transfer?.status === 'rejected') return message.sender === 'user' ? '对方已拒绝' : '你已拒绝';
-  return message.sender === 'user' ? '等待对方处理' : '等待你处理';
+  if (message.transfer?.status === 'accepted') return '已接收';
+  if (message.transfer?.status === 'rejected') return '已拒绝';
+  return '待确认';
+}
+
+function detailLinkPayIsReceipt(message: ChatMessage) {
+  return Boolean(message.transfer?.responseToMessageId);
+}
+
+function originalTransferMessageForReceipt(message: ChatMessage) {
+  const sourceMessageId = message.transfer?.responseToMessageId;
+  if (!sourceMessageId) return null;
+  return store.messages.find((item) => item.id === sourceMessageId && item.transfer && !item.transfer.responseToMessageId) ?? null;
+}
+
+function transferOriginalSender(message: ChatMessage) {
+  if (!detailLinkPayIsReceipt(message)) return message.sender;
+  return originalTransferMessageForReceipt(message)?.sender ?? (message.sender === 'user' ? 'char' : 'user');
+}
+
+function detailLinkPayAmount(message: ChatMessage) {
+  return message.transfer?.amount || '0.00';
 }
 
 function detailLinkPayTitle(message: ChatMessage) {
-  return message.sender === 'user' ? '付款（LINK Pay）' : '接收（LINK Pay）';
+  if (message.transfer?.status === 'accepted') return message.sender === 'user' ? '对方已收款' : '你已收款';
+  if (message.transfer?.status === 'rejected') return message.sender === 'user' ? '对方已拒收' : '你已拒收';
+  return message.sender === 'user' ? '等待对方确认' : '请确认是否接收';
 }
 
-function detailLinkPaySummary(message: ChatMessage) {
-  const amount = message.transfer?.amount ?? '0.00';
-  const direction = message.sender === 'user'
-    ? `您已付款 ¥${amount}。（收款方：${characterDisplayName.value}）`
-    : `您已收到 ¥${amount}。（来自：${characterDisplayName.value}）`;
-  return `${direction} ${detailTransferStatusLabel(message)}`;
+function detailTransferDirectionLabel(message: ChatMessage) {
+  return message.sender === 'user' ? '发出转账' : '收到转账';
+}
+
+function detailTransferCounterpartyTerm(message: ChatMessage) {
+  return message.sender === 'user' ? '收款方' : '付款方';
+}
+
+function detailTransferNoteRaw(message: ChatMessage) {
+  return message.transfer?.note?.trim() || '';
+}
+
+function detailReceiptIcon(message: ChatMessage) {
+  return message.transfer?.status === 'accepted' ? '✓' : '×';
+}
+
+function detailReceiptTitle(message: ChatMessage) {
+  const originalSender = transferOriginalSender(message);
+  if (message.transfer?.status === 'accepted') return `${originalSender === 'char' ? '你已收款' : '对方已收款'} ¥${detailLinkPayAmount(message)}`;
+  if (message.transfer?.status === 'rejected') return `${originalSender === 'char' ? '你已拒收' : '对方已拒收'} ¥${detailLinkPayAmount(message)}`;
+  return `${detailTransferStatusLabel(message)} ¥${detailLinkPayAmount(message)}`;
+}
+
+function detailReceiptMeta(message: ChatMessage) {
+  return transferOriginalSender(message) === 'char'
+    ? `${characterDisplayName.value} 发来的转账`
+    : '你发出的转账';
 }
 
 function openCardDetail(message: ChatMessage) {
@@ -1695,7 +1769,9 @@ function openEditActiveMessage() {
   editLocationDistanceDraft.value = message.location?.distance ?? '';
   editTransferAmountDraft.value = message.transfer?.amount ?? '';
   editTransferNoteDraft.value = message.transfer?.note ?? '';
-  editTransferStatusDraft.value = message.transfer?.status ?? 'pending';
+  editTransferStatusDraft.value = message.transfer?.responseToMessageId && message.transfer.status === 'pending'
+    ? 'accepted'
+    : message.transfer?.status ?? 'pending';
   showMessageMenu.value = false;
   showEditModal.value = true;
 }
@@ -2386,160 +2462,211 @@ onBeforeUnmount(() => {
   word-break: break-word;
 }
 
-.link-pay-card {
-  display: grid;
-  grid-template-rows: 82px auto 28px;
-  min-width: 0;
-  overflow: hidden;
+.card-detail-location-card.card-detail-preview-card {
+  grid-template-rows: 128px auto 36px;
+  width: min(336px, 100%);
   border: 1px solid rgba(17, 17, 17, 0.08);
-  border-radius: 10px;
   background: #ffffff;
-  color: #111111;
+  box-shadow: 0 12px 28px rgba(26, 32, 38, 0.1);
 }
 
-.link-pay-hero {
-  display: grid;
-  place-items: center;
-  min-height: 82px;
-  background: #04c755;
+.card-detail-location-card .link-location-map {
+  min-height: 128px;
+  background:
+    linear-gradient(112deg, transparent 0 54%, rgba(216, 219, 222, 0.7) 55% 100%),
+    linear-gradient(22deg, rgba(205, 231, 215, 0.76) 0 26%, transparent 27% 100%),
+    linear-gradient(164deg, rgba(255, 255, 255, 0.94) 0 7%, transparent 8% 100%),
+    #f0f1f3;
 }
 
-.link-pay-envelope {
-  position: relative;
-  width: 62px;
-  height: 40px;
-  border: 2px solid #111111;
-  background: #ffffff;
-}
-
-.link-pay-envelope::before,
-.link-pay-envelope::after {
+.card-detail-location-card .link-location-map::after {
   position: absolute;
-  bottom: -2px;
-  width: 42px;
-  height: 2px;
-  background: #111111;
+  inset: 0;
+  z-index: 1;
+  background: linear-gradient(180deg, transparent 52%, rgba(255, 255, 255, 0.12));
   content: '';
-  transform-origin: bottom center;
+  pointer-events: none;
 }
 
-.link-pay-envelope::before {
-  left: -4px;
-  transform: rotate(31deg);
+.card-detail-location-card .link-map-road-1 {
+  left: -22px;
+  top: 28px;
+  width: 214px;
+  height: 11px;
 }
 
-.link-pay-envelope::after {
-  right: -4px;
-  transform: rotate(-31deg);
+.card-detail-location-card .link-map-road-2 {
+  right: -18px;
+  top: 35px;
+  width: 186px;
+  height: 11px;
 }
 
-.link-pay-bill {
-  position: absolute;
-  left: 9px;
-  top: -19px;
-  width: 44px;
-  height: 28px;
-  border: 2px solid #111111;
-  background: #ffffff;
-  clip-path: polygon(0 18%, 50% 0, 100% 18%, 100% 100%, 0 100%);
+.card-detail-location-card .link-map-road-3 {
+  left: 66px;
+  top: 72px;
+  width: 190px;
+  height: 11px;
 }
 
-.link-pay-bill::before,
-.link-pay-bill::after {
-  position: absolute;
-  top: 7px;
-  width: 5px;
-  height: 5px;
-  border-top: 2px solid #111111;
-  content: '';
+.card-detail-location-card .link-map-road-4 {
+  left: 175px;
+  top: 53px;
+  width: 162px;
+  height: 11px;
 }
 
-.link-pay-bill::before {
-  left: 7px;
-  border-left: 2px solid #111111;
+.card-detail-location-card .link-map-block-1 {
+  left: 18px;
+  top: 6px;
+  width: 74px;
+  height: 42px;
 }
 
-.link-pay-bill::after {
-  right: 7px;
-  border-right: 2px solid #111111;
+.card-detail-location-card .link-map-block-2 {
+  right: 22px;
+  top: 5px;
+  width: 92px;
+  height: 46px;
 }
 
-.link-pay-symbol {
-  position: absolute;
-  left: 50%;
-  top: -7px;
+.card-detail-location-card .link-map-block-3 {
+  right: 8px;
+  bottom: 12px;
+  width: 92px;
+  height: 44px;
+}
+
+.card-detail-location-card .link-map-label {
   z-index: 2;
-  color: #04c755;
-  font-size: 15px;
-  font-weight: 950;
-  line-height: 1;
+  max-width: 168px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.card-detail-location-card .link-map-label-top {
+  right: 22px;
+  top: 18px;
+}
+
+.card-detail-location-card .link-map-label-mid {
+  left: 50%;
+  top: 87px;
+  max-width: 198px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.76);
+  line-height: 1.15;
+  text-align: center;
   transform: translateX(-50%);
 }
 
-.link-pay-body {
+.card-detail-location-card .link-map-pin-main {
+  left: 50%;
+  top: 66px;
+  width: 28px;
+  height: 28px;
+  transform: translate(-50%, -50%) rotate(-45deg);
+  box-shadow: 0 4px 12px rgba(239, 76, 67, 0.32);
+}
+
+.card-detail-location-card .link-map-pin-main::after {
+  left: 8px;
+  top: 8px;
+  width: 12px;
+  height: 12px;
+}
+
+.card-detail-location-card .link-map-pin-secondary {
+  right: 48px;
+  bottom: 24px;
+}
+
+.card-detail-location-card .link-map-google {
+  left: 10px;
+  bottom: 9px;
+  z-index: 4;
+  font-size: 15px;
+}
+
+.link-location-body {
   display: grid;
-  gap: 4px;
+  gap: 5px;
   min-width: 0;
-  padding: 9px 10px 10px;
+  padding: 12px 12px 13px;
   border-bottom: 1px solid #eeeeee;
   background: #ffffff;
 }
 
-.link-pay-body strong {
-  color: #101010;
-  font-size: 11px;
+.link-location-kicker {
+  color: #04a64b;
+  font-size: 10px;
   font-weight: 900;
-  line-height: 1.2;
+  letter-spacing: 0.08em;
+  line-height: 1.1;
+  text-transform: uppercase;
 }
 
-.link-pay-body > span:not(.link-pay-more) {
-  color: #777777;
-  font-size: 10px;
-  font-weight: 520;
-  line-height: 1.35;
-  white-space: normal;
+.link-location-body strong {
+  min-width: 0;
+  color: #101010;
+  font-size: 16px;
+  font-weight: 930;
+  line-height: 1.22;
+  overflow-wrap: anywhere;
+}
+
+.link-location-detail-address {
+  min-width: 0;
+  color: #6b7078;
+  font-size: 12px;
+  font-weight: 560;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
   word-break: break-word;
 }
 
-.link-pay-more {
+.link-location-footer {
   display: grid;
-  place-items: center;
-  min-height: 24px;
-  margin-top: 5px;
-  border-radius: 6px;
-  background: #f1f1f1;
-  color: #111111;
-  font-size: 11px;
-  font-weight: 900;
-}
-
-.link-pay-footer {
-  display: grid;
-  grid-template-columns: 17px minmax(0, 1fr) 7px;
+  grid-template-columns: 18px minmax(0, 1fr) 7px;
   align-items: center;
-  gap: 5px;
+  gap: 7px;
   min-width: 0;
-  min-height: 28px;
-  padding: 0 8px;
+  min-height: 36px;
+  padding: 0 10px;
   background: #ffffff;
-  color: #777777;
-  font-size: 11px;
-  font-weight: 760;
+  color: #5f6670;
+  font-size: 12px;
+  font-weight: 820;
 }
 
-.link-pay-footer-mark {
-  display: grid;
-  place-items: center;
+.link-location-footer > span:nth-child(2) {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.link-location-footer-mark {
+  position: relative;
+  display: block;
   width: 16px;
   height: 16px;
-  border-radius: 50%;
+  border-radius: 50% 50% 50% 0;
   background: #04c755;
-  color: #ffffff;
-  font-size: 10px;
-  font-weight: 900;
+  transform: rotate(-45deg);
 }
 
-.link-pay-chevron {
+.link-location-footer-mark::after {
+  position: absolute;
+  left: 5px;
+  top: 5px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #ffffff;
+  content: '';
+}
+
+.link-location-chevron {
   width: 6px;
   height: 6px;
   border-top: 2px solid #c6c6c6;
@@ -2547,10 +2674,276 @@ onBeforeUnmount(() => {
   transform: rotate(45deg);
 }
 
+.transfer-compose-preview,
+.transfer-detail-card,
+.transfer-detail-receipt {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid rgba(12, 20, 28, 0.08);
+  border-radius: 14px;
+  background: #ffffff;
+  color: #111111;
+  box-shadow: 0 14px 34px rgba(26, 32, 38, 0.1);
+}
+
+.transfer-compose-preview {
+  display: grid;
+  justify-self: center;
+  width: min(286px, 100%);
+}
+
+.transfer-compose-head,
+.transfer-detail-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+  padding: 14px 14px 10px;
+  background: #ffffff;
+}
+
+.transfer-compose-brand,
+.transfer-detail-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  color: #252a31;
+  font-size: 12px;
+  font-weight: 920;
+  line-height: 1;
+}
+
+.transfer-compose-brand > span:first-child,
+.transfer-detail-brand > span:first-child {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 7px;
+  background: #04c755;
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 950;
+}
+
+.transfer-compose-head > span:last-child,
+.transfer-detail-head > span:last-child {
+  flex: 0 0 auto;
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: #effaf3;
+  color: #05883f;
+  font-size: 12px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.transfer-detail-card--rejected .transfer-detail-head > span:last-child {
+  background: #f2f3f5;
+  color: #626b75;
+}
+
+.transfer-compose-main,
+.transfer-detail-hero {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  padding: 0 14px 16px;
+  background:
+    linear-gradient(135deg, rgba(4, 199, 85, 0.16), rgba(4, 199, 85, 0.04) 72%),
+    #f8fffa;
+}
+
+.transfer-detail-card--rejected .transfer-detail-hero {
+  background:
+    linear-gradient(135deg, rgba(129, 139, 151, 0.14), rgba(129, 139, 151, 0.04) 72%),
+    #fafbfc;
+}
+
+.transfer-compose-main small,
+.transfer-detail-hero small {
+  color: #168447;
+  font-size: 11px;
+  font-weight: 920;
+  line-height: 1;
+}
+
+.transfer-compose-main strong,
+.transfer-detail-hero strong {
+  min-width: 0;
+  color: #101713;
+  font-size: 40px;
+  font-weight: 950;
+  letter-spacing: 0;
+  line-height: 1;
+  overflow-wrap: anywhere;
+}
+
+.transfer-compose-main span,
+.transfer-detail-hero span {
+  min-width: 0;
+  color: #2f373f;
+  font-size: 17px;
+  font-weight: 930;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+.transfer-compose-note {
+  min-width: 0;
+  padding: 12px 14px;
+  border-top: 1px solid rgba(17, 17, 17, 0.06);
+  color: #737983;
+  font-size: 12px;
+  font-weight: 720;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.transfer-detail-card,
+.transfer-detail-receipt {
+  justify-self: center;
+  width: min(316px, 100%);
+}
+
+.transfer-detail-meta {
+  display: grid;
+  gap: 0;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  background: #ffffff;
+}
+
+.transfer-detail-meta > div {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr);
+  gap: 10px;
+  min-width: 0;
+  padding: 12px 14px;
+  border-top: 1px solid rgba(17, 17, 17, 0.06);
+}
+
+.transfer-detail-meta dt,
+.transfer-detail-meta dd {
+  min-width: 0;
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.transfer-detail-meta dt {
+  color: #8a9098;
+  font-weight: 820;
+}
+
+.transfer-detail-meta dd {
+  color: #252a31;
+  font-weight: 760;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.transfer-detail-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  min-width: 0;
+  padding: 12px 14px 14px;
+  border-top: 1px solid rgba(17, 17, 17, 0.06);
+}
+
+.transfer-detail-action {
+  display: grid;
+  place-items: center;
+  min-width: 0;
+  min-height: 42px;
+  border: 0;
+  border-radius: 12px;
+  font-size: 14px;
+  font-weight: 930;
+  line-height: 1;
+}
+
+.transfer-detail-action--reject {
+  background: #f0f1f3;
+  color: #24272d;
+}
+
+.transfer-detail-action--accept {
+  background: #04c755;
+  color: #ffffff;
+  box-shadow: 0 9px 18px rgba(4, 199, 85, 0.22);
+}
+
+.transfer-detail-receipt {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  padding: 14px;
+  box-shadow: 0 10px 26px rgba(26, 32, 38, 0.08);
+}
+
+.transfer-detail-receipt-icon {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  background: #effaf3;
+  color: #04a64b;
+  font-size: 20px;
+  font-weight: 950;
+  line-height: 1;
+}
+
+.transfer-detail-receipt--rejected .transfer-detail-receipt-icon {
+  background: #f2f3f5;
+  color: #7b828c;
+}
+
+.transfer-detail-receipt-copy {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.transfer-detail-receipt-copy small {
+  color: #7a818a;
+  font-size: 11px;
+  font-weight: 820;
+  line-height: 1;
+}
+
+.transfer-detail-receipt-copy strong {
+  min-width: 0;
+  color: #161a1f;
+  font-size: 18px;
+  font-weight: 930;
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+}
+
+.transfer-detail-receipt-copy span {
+  color: #737983;
+  font-size: 12px;
+  font-weight: 720;
+  line-height: 1.25;
+}
+
 .transfer-preview-card,
 .card-detail-preview-card {
   justify-self: center;
   width: min(176px, 100%);
+}
+
+.transfer-preview-card,
+.card-detail-sheet-transfer .card-detail-preview-card {
+  width: min(286px, 100%);
 }
 
 .transfer-field,

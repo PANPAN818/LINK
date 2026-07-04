@@ -117,7 +117,7 @@ function getTimelineMessagePreview(message: ChatMessage) {
   if (message.image) return `[图片] ${message.image.description}`.trim();
   if (message.voice) return `[语音] ${message.voice.transcript}`.trim();
   if (message.location) return `[位置] ${message.location.name || message.location.address || message.location.distance || ''}`.trim();
-  if (message.transfer) return `[转账] ${message.transfer.amount || ''} ${message.transfer.note || ''}`.trim();
+  if (message.transfer) return `${message.transfer.responseToMessageId ? '[转账回执]' : '[转账]'} ${message.transfer.amount || ''} ${message.transfer.note || ''}`.trim();
   if (message.offlineInvitation) return `[离线邀请] ${message.offlineInvitation.prompt || message.offlineInvitation.status || ''}`.trim();
   return message.content.trim();
 }
@@ -1725,6 +1725,21 @@ export const useAppStore = defineStore('app', () => {
     return `[转账] ¥${transfer.amount}${transfer.note ? ` · ${transfer.note}` : ''} · ${statusText}`;
   }
 
+  function formatTransferReceiptContent(transfer: Pick<ChatTransferAttachment, 'amount' | 'note' | 'status'>) {
+    const statusText = transfer.status === 'accepted'
+      ? '已接收'
+      : transfer.status === 'rejected'
+        ? '已拒绝'
+        : '待处理';
+    return `[转账回执] ${statusText} ¥${transfer.amount}${transfer.note ? ` · ${transfer.note}` : ''}`;
+  }
+
+  function formatTransferMessageContent(transfer: ChatTransferAttachment) {
+    return transfer.responseToMessageId
+      ? formatTransferReceiptContent(transfer)
+      : formatTransferContent(transfer);
+  }
+
   function formatOfflineInvitationContent(invitation: Pick<ChatOfflineInvitationAttachment, 'status'>) {
     const statusText = {
       pending: '等待选择',
@@ -1803,7 +1818,7 @@ export const useAppStore = defineStore('app', () => {
     if (message.image) return `[图片] ${message.image.description}`.trim();
     if (message.voice) return `[语音] ${message.voice.transcript}`.trim();
     if (message.location) return formatLocationContent(message.location).trim();
-    if (message.transfer) return formatTransferContent(message.transfer).trim();
+    if (message.transfer) return formatTransferMessageContent(message.transfer).trim();
     if (message.offlineInvitation) return formatOfflineInvitationContent(message.offlineInvitation).trim();
     return message.content.trim();
   }
@@ -2086,22 +2101,81 @@ export const useAppStore = defineStore('app', () => {
   async function updateMessageTransfer(messageId: string, transfer: Pick<ChatTransferAttachment, 'amount' | 'note' | 'status'>) {
     const amount = String(transfer.amount ?? '').replace(/[￥¥,\s]/g, '').trim();
     if (!/^\d+(?:\.\d{1,2})?$/.test(amount) || Number(amount) <= 0) return null;
-    const status: ChatTransferStatus = ['accepted', 'rejected'].includes(transfer.status) ? transfer.status : 'pending';
     const messageIndex = messages.value.findIndex((message) => message.id === messageId);
     if (messageIndex < 0) return null;
     const existingMessage = messages.value[messageIndex];
     if (!existingMessage.transfer) return null;
-    const floorImpacts = memoryFloorImpactsForMessages([existingMessage]);
+    const isReceipt = Boolean(existingMessage.transfer.responseToMessageId);
+    const requestedStatus: ChatTransferStatus = ['accepted', 'rejected'].includes(transfer.status) ? transfer.status : 'pending';
+    const status: ChatTransferStatus = isReceipt && requestedStatus === 'pending'
+      ? existingMessage.transfer.status === 'rejected' ? 'rejected' : 'accepted'
+      : requestedStatus;
+    const relatedReceiptMessages = messages.value.filter((message) => message.transfer?.responseToMessageId === existingMessage.id);
+    const floorImpacts = memoryFloorImpactsForMessages([existingMessage, ...relatedReceiptMessages]);
     const editedAt = Date.now();
+    const note = transfer.note?.trim() || undefined;
+
+    if (isReceipt) {
+      const respondedAt = existingMessage.transfer.respondedAt ?? editedAt;
+      const nextTransfer: ChatTransferAttachment = {
+        ...existingMessage.transfer,
+        amount,
+        currency: existingMessage.transfer.currency ?? 'CNY',
+        note,
+        status,
+        respondedAt,
+        responseToMessageId: existingMessage.transfer.responseToMessageId
+      };
+      const nextMessage: ChatMessage = {
+        ...existingMessage,
+        content: formatTransferReceiptContent(nextTransfer),
+        transfer: nextTransfer,
+        editedAt
+      };
+      messages.value[messageIndex] = nextMessage;
+
+      const originalMessageIndex = messages.value.findIndex((message) => message.id === nextTransfer.responseToMessageId);
+      const originalMessage = originalMessageIndex >= 0 ? messages.value[originalMessageIndex] : null;
+      const nextMessages: ChatMessage[] = [nextMessage];
+      if (originalMessage?.transfer) {
+        const { responseToMessageId, ...originalTransferBase } = originalMessage.transfer;
+        void responseToMessageId;
+        const originalTransfer: ChatTransferAttachment = {
+          ...originalTransferBase,
+          amount,
+          currency: originalTransferBase.currency ?? 'CNY',
+          note,
+          status,
+          respondedAt
+        };
+        const nextOriginalMessage: ChatMessage = {
+          ...originalMessage,
+          content: formatTransferContent(originalTransfer),
+          transfer: originalTransfer,
+          editedAt
+        };
+        messages.value[originalMessageIndex] = nextOriginalMessage;
+        nextMessages.push(nextOriginalMessage);
+      }
+
+      await Promise.all(nextMessages.map((message) => putEntity('messages', message)));
+      await pruneMemoriesForMessageIds(nextMessages.map((message) => message.id), memoryFloorImpactsForMessages([existingMessage, ...(originalMessage?.transfer ? [originalMessage] : [])]));
+      await touchConversationAfterMessageChange(nextMessage.conversationId, editedAt);
+      return nextMessage;
+    }
+
+    const receiptRespondedAt = relatedReceiptMessages.find((message) => message.transfer?.respondedAt)?.transfer?.respondedAt;
+    const respondedAt = status === 'pending' ? undefined : existingMessage.transfer.respondedAt ?? receiptRespondedAt ?? editedAt;
     const nextTransfer: ChatTransferAttachment = {
+      ...existingMessage.transfer,
       amount,
-      currency: 'CNY',
-      note: transfer.note?.trim() || undefined,
+      currency: existingMessage.transfer.currency ?? 'CNY',
+      note,
       status,
-      ...(status === 'pending'
-        ? {}
-        : { respondedAt: existingMessage.transfer.respondedAt ?? editedAt })
+      ...(respondedAt ? { respondedAt } : {})
     };
+    if (status === 'pending') delete nextTransfer.respondedAt;
+    delete nextTransfer.responseToMessageId;
     const nextMessage: ChatMessage = {
       ...existingMessage,
       content: formatTransferContent(nextTransfer),
@@ -2110,7 +2184,58 @@ export const useAppStore = defineStore('app', () => {
     };
     messages.value[messageIndex] = nextMessage;
     await putEntity('messages', nextMessage);
-    await pruneMemoriesForMessageIds([nextMessage.id], floorImpacts);
+    if (status === 'pending') {
+      if (relatedReceiptMessages.length) await deleteMessages(relatedReceiptMessages.map((message) => message.id));
+      await pruneMemoriesForMessageIds([nextMessage.id], floorImpacts);
+      await touchConversationAfterMessageChange(nextMessage.conversationId, editedAt);
+      return nextMessage;
+    }
+
+    const receiptMessages = relatedReceiptMessages.length
+      ? relatedReceiptMessages.map((receiptMessage) => {
+          const receiptTransfer: ChatTransferAttachment = {
+            ...receiptMessage.transfer,
+            amount: nextTransfer.amount,
+            currency: nextTransfer.currency,
+            note: nextTransfer.note,
+            status,
+            respondedAt,
+            responseToMessageId: nextMessage.id
+          };
+          const nextReceiptMessage: ChatMessage = {
+            ...receiptMessage,
+            content: formatTransferReceiptContent(receiptTransfer),
+            transfer: receiptTransfer,
+            editedAt
+          };
+          const receiptIndex = messages.value.findIndex((message) => message.id === receiptMessage.id);
+          if (receiptIndex >= 0) messages.value[receiptIndex] = nextReceiptMessage;
+          return nextReceiptMessage;
+        })
+      : (() => {
+          const receiptTransfer: ChatTransferAttachment = {
+            amount: nextTransfer.amount,
+            currency: nextTransfer.currency,
+            note: nextTransfer.note,
+            status,
+            respondedAt,
+            responseToMessageId: nextMessage.id
+          };
+          return [{
+            id: createId('msg'),
+            conversationId: nextMessage.conversationId,
+            sender: nextMessage.sender === 'char' ? 'user' : 'char',
+            mode: nextMessage.mode,
+            content: formatTransferReceiptContent(receiptTransfer),
+            transfer: receiptTransfer,
+            createdAt: editedAt + 1,
+            status: 'sent' as const
+          } satisfies ChatMessage];
+        })();
+
+    if (!relatedReceiptMessages.length) messages.value.push(...receiptMessages);
+    await Promise.all(receiptMessages.map((message) => putEntity('messages', message)));
+    await pruneMemoriesForMessageIds([nextMessage.id, ...relatedReceiptMessages.map((message) => message.id)], floorImpacts);
     await touchConversationAfterMessageChange(nextMessage.conversationId, editedAt);
     return nextMessage;
   }
@@ -3874,16 +3999,60 @@ export const useAppStore = defineStore('app', () => {
     if (!message?.transfer || message.transfer.status !== 'pending') return null;
     if (actor === 'user' && message.sender !== 'char') return null;
     if (actor === 'char' && message.sender !== 'user') return null;
-    const nextTransfer = { ...message.transfer, status, respondedAt: Date.now() };
+    const respondedAt = Date.now();
+    const nextTransfer = { ...message.transfer, status, respondedAt };
     const nextMessage: ChatMessage = {
       ...message,
       content: formatTransferContent(nextTransfer),
       transfer: nextTransfer,
-      editedAt: Date.now()
+      editedAt: respondedAt
     };
     const messageIndex = messages.value.findIndex((item) => item.id === messageId);
     if (messageIndex >= 0) messages.value[messageIndex] = nextMessage;
     await putEntity('messages', nextMessage);
+    const receiptTransfer: ChatTransferAttachment = {
+      amount: nextTransfer.amount,
+      currency: nextTransfer.currency,
+      note: nextTransfer.note,
+      status,
+      respondedAt,
+      responseToMessageId: message.id
+    };
+    const existingReceiptIndex = messages.value.findIndex((item) => item.transfer?.responseToMessageId === message.id);
+    const existingReceiptMessage = existingReceiptIndex >= 0 ? messages.value[existingReceiptIndex] : null;
+    const receiptMessage: ChatMessage = existingReceiptMessage
+      ? {
+          ...existingReceiptMessage,
+          sender: actor,
+          content: formatTransferReceiptContent(receiptTransfer),
+          transfer: receiptTransfer,
+          editedAt: respondedAt
+        }
+      : {
+          id: createId('msg'),
+          conversationId: message.conversationId,
+          sender: actor,
+          mode: message.mode,
+          content: formatTransferReceiptContent(receiptTransfer),
+          transfer: receiptTransfer,
+          createdAt: respondedAt + 1,
+          status: 'sent'
+        };
+    if (existingReceiptIndex >= 0) messages.value[existingReceiptIndex] = receiptMessage;
+    else messages.value.push(receiptMessage);
+    await putEntity('messages', receiptMessage);
+    const conversation = conversationById(message.conversationId);
+    if (conversation) {
+      if (actor === 'char') notifyCharacterMessages(conversation, [receiptMessage]);
+      const nextConversation = {
+        ...conversation,
+        updatedAt: receiptMessage.createdAt,
+        unreadCount: actor === 'char' ? unreadCountAfterIncomingMessage(conversation, 1) : 0
+      };
+      const conversationIndex = conversations.value.findIndex((item) => item.id === message.conversationId);
+      if (conversationIndex >= 0) conversations.value[conversationIndex] = nextConversation;
+      await putEntity('conversations', nextConversation);
+    }
     void maybeAutoSummarizeConversation(message.conversationId);
     return nextMessage;
   }

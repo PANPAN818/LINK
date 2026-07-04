@@ -113,7 +113,8 @@ function cardMeta(item: FavoriteMessageRecord) {
 
 function transferStatusLabel(item: FavoriteMessageRecord) {
   const status = item.message.transfer?.status ?? 'pending';
-  return ({ pending: '等待处理', accepted: '已接收', rejected: '已拒绝' } as const)[status];
+  const label = ({ pending: '等待处理', accepted: '已接收', rejected: '已拒绝' } as const)[status];
+  return item.message.transfer?.responseToMessageId ? `转账回执 · ${label}` : label;
 }
 
 function favoriteAuthorAvatar(item: FavoriteMessageRecord) {

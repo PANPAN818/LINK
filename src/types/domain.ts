@@ -408,6 +408,7 @@ export interface ChatTransferAttachment {
   note?: string;
   status: ChatTransferStatus;
   respondedAt?: number;
+  responseToMessageId?: string;
 }
 
 export type ChatOfflineInvitationStatus = 'pending' | 'accepted' | 'rejected';
