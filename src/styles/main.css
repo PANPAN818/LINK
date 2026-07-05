@@ -134,6 +134,16 @@ html.is-ios .modal-panel .modal-body .edit-message-sheet textarea {
   line-height: 1.45 !important;
 }
 
+html.is-ios.keyboard-open #app .chat-room .composer,
+html.is-ios.keyboard-open #app .chat-room .selection-toolbar {
+  transform: none;
+}
+
+html.is-ios.keyboard-open #app .chat-room .message-list {
+  padding-bottom: 8px;
+  scroll-padding-bottom: 8px;
+}
+
 a {
   color: inherit;
   text-decoration: none;
