@@ -33,7 +33,7 @@ export function syncAppViewportHeight() {
     const activeKeyboardInput = isKeyboardInput(document.activeElement);
     const viewportDelta = Math.max(0, stableViewportHeight - viewportHeight);
     const keyboardOpen = activeKeyboardInput && Math.max(viewportOverlap, viewportDelta) > 80;
-    const overlayKeyboardOpen = keyboardOpen && viewportOverlap > 0;
+    const overlayKeyboardOpen = keyboardOpen && !isIOS && viewportOverlap > 0;
 
     if (!keyboardOpen) stableViewportHeight = viewportHeight;
 
