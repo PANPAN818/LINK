@@ -52,11 +52,9 @@
                 <span>{{ formatFontMeta(entry) }}</span>
                 <div>
                   <button class="card-action" type="button" :disabled="entry.id === fontSettings.activeFontId || applyingFontId === entry.id" @click="applyFont(entry.id)">
-                    <Check :size="15" />
                     <span>{{ applyingFontId === entry.id ? '检测中' : entry.id === fontSettings.activeFontId ? '已应用' : '应用' }}</span>
                   </button>
                   <button class="card-action danger" type="button" @click="removeFont(entry.id)">
-                    <Trash2 :size="15" />
                     <span>删除</span>
                   </button>
                 </div>
@@ -96,17 +94,14 @@
               <pre class="style-code-preview">{{ entry.css }}</pre>
               <footer class="font-card-footer style-card-footer">
                 <span>{{ countCssLines(entry.css) }} 行 CSS</span>
-                <div class="style-card-actions" :class="{ 'custom-style-actions': entry.id !== activeDefaultStylePresetId }">
+                <div v-if="entry.id !== activeDefaultStylePresetId" class="style-card-actions custom-style-actions">
                   <button class="card-action" type="button" :disabled="entry.id === activeStyleId" @click="applyThemeStyle(entry.id)">
-                    <Check :size="15" />
                     <span>{{ entry.id === activeStyleId ? '已应用' : '应用' }}</span>
                   </button>
-                  <button v-if="entry.id !== activeDefaultStylePresetId" class="card-action" type="button" @click="openStyleEditor(entry)">
-                    <Pencil :size="15" />
+                  <button class="card-action" type="button" @click="openStyleEditor(entry)">
                     <span>编辑</span>
                   </button>
-                  <button v-if="entry.id !== activeDefaultStylePresetId" class="card-action danger" type="button" @click="removeThemeStyle(entry.id)">
-                    <Trash2 :size="15" />
+                  <button class="card-action danger" type="button" @click="removeThemeStyle(entry.id)">
                     <span>删除</span>
                   </button>
                 </div>
@@ -359,7 +354,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { Check, FileCode2, Globe2, LoaderCircle, Minus, Moon, Pencil, Plus, Share2, Trash2, Type, Upload, Wifi } from 'lucide-vue-next';
+import { FileCode2, Globe2, LoaderCircle, Minus, Moon, Plus, Share2, Type, Upload, Wifi } from 'lucide-vue-next';
 import AppModal from '@/components/common/AppModal.vue';
 import { useAppStore } from '@/stores/appStore';
 import type { AppSettings, AppThemeSettings, ThemeFontEntry, ThemeFontSource, ThemeStylePreset, ThemeStyleScopeSettings } from '@/types/domain';
