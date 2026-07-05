@@ -283,38 +283,42 @@
           </div>
         </section>
 
-        <section v-if="stylePresets.length" class="export-preset-list" :aria-label="`选择导出的${activeStyleLabel}样式`">
-          <label v-for="entry in stylePresets" :key="entry.id" class="export-preset-item">
-            <input type="checkbox" :value="entry.id" v-model="selectedExportStyleIds" />
-            <span>
-              <strong>{{ entry.name }}</strong>
-              <small>{{ countCssLines(entry.css) }} 行 CSS · {{ formatStyleMeta(entry) }}</small>
-            </span>
-          </label>
-        </section>
-        <section v-if="stylePresets.length" class="export-cover-panel">
-          <div class="field export-cover-copy">
-            <span>分享封面（可选）</span>
-            <small>选择一张图片作为导出 PNG 的展示封面，样式数据会隐藏写入图片中，导入时仍可识别。</small>
-          </div>
-          <label class="file-drop-card export-cover-picker">
-            <Upload :size="18" />
-            <strong>{{ selectedStyleExportCoverFile ? '更换分享封面' : '选择分享封面图片' }}</strong>
-            <span>{{ selectedStyleExportCoverFile ? selectedStyleExportCoverFile.name : '支持相册图片，导出时会统一转成 PNG' }}</span>
-            <input type="file" accept="image/*" @change="selectStyleExportCoverFile" />
-          </label>
-          <section v-if="styleExportCoverPreview" class="export-cover-preview">
-            <img :src="styleExportCoverPreview" alt="" />
-            <div>
-              <strong>{{ selectedStyleExportCoverFile ? selectedStyleExportCoverFile.name : '已选择分享封面' }}</strong>
-              <small>导出时会叠加样式标题，并把样式数据写入图片。</small>
-            </div>
-            <button class="card-action" type="button" @click="clearStyleExportCover">移除图片</button>
+        <section ref="styleExportScrollShell" class="composer-section export-scroll-shell">
+          <template v-if="stylePresets.length">
+            <section class="export-preset-list" :aria-label="`选择导出的${activeStyleLabel}样式`">
+              <label v-for="entry in stylePresets" :key="entry.id" class="export-preset-item">
+                <input type="checkbox" :value="entry.id" v-model="selectedExportStyleIds" />
+                <span>
+                  <strong>{{ entry.name }}</strong>
+                  <small>{{ countCssLines(entry.css) }} 行 CSS · {{ formatStyleMeta(entry) }}</small>
+                </span>
+              </label>
+            </section>
+            <section class="export-cover-panel">
+              <div class="field export-cover-copy">
+                <span>分享封面（可选）</span>
+                <small>选择一张图片作为导出 PNG 的展示封面，样式数据会隐藏写入图片中，导入时仍可识别。</small>
+              </div>
+              <label class="file-drop-card export-cover-picker">
+                <Upload :size="18" />
+                <strong>{{ selectedStyleExportCoverFile ? '更换分享封面' : '选择分享封面图片' }}</strong>
+                <span>{{ selectedStyleExportCoverFile ? selectedStyleExportCoverFile.name : '支持相册图片，导出时会统一转成 PNG' }}</span>
+                <input type="file" accept="image/*" @change="selectStyleExportCoverFile" />
+              </label>
+              <section v-if="styleExportCoverPreview" class="export-cover-preview">
+                <img :src="styleExportCoverPreview" alt="" />
+                <div>
+                  <strong>{{ selectedStyleExportCoverFile ? selectedStyleExportCoverFile.name : '已选择分享封面' }}</strong>
+                  <small>导出时会叠加样式标题，并把样式数据写入图片。</small>
+                </div>
+                <button class="card-action" type="button" @click="clearStyleExportCover">移除图片</button>
+              </section>
+            </section>
+          </template>
+          <section v-else class="empty-shell">
+            <strong>还没有可分享的自定义样式</strong>
+            <p>先通过右上角 + 添加{{ activeStyleLabel }}样式，再导出 PNG。</p>
           </section>
-        </section>
-        <section v-else class="empty-shell">
-          <strong>还没有可分享的自定义样式</strong>
-          <p>先通过右上角 + 添加{{ activeStyleLabel }}样式，再导出 PNG。</p>
         </section>
 
         <p v-if="styleExportError" class="sync-feedback error">{{ styleExportError }}</p>
@@ -352,7 +356,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { FileCode2, Globe2, LoaderCircle, Minus, Moon, Plus, Share2, Type, Upload, Wifi } from 'lucide-vue-next';
 import AppModal from '@/components/common/AppModal.vue';
@@ -433,6 +437,7 @@ const editingStylePresetId = ref('');
 const selectedExportStyleIds = ref<string[]>([]);
 const selectedStyleExportCoverFile = ref<File | null>(null);
 const styleExportCoverPreview = ref('');
+const styleExportScrollShell = ref<HTMLElement | null>(null);
 const fontLoadError = ref<FontLoadErrorState>({
   open: false,
   name: '',
@@ -478,7 +483,12 @@ onMounted(async () => {
 });
 
 watch(showStyleExporter, (open) => {
-  if (open) return;
+  if (open) {
+    void nextTick(() => {
+      styleExportScrollShell.value?.scrollTo({ top: 0 });
+    });
+    return;
+  }
   selectedExportStyleIds.value = [];
   selectedStyleExportCoverFile.value = null;
   styleExportCoverPreview.value = '';
@@ -1758,8 +1768,13 @@ function formatFontMeta(entry: ThemeFontEntry) {
   display: grid;
   align-content: start;
   gap: 10px;
-  min-height: 0;
-  overflow: auto;
+  min-height: auto;
+}
+
+.export-scroll-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 
 .export-preset-item {
@@ -1823,10 +1838,16 @@ function formatFontMeta(entry: ThemeFontEntry) {
   color: var(--muted);
   font-size: 12px;
   line-height: 1.5;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .export-cover-picker {
   min-height: 112px;
+  place-items: start;
+  align-content: center;
+  justify-items: start;
+  text-align: left;
 }
 
 .export-cover-preview {
@@ -1847,15 +1868,17 @@ function formatFontMeta(entry: ThemeFontEntry) {
 .export-cover-preview > div {
   display: grid;
   gap: 4px;
+  min-width: 0;
 }
 
 .export-cover-preview strong {
-  overflow: hidden;
   color: #111111;
   font-size: 13px;
   font-weight: 900;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.4;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .export-cover-preview small {
@@ -1912,6 +1935,10 @@ function formatFontMeta(entry: ThemeFontEntry) {
 .file-drop-card strong,
 .file-drop-card span {
   display: block;
+  width: 100%;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .file-drop-card strong {
