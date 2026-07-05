@@ -94,12 +94,16 @@
                 </span>
               </div>
               <pre class="style-code-preview">{{ entry.css }}</pre>
-              <footer class="font-card-footer">
+              <footer class="font-card-footer style-card-footer">
                 <span>{{ countCssLines(entry.css) }} 行 CSS</span>
-                <div>
+                <div class="style-card-actions" :class="{ 'custom-style-actions': entry.id !== activeDefaultStylePresetId }">
                   <button class="card-action" type="button" :disabled="entry.id === activeStyleId" @click="applyThemeStyle(entry.id)">
                     <Check :size="15" />
                     <span>{{ entry.id === activeStyleId ? '已应用' : '应用' }}</span>
+                  </button>
+                  <button v-if="entry.id !== activeDefaultStylePresetId" class="card-action" type="button" @click="openStyleEditor(entry)">
+                    <Pencil :size="15" />
+                    <span>编辑</span>
                   </button>
                   <button v-if="entry.id !== activeDefaultStylePresetId" class="card-action danger" type="button" @click="removeThemeStyle(entry.id)">
                     <Trash2 :size="15" />
@@ -228,18 +232,18 @@
       </form>
     </AppModal>
 
-    <AppModal v-model="showStyleImporter" :title="`添加${activeStyleLabel}样式`" :show-header="false" fixed-height variant="ins">
+    <AppModal v-model="showStyleImporter" :title="editingStylePresetId ? `编辑${activeStyleLabel}样式` : `添加${activeStyleLabel}样式`" :show-header="false" fixed-height variant="ins">
       <form class="font-composer style-import-composer" @submit.prevent="submitStyleImporter">
         <section class="composer-hero">
           <span class="composer-avatar"><FileCode2 :size="26" /></span>
           <div>
             <span>{{ activeStyleKicker }}</span>
-            <strong>{{ activeStyleImportTab === 'code' ? '完整代码' : 'PNG 导入' }}</strong>
-            <p>{{ activeStyleImportTab === 'code' ? `粘贴完整 CSS 后保存为${activeStyleLabel}样式。` : `选择别人分享的 LINK ${activeStyleLabel}样式 PNG。` }}</p>
+            <strong>{{ editingStylePresetId ? '编辑代码' : activeStyleImportTab === 'code' ? '完整代码' : 'PNG 导入' }}</strong>
+            <p>{{ editingStylePresetId ? `修改名称或 CSS 后保存这个${activeStyleLabel}样式。` : activeStyleImportTab === 'code' ? `粘贴完整 CSS 后保存为${activeStyleLabel}样式。` : `选择别人分享的 LINK ${activeStyleLabel}样式 PNG。` }}</p>
           </div>
         </section>
 
-        <nav class="composer-tabs" :aria-label="`${activeStyleLabel}样式导入方式`">
+        <nav v-if="!editingStylePresetId" class="composer-tabs" :aria-label="`${activeStyleLabel}样式导入方式`">
           <button class="composer-tab" :class="{ active: activeStyleImportTab === 'code' }" type="button" @click="activeStyleImportTab = 'code'">代码</button>
           <button class="composer-tab" :class="{ active: activeStyleImportTab === 'png' }" type="button" @click="activeStyleImportTab = 'png'">PNG</button>
         </nav>
@@ -268,7 +272,7 @@
 
         <div class="composer-footer">
           <button class="footer-button footer-cancel" type="button" @click="showStyleImporter = false">取消</button>
-          <button class="footer-button footer-save" type="submit" :disabled="isImportingStyle">{{ isImportingStyle ? '处理中...' : '保存' }}</button>
+          <button class="footer-button footer-save" type="submit" :disabled="isImportingStyle">{{ isImportingStyle ? '处理中...' : editingStylePresetId ? '保存修改' : '保存' }}</button>
         </div>
       </form>
     </AppModal>
@@ -335,7 +339,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { Check, FileCode2, Globe2, LoaderCircle, Minus, Moon, Plus, Share2, Trash2, Type, Upload, Wifi } from 'lucide-vue-next';
+import { Check, FileCode2, Globe2, LoaderCircle, Minus, Moon, Pencil, Plus, Share2, Trash2, Type, Upload, Wifi } from 'lucide-vue-next';
 import AppModal from '@/components/common/AppModal.vue';
 import { useAppStore } from '@/stores/appStore';
 import type { AppSettings, AppThemeSettings, ThemeFontEntry, ThemeFontSource, ThemeStylePreset, ThemeStyleScopeSettings } from '@/types/domain';
@@ -409,6 +413,7 @@ const isImportingStyle = ref(false);
 const applyingFontId = ref('');
 const styleNameDraft = ref('');
 const styleCssDraft = ref('');
+const editingStylePresetId = ref('');
 const selectedExportStyleIds = ref<string[]>([]);
 const fontLoadError = ref<FontLoadErrorState>({
   open: false,
@@ -609,8 +614,21 @@ function openActiveImporter() {
 
 function openStyleImporter() {
   activeStyleImportTab.value = 'code';
+  editingStylePresetId.value = '';
   styleNameDraft.value = '';
   styleCssDraft.value = activeStyleScopeId.value === 'offline' ? defaultOfflineThemeCss : defaultOnlineThemeCss;
+  selectedStylePngFile.value = null;
+  styleImportError.value = '';
+  feedbackMessage.value = '';
+  showStyleImporter.value = true;
+}
+
+function openStyleEditor(entry: ThemeStylePreset) {
+  if (entry.id === activeDefaultStylePresetId.value) return;
+  activeStyleImportTab.value = 'code';
+  editingStylePresetId.value = entry.id;
+  styleNameDraft.value = entry.name;
+  styleCssDraft.value = entry.css;
   selectedStylePngFile.value = null;
   styleImportError.value = '';
   feedbackMessage.value = '';
@@ -684,6 +702,10 @@ async function submitStyleImporter() {
   if (isImportingStyle.value) return;
   isImportingStyle.value = true;
   try {
+    if (editingStylePresetId.value) {
+      await updateThemeStyleFromCode();
+      return;
+    }
     if (activeStyleImportTab.value === 'png') {
       await importThemeStylesFromPng();
       return;
@@ -708,6 +730,28 @@ async function importThemeStyleFromCode() {
   if (!await trySaveThemeSettings(nextThemeSettings)) return;
   resetStyleImporterDraft();
   feedbackMessage.value = `已保存并应用 ${entry.name}。`;
+}
+
+async function updateThemeStyleFromCode() {
+  const css = styleCssDraft.value.trim();
+  if (!css) {
+    styleImportError.value = '请先填写完整 CSS 样式代码。';
+    return;
+  }
+  const nextThemeSettings = cloneThemeSettings(themeSettings.value);
+  const scope = nextThemeSettings[activeStyleScopeId.value];
+  const entry = scope.presets.find((item) => item.id === editingStylePresetId.value);
+  if (!entry) {
+    styleImportError.value = '没有找到要编辑的样式，请关闭后重试。';
+    return;
+  }
+  entry.name = styleNameDraft.value.trim() || `自定义${activeStyleLabel.value}样式`;
+  entry.css = css;
+  entry.updatedAt = Date.now();
+  if (!await trySaveThemeSettings(nextThemeSettings)) return;
+  const updatedName = entry.name;
+  resetStyleImporterDraft();
+  feedbackMessage.value = `已更新 ${updatedName}。`;
 }
 
 async function importThemeStylesFromPng() {
@@ -746,6 +790,7 @@ async function importThemeStylesFromPng() {
 }
 
 function resetStyleImporterDraft() {
+  editingStylePresetId.value = '';
   styleNameDraft.value = '';
   styleCssDraft.value = '';
   selectedStylePngFile.value = null;
@@ -1452,6 +1497,32 @@ function formatFontMeta(entry: ThemeFontEntry) {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+}
+
+.style-card-footer {
+  display: grid;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.style-card-footer > span {
+  margin-right: 0;
+}
+
+.style-card-actions {
+  display: grid;
+  gap: 8px;
+  width: 100%;
+}
+
+.style-card-actions.custom-style-actions {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.style-card-actions .card-action {
+  min-width: 0;
+  width: 100%;
+  padding-inline: 8px;
 }
 
 .card-action {
