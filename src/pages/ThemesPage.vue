@@ -4,9 +4,14 @@
       <button class="themes-title-button" type="button" aria-label="返回上一页" @click="goBack">
         <h1 class="top-title">Themes</h1>
       </button>
-      <button class="header-add-button" type="button" aria-label="导入字体" title="导入字体" @click="openImporter">
-        <Plus :size="19" stroke-width="2.4" />
-      </button>
+      <div class="header-actions">
+        <button v-if="isStyleTab" class="header-add-button" type="button" :aria-label="`分享${activeStyleLabel}样式`" :title="`分享${activeStyleLabel}样式`" @click="openStyleExporter">
+          <Share2 :size="18" stroke-width="2.35" />
+        </button>
+        <button class="header-add-button" type="button" :aria-label="isStyleTab ? `添加${activeStyleLabel}样式` : '导入字体'" :title="isStyleTab ? `添加${activeStyleLabel}样式` : '导入字体'" @click="openActiveImporter">
+          <Plus :size="19" stroke-width="2.4" />
+        </button>
+      </div>
     </header>
 
     <main class="themes-main">
@@ -31,7 +36,6 @@
                 <span class="font-mark"><Type :size="18" /></span>
                 <div class="font-copy">
                   <strong>{{ entry.name }}</strong>
-                  <p>{{ entry.family }}</p>
                 </div>
                 <span class="status-pill" :class="entry.id === fontSettings.activeFontId ? 'enabled' : 'disabled'">
                   {{ entry.id === fontSettings.activeFontId ? 'Applied' : sourceLabel(entry) }}
@@ -47,9 +51,9 @@
               <footer class="font-card-footer">
                 <span>{{ formatFontMeta(entry) }}</span>
                 <div>
-                  <button class="card-action" type="button" :disabled="entry.id === fontSettings.activeFontId" @click="applyFont(entry.id)">
+                  <button class="card-action" type="button" :disabled="entry.id === fontSettings.activeFontId || applyingFontId === entry.id" @click="applyFont(entry.id)">
                     <Check :size="15" />
-                    <span>{{ entry.id === fontSettings.activeFontId ? '已应用' : '应用' }}</span>
+                    <span>{{ applyingFontId === entry.id ? '检测中' : entry.id === fontSettings.activeFontId ? '已应用' : '应用' }}</span>
                   </button>
                   <button class="card-action danger" type="button" @click="removeFont(entry.id)">
                     <Trash2 :size="15" />
@@ -63,6 +67,47 @@
           <section v-else class="empty-shell">
             <strong>还没有导入字体</strong>
             <p>点击右上角 +，通过链接或本地字体文件添加到字体库。</p>
+          </section>
+
+          <p v-if="feedbackMessage" class="sync-feedback success">{{ feedbackMessage }}</p>
+        </section>
+
+        <section v-else-if="isStyleTab" class="online-style-library" :aria-label="`${activeStyleLabel}样式`">
+          <header class="font-library-head">
+            <div>
+              <p class="section-kicker">{{ activeStyleKicker }}</p>
+              <h2>{{ activeStyleName }}</h2>
+            </div>
+            <button class="section-action" type="button" :disabled="!activeStyleSettings.activePresetId" @click="applyThemeStyle(activeDefaultStylePresetId)">恢复默认</button>
+          </header>
+
+          <section class="font-card-list" :aria-label="`${activeStyleLabel}样式预设`">
+            <article v-for="entry in allStylePresets" :key="entry.id" class="font-card style-preset-card" :class="{ active: entry.id === activeStyleId }">
+              <div class="font-card-top">
+                <span class="font-mark"><FileCode2 :size="18" /></span>
+                <div class="font-copy">
+                  <strong>{{ entry.name }}</strong>
+                  <small>{{ entry.id === activeDefaultStylePresetId ? '内置默认样式' : formatStyleMeta(entry) }}</small>
+                </div>
+                <span class="status-pill" :class="entry.id === activeStyleId ? 'enabled' : 'disabled'">
+                  {{ entry.id === activeStyleId ? 'Applied' : entry.id === activeDefaultStylePresetId ? 'Default' : 'Saved' }}
+                </span>
+              </div>
+              <pre class="style-code-preview">{{ entry.css }}</pre>
+              <footer class="font-card-footer">
+                <span>{{ countCssLines(entry.css) }} 行 CSS</span>
+                <div>
+                  <button class="card-action" type="button" :disabled="entry.id === activeStyleId" @click="applyThemeStyle(entry.id)">
+                    <Check :size="15" />
+                    <span>{{ entry.id === activeStyleId ? '已应用' : '应用' }}</span>
+                  </button>
+                  <button v-if="entry.id !== activeDefaultStylePresetId" class="card-action danger" type="button" @click="removeThemeStyle(entry.id)">
+                    <Trash2 :size="15" />
+                    <span>删除</span>
+                  </button>
+                </div>
+              </footer>
+            </article>
           </section>
 
           <p v-if="feedbackMessage" class="sync-feedback success">{{ feedbackMessage }}</p>
@@ -120,11 +165,6 @@
           </label>
 
           <label class="field">
-            <span>字体族名</span>
-            <input v-model="linkFamily" placeholder="例如：LXGW WenKai" />
-          </label>
-
-          <label class="field">
             <span>字体链接</span>
             <textarea v-model="linkUrls" rows="5" placeholder="每行一个 .woff2 / .ttf / CSS 链接"></textarea>
           </label>
@@ -134,11 +174,6 @@
           <label class="field">
             <span>字体名称</span>
             <input v-model="fileName" placeholder="留空则使用文件名" />
-          </label>
-
-          <label class="field">
-            <span>字体族名</span>
-            <input v-model="fileFamily" placeholder="留空则使用文件名" />
           </label>
 
           <label class="file-drop-card">
@@ -157,9 +192,111 @@
 
         <div class="composer-footer">
           <button class="footer-button footer-cancel" type="button" @click="showImporter = false">取消</button>
-          <button class="footer-button footer-save" type="submit">导入</button>
+          <button class="footer-button footer-save" type="submit" :disabled="isImportingFont">{{ isImportingFont ? '检测中...' : '导入' }}</button>
         </div>
       </form>
+    </AppModal>
+
+    <AppModal v-model="showStyleImporter" :title="`添加${activeStyleLabel}样式`" :show-header="false" fixed-height variant="ins">
+      <form class="font-composer style-import-composer" @submit.prevent="submitStyleImporter">
+        <section class="composer-hero">
+          <span class="composer-avatar"><FileCode2 :size="26" /></span>
+          <div>
+            <span>{{ activeStyleKicker }}</span>
+            <strong>{{ activeStyleImportTab === 'code' ? '完整代码' : 'PNG 导入' }}</strong>
+            <p>{{ activeStyleImportTab === 'code' ? `粘贴完整 CSS 后保存为${activeStyleLabel}样式。` : `选择别人分享的 LINK ${activeStyleLabel}样式 PNG。` }}</p>
+          </div>
+        </section>
+
+        <nav class="composer-tabs" :aria-label="`${activeStyleLabel}样式导入方式`">
+          <button class="composer-tab" :class="{ active: activeStyleImportTab === 'code' }" type="button" @click="activeStyleImportTab = 'code'">代码</button>
+          <button class="composer-tab" :class="{ active: activeStyleImportTab === 'png' }" type="button" @click="activeStyleImportTab = 'png'">PNG</button>
+        </nav>
+
+        <section v-if="activeStyleImportTab === 'code'" class="composer-section form-grid">
+          <label class="field">
+            <span>样式名称</span>
+            <input v-model="styleNameDraft" :placeholder="activeStyleScopeId === 'offline' ? '例如：月雾小说页' : '例如：浅雾绿聊天页'" />
+          </label>
+          <label class="field style-code-field">
+            <span>完整 CSS</span>
+            <textarea v-model="styleCssDraft" rows="12" spellcheck="false" placeholder="粘贴完整 CSS 代码"></textarea>
+          </label>
+        </section>
+
+        <section v-else class="composer-section form-grid">
+          <label class="file-drop-card">
+            <Upload :size="18" />
+            <strong>选择 PNG 样式图片</strong>
+            <span>{{ selectedStylePngFile ? selectedStylePngFile.name : `导入别人分享的${activeStyleLabel}样式` }}</span>
+            <input type="file" accept="image/png" @change="selectStylePngFile" />
+          </label>
+        </section>
+
+        <p v-if="styleImportError" class="sync-feedback error">{{ styleImportError }}</p>
+
+        <div class="composer-footer">
+          <button class="footer-button footer-cancel" type="button" @click="showStyleImporter = false">取消</button>
+          <button class="footer-button footer-save" type="submit" :disabled="isImportingStyle">{{ isImportingStyle ? '处理中...' : '保存' }}</button>
+        </div>
+      </form>
+    </AppModal>
+
+    <AppModal v-model="showStyleExporter" :title="`分享${activeStyleLabel}样式`" :show-header="false" fixed-height variant="ins">
+      <section class="font-composer style-export-composer">
+        <section class="composer-hero">
+          <span class="composer-avatar"><Share2 :size="26" /></span>
+          <div>
+            <span>Share Style</span>
+            <strong>导出 PNG</strong>
+            <p>选择一个或多个已保存的{{ activeStyleLabel }}样式预设，导出的 PNG 可被其他用户导入。</p>
+          </div>
+        </section>
+
+        <section v-if="stylePresets.length" class="export-preset-list" :aria-label="`选择导出的${activeStyleLabel}样式`">
+          <label v-for="entry in stylePresets" :key="entry.id" class="export-preset-item">
+            <input type="checkbox" :value="entry.id" v-model="selectedExportStyleIds" />
+            <span>
+              <strong>{{ entry.name }}</strong>
+              <small>{{ countCssLines(entry.css) }} 行 CSS · {{ formatStyleMeta(entry) }}</small>
+            </span>
+          </label>
+        </section>
+        <section v-else class="empty-shell">
+          <strong>还没有可分享的自定义样式</strong>
+          <p>先通过右上角 + 添加{{ activeStyleLabel }}样式，再导出 PNG。</p>
+        </section>
+
+        <p v-if="styleExportError" class="sync-feedback error">{{ styleExportError }}</p>
+
+        <div class="composer-footer">
+          <button class="footer-button footer-cancel" type="button" @click="showStyleExporter = false">取消</button>
+          <button class="footer-button footer-save" type="button" :disabled="!stylePresets.length" @click="exportSelectedThemeStyles">导出 PNG</button>
+        </div>
+      </section>
+    </AppModal>
+
+    <AppModal v-model="fontLoadError.open" title="字体加载失败" variant="ins">
+      <section class="font-error-sheet">
+        <strong>{{ fontLoadError.name }}</strong>
+        <p>{{ fontLoadError.summary }}</p>
+        <dl>
+          <div>
+            <dt>字体名称</dt>
+            <dd>{{ fontLoadError.name || '未填写' }}</dd>
+          </div>
+          <div v-if="fontLoadError.url">
+            <dt>字体来源</dt>
+            <dd>{{ fontLoadError.url }}</dd>
+          </div>
+          <div>
+            <dt>浏览器返回</dt>
+            <dd>{{ fontLoadError.detail }}</dd>
+          </div>
+        </dl>
+        <p class="font-error-tip">请确认链接能直接访问、服务器允许跨域读取字体文件，或改用本地字体文件导入。</p>
+        <button class="footer-button footer-save" type="button" @click="fontLoadError.open = false">知道了</button>
+      </section>
     </AppModal>
   </section>
 </template>
@@ -167,15 +304,34 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { Check, Globe2, LoaderCircle, Moon, Plus, Trash2, Type, Upload, Wifi } from 'lucide-vue-next';
+import { Check, FileCode2, Globe2, LoaderCircle, Moon, Plus, Share2, Trash2, Type, Upload, Wifi } from 'lucide-vue-next';
 import AppModal from '@/components/common/AppModal.vue';
 import { useAppStore } from '@/stores/appStore';
-import type { AppSettings, AppThemeSettings, ThemeFontEntry, ThemeFontSource } from '@/types/domain';
+import type { AppSettings, AppThemeSettings, ThemeFontEntry, ThemeFontSource, ThemeStylePreset, ThemeStyleScopeSettings } from '@/types/domain';
 import { createId } from '@/utils/id';
 import { normalizeAppSettings } from '@/utils/settings';
+import {
+  decodeThemeStylePresetsFromPng,
+  defaultOfflineThemeCss,
+  defaultOfflineThemePresetId,
+  defaultOnlineThemeCss,
+  defaultOnlineThemePresetId,
+  encodeThemeStylePresetsToPng
+} from '@/utils/themeStyles';
 
 type ThemeTab = 'font' | 'global' | 'online' | 'offline';
 type ImportTab = 'link' | 'file';
+type StyleImportTab = 'code' | 'png';
+type StyleScopeId = 'online' | 'offline';
+
+interface FontLoadErrorState {
+  open: boolean;
+  name: string;
+  family: string;
+  url: string;
+  summary: string;
+  detail: string;
+}
 
 const tabs = [
   { id: 'font' as ThemeTab, label: '字体', icon: Type },
@@ -202,15 +358,33 @@ const route = useRoute();
 const router = useRouter();
 const store = useAppStore();
 const showImporter = ref(false);
+const showStyleImporter = ref(false);
+const showStyleExporter = ref(false);
 const activeImportTab = ref<ImportTab>('link');
+const activeStyleImportTab = ref<StyleImportTab>('code');
 const linkName = ref('');
-const linkFamily = ref('');
 const linkUrls = ref('');
 const fileName = ref('');
-const fileFamily = ref('');
 const selectedFontFiles = ref<File[]>([]);
+const selectedStylePngFile = ref<File | null>(null);
 const importError = ref('');
+const styleImportError = ref('');
+const styleExportError = ref('');
 const feedbackMessage = ref('');
+const isImportingFont = ref(false);
+const isImportingStyle = ref(false);
+const applyingFontId = ref('');
+const styleNameDraft = ref('');
+const styleCssDraft = ref('');
+const selectedExportStyleIds = ref<string[]>([]);
+const fontLoadError = ref<FontLoadErrorState>({
+  open: false,
+  name: '',
+  family: '',
+  url: '',
+  summary: '',
+  detail: ''
+});
 
 const currentSettings = computed<AppSettings>(() => normalizeAppSettings(store.settings));
 const themeSettings = computed(() => currentSettings.value.themeSettings);
@@ -222,9 +396,29 @@ const activeTab = computed<ThemeTab>(() => {
 });
 const activeMeta = computed(() => tabs.find((tab) => tab.id === activeTab.value) ?? tabs[0]);
 const activeFontEntry = computed(() => fontEntries.value.find((entry) => entry.id === fontSettings.value.activeFontId) ?? null);
+const isStyleTab = computed(() => activeTab.value === 'online' || activeTab.value === 'offline');
+const activeStyleScopeId = computed<StyleScopeId>(() => activeTab.value === 'offline' ? 'offline' : 'online');
+const activeStyleLabel = computed(() => activeStyleScopeId.value === 'offline' ? '线下' : '线上');
+const activeStyleKicker = computed(() => activeStyleScopeId.value === 'offline' ? 'Offline Style' : 'Online Style');
+const activeStyleSettings = computed(() => themeSettings.value[activeStyleScopeId.value]);
+const stylePresets = computed(() => activeStyleSettings.value.presets);
+const activeDefaultStylePresetId = computed(() => activeStyleScopeId.value === 'offline' ? defaultOfflineThemePresetId : defaultOnlineThemePresetId);
+const defaultStylePreset = computed<ThemeStylePreset>(() => ({
+  id: activeDefaultStylePresetId.value,
+  name: `默认${activeStyleLabel.value}样式`,
+  css: activeStyleScopeId.value === 'offline' ? defaultOfflineThemeCss : defaultOnlineThemeCss,
+  source: 'custom',
+  createdAt: 0,
+  updatedAt: 0
+}));
+const allStylePresets = computed(() => [defaultStylePreset.value, ...stylePresets.value]);
+const activeStyleId = computed(() => activeStyleSettings.value.activePresetId || activeDefaultStylePresetId.value);
+const activeStylePreset = computed(() => allStylePresets.value.find((entry) => entry.id === activeStyleId.value) ?? defaultStylePreset.value);
+const activeStyleName = computed(() => activeStylePreset.value.name);
 
-onMounted(() => {
-  void store.hydrate();
+onMounted(async () => {
+  await store.hydrate();
+  await validateActiveFontOnOpen();
 });
 
 function goBack() {
@@ -244,20 +438,39 @@ function cloneFontEntry(entry: ThemeFontEntry): ThemeFontEntry {
   return { ...entry };
 }
 
+function cloneStylePreset(entry: ThemeStylePreset): ThemeStylePreset {
+  return { ...entry };
+}
+
+function cloneStyleScope(scope: ThemeStyleScopeSettings): ThemeStyleScopeSettings {
+  return {
+    activePresetId: scope.activePresetId,
+    presets: scope.presets.map(cloneStylePreset)
+  };
+}
+
 function cloneThemeSettings(settings: AppThemeSettings): AppThemeSettings {
   return {
     fonts: {
       activeFontId: settings.fonts.activeFontId,
       entries: settings.fonts.entries.map(cloneFontEntry)
     },
-    global: {},
-    online: {},
-    offline: {}
+    global: cloneStyleScope(settings.global),
+    online: cloneStyleScope(settings.online),
+    offline: cloneStyleScope(settings.offline)
   };
 }
 
 function sanitizeFontFamily(value: string) {
   return value.replace(/[{};]/g, '').replace(/\s+/g, ' ').trim();
+}
+
+function escapeCssString(value: string) {
+  return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, ' ');
+}
+
+function getQuotedFontFamily(family: string) {
+  return `"${escapeCssString(family)}"`;
 }
 
 function getFileExtension(fileNameValue: string) {
@@ -281,12 +494,13 @@ function splitFontUrls(value: string) {
   return [...new Set(value.split(/\n+/).map((url) => url.trim()).filter(Boolean))];
 }
 
-function createFontEntry(options: { name: string; family: string; source: ThemeFontSource; url?: string; mimeType?: string; size?: number }): ThemeFontEntry {
+function createFontEntry(options: { name: string; family?: string; source: ThemeFontSource; url?: string; mimeType?: string; size?: number }): ThemeFontEntry {
   const now = Date.now();
-  const family = sanitizeFontFamily(options.family);
+  const name = options.name.trim() || '自定义字体';
+  const family = sanitizeFontFamily(options.family || name);
   return {
     id: createId('theme-font'),
-    name: options.name.trim() || family || '自定义字体',
+    name,
     family,
     source: options.source,
     url: options.source === 'family' ? '' : String(options.url ?? '').trim(),
@@ -329,6 +543,30 @@ function openImporter() {
   showImporter.value = true;
 }
 
+function openActiveImporter() {
+  if (isStyleTab.value) {
+    openStyleImporter();
+    return;
+  }
+  openImporter();
+}
+
+function openStyleImporter() {
+  activeStyleImportTab.value = 'code';
+  styleNameDraft.value = '';
+  styleCssDraft.value = activeStyleScopeId.value === 'offline' ? defaultOfflineThemeCss : defaultOnlineThemeCss;
+  selectedStylePngFile.value = null;
+  styleImportError.value = '';
+  feedbackMessage.value = '';
+  showStyleImporter.value = true;
+}
+
+function openStyleExporter() {
+  selectedExportStyleIds.value = stylePresets.value.map((entry) => entry.id);
+  styleExportError.value = '';
+  showStyleExporter.value = true;
+}
+
 function inferFontMimeType(file: File) {
   return file.type || fontMimeByExtension[getFileExtension(file.name)] || 'font/woff2';
 }
@@ -346,6 +584,18 @@ function readFileAsDataUrl(file: File) {
   });
 }
 
+function createStylePreset(options: { name: string; css: string; source?: ThemeStylePreset['source'] }): ThemeStylePreset {
+  const now = Date.now();
+  return {
+    id: createId('theme-style'),
+    name: options.name.trim() || `自定义${activeStyleLabel.value}样式`,
+    css: options.css.trim(),
+    source: options.source ?? 'custom',
+    createdAt: now,
+    updatedAt: now
+  };
+}
+
 function selectFontFiles(event: Event) {
   const input = event.target as HTMLInputElement;
   selectedFontFiles.value = Array.from(input.files ?? []);
@@ -353,17 +603,191 @@ function selectFontFiles(event: Event) {
   importError.value = '';
 }
 
+function selectStylePngFile(event: Event) {
+  const input = event.target as HTMLInputElement;
+  selectedStylePngFile.value = input.files?.[0] ?? null;
+  input.value = '';
+  styleImportError.value = '';
+}
+
 async function submitImporter() {
-  if (activeImportTab.value === 'link') {
-    await importFontLinks();
+  if (isImportingFont.value) return;
+  isImportingFont.value = true;
+  try {
+    if (activeImportTab.value === 'link') {
+      await importFontLinks();
+      return;
+    }
+    await importFontFiles();
+  } finally {
+    isImportingFont.value = false;
+  }
+}
+
+async function submitStyleImporter() {
+  if (isImportingStyle.value) return;
+  isImportingStyle.value = true;
+  try {
+    if (activeStyleImportTab.value === 'png') {
+      await importThemeStylesFromPng();
+      return;
+    }
+    await importThemeStyleFromCode();
+  } finally {
+    isImportingStyle.value = false;
+  }
+}
+
+async function importThemeStyleFromCode() {
+  const css = styleCssDraft.value.trim();
+  if (!css) {
+    styleImportError.value = '请先填写完整 CSS 样式代码。';
     return;
   }
-  await importFontFiles();
+  const entry = createStylePreset({ name: styleNameDraft.value, css });
+  const nextThemeSettings = cloneThemeSettings(themeSettings.value);
+  const scope = nextThemeSettings[activeStyleScopeId.value];
+  scope.presets = [entry, ...scope.presets];
+  scope.activePresetId = entry.id;
+  if (!await trySaveThemeSettings(nextThemeSettings)) return;
+  resetStyleImporterDraft();
+  feedbackMessage.value = `已保存并应用 ${entry.name}。`;
+}
+
+async function importThemeStylesFromPng() {
+  const file = selectedStylePngFile.value;
+  if (!file) {
+    styleImportError.value = '请先选择 PNG 样式图片。';
+    return;
+  }
+  if (file.type && file.type !== 'image/png') {
+    styleImportError.value = '请选择 PNG 格式的样式图片。';
+    return;
+  }
+  try {
+    const decodedPresets = await decodeThemeStylePresetsFromPng(await readFileAsDataUrl(file));
+    const importedPresets = decodedPresets
+      .map((entry, index) => createStylePreset({
+        name: String(entry.name ?? '').trim() || `导入样式 ${index + 1}`,
+        css: String(entry.css ?? '').trim(),
+        source: 'imported'
+      }))
+      .filter((entry) => entry.css);
+    if (!importedPresets.length) {
+      styleImportError.value = `PNG 中没有可用的${activeStyleLabel.value}样式。`;
+      return;
+    }
+    const nextThemeSettings = cloneThemeSettings(themeSettings.value);
+    const scope = nextThemeSettings[activeStyleScopeId.value];
+    scope.presets = [...importedPresets, ...scope.presets];
+    scope.activePresetId = importedPresets[0].id;
+    if (!await trySaveThemeSettings(nextThemeSettings)) return;
+    resetStyleImporterDraft();
+    feedbackMessage.value = `已导入并应用 ${importedPresets[0].name}。`;
+  } catch (error) {
+    styleImportError.value = error instanceof Error ? error.message : 'PNG 样式图片导入失败。';
+  }
+}
+
+function resetStyleImporterDraft() {
+  styleNameDraft.value = '';
+  styleCssDraft.value = '';
+  selectedStylePngFile.value = null;
+  styleImportError.value = '';
+  showStyleImporter.value = false;
+}
+
+function getFontLoadDetail(error: unknown) {
+  if (error instanceof Error) return [error.name, error.message].filter(Boolean).join(': ');
+  return String(error || '浏览器没有返回更多错误信息。');
+}
+
+function openFontLoadError(entry: ThemeFontEntry, summary: string, error: unknown) {
+  fontLoadError.value = {
+    open: true,
+    name: entry.name || '自定义字体',
+    family: entry.family,
+    url: entry.url,
+    summary,
+    detail: getFontLoadDetail(error)
+  };
+  importError.value = summary;
+  feedbackMessage.value = '';
+}
+
+function withFontLoadTimeout<T>(promise: Promise<T>, message: string) {
+  const timeoutMs = 12000;
+  let timer = 0;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = window.setTimeout(() => reject(new Error(message)), timeoutMs);
+  });
+  return Promise.race([promise, timeout]).finally(() => window.clearTimeout(timer));
+}
+
+async function validateFontFileEntry(entry: ThemeFontEntry) {
+  const fontFace = new FontFace(entry.family, `url("${escapeCssString(entry.url)}")`, { display: 'swap' });
+  document.fonts.add(fontFace);
+  try {
+    await withFontLoadTimeout(fontFace.load(), `字体文件加载超时，浏览器在 12 秒内没有完成下载：${entry.url}`);
+    if (fontFace.status !== 'loaded') throw new Error(`字体状态为 ${fontFace.status}，没有完成加载。`);
+  } finally {
+    document.fonts.delete(fontFace);
+  }
+}
+
+function loadTemporaryStylesheet(url: string) {
+  return new Promise<HTMLLinkElement>((resolve, reject) => {
+    const link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = url;
+    link.addEventListener('load', () => resolve(link), { once: true });
+    link.addEventListener('error', () => reject(new Error(`CSS 字体链接加载失败：${url}`)), { once: true });
+    document.head.appendChild(link);
+  });
+}
+
+async function validateStylesheetFontEntry(entry: ThemeFontEntry) {
+  let link: HTMLLinkElement | null = null;
+  try {
+    link = await withFontLoadTimeout(loadTemporaryStylesheet(entry.url), `CSS 字体链接加载超时，浏览器在 12 秒内没有完成下载：${entry.url}`);
+    const loadedFaces = await withFontLoadTimeout(document.fonts.load(`16px ${getQuotedFontFamily(entry.family)}`, 'LINK 字体检测'), `CSS 已下载，但字体名称「${entry.name}」没有在 12 秒内完成加载。`);
+    if (!loadedFaces.length) throw new Error(`CSS 已下载，但没有找到字体名称「${entry.name}」对应的字体。`);
+  } finally {
+    link?.remove();
+  }
+}
+
+async function validateFontEntryCanLoad(entry: ThemeFontEntry, context: string) {
+  if (entry.source === 'family') return true;
+  if (!entry.url.trim()) {
+    openFontLoadError(entry, `${context}失败：字体链接为空。`, new Error('没有可加载的字体 URL。'));
+    return false;
+  }
+  if (!entry.family.trim()) {
+    openFontLoadError(entry, `${context}失败：字体名称为空。`, new Error('浏览器需要字体名称才能应用字体。'));
+    return false;
+  }
+  if (typeof document === 'undefined' || typeof FontFace === 'undefined' || !document.fonts) return true;
+
+  try {
+    if (entry.source === 'url' && isStylesheetFontUrl(entry.url)) await validateStylesheetFontEntry(entry);
+    else await validateFontFileEntry(entry);
+    return true;
+  } catch (error) {
+    openFontLoadError(entry, `${context}失败：浏览器没有成功加载这个字体。`, error);
+    return false;
+  }
+}
+
+async function validateFontEntriesCanLoad(entries: ThemeFontEntry[], context: string) {
+  for (const entry of entries) {
+    if (!await validateFontEntryCanLoad(entry, context)) return false;
+  }
+  return true;
 }
 
 async function importFontLinks() {
   const urls = splitFontUrls(linkUrls.value);
-  const familyBase = sanitizeFontFamily(linkFamily.value || linkName.value);
   if (!urls.length) {
     importError.value = '请先填写字体链接。';
     return;
@@ -372,20 +796,21 @@ async function importFontLinks() {
   const nextThemeSettings = cloneThemeSettings(themeSettings.value);
   const newEntries = urls.map((url, index) => {
     const fallbackName = getFontNameFromUrl(url, index);
-    const family = familyBase || fallbackName;
-    const name = linkName.value.trim() || family;
+    const name = linkName.value.trim() || fallbackName;
     return createFontEntry({
       name: urls.length > 1 && !linkName.value.trim() ? `${name} ${index + 1}` : name,
-      family,
       source: 'url',
       url
     });
   });
 
+  if (!await validateFontEntriesCanLoad(newEntries, '导入')) return;
+
   nextThemeSettings.fonts.entries = [...newEntries, ...nextThemeSettings.fonts.entries];
+  nextThemeSettings.fonts.activeFontId = newEntries[0]?.id ?? nextThemeSettings.fonts.activeFontId;
   if (!await trySaveThemeSettings(nextThemeSettings)) return;
   resetImporterDraft();
-  feedbackMessage.value = `已导入 ${newEntries.length} 个字体链接。`;
+  feedbackMessage.value = `已导入并应用 ${newEntries[0]?.name ?? '字体'}。`;
 }
 
 async function importFontFiles() {
@@ -404,11 +829,9 @@ async function importFontFiles() {
   const newEntries: ThemeFontEntry[] = [];
   for (const [index, file] of files.entries()) {
     const fallbackName = stripFontExtension(file.name) || `字体 ${index + 1}`;
-    const family = sanitizeFontFamily(fileFamily.value || fallbackName);
     const name = fileName.value.trim() || fallbackName;
     newEntries.push(createFontEntry({
       name: files.length > 1 && !fileName.value.trim() ? `${name} ${index + 1}` : name,
-      family,
       source: 'file',
       url: await readFileAsDataUrl(file),
       mimeType: inferFontMimeType(file),
@@ -416,32 +839,50 @@ async function importFontFiles() {
     }));
   }
 
+  if (!await validateFontEntriesCanLoad(newEntries, '导入')) return;
+
   nextThemeSettings.fonts.entries = [...newEntries, ...nextThemeSettings.fonts.entries];
+  nextThemeSettings.fonts.activeFontId = newEntries[0]?.id ?? nextThemeSettings.fonts.activeFontId;
   if (!await trySaveThemeSettings(nextThemeSettings)) return;
   resetImporterDraft();
-  feedbackMessage.value = `已导入 ${newEntries.length} 个字体文件。`;
+  feedbackMessage.value = `已导入并应用 ${newEntries[0]?.name ?? '字体'}。`;
 }
 
 function resetImporterDraft() {
   linkName.value = '';
-  linkFamily.value = '';
   linkUrls.value = '';
   fileName.value = '';
-  fileFamily.value = '';
   selectedFontFiles.value = [];
   importError.value = '';
   showImporter.value = false;
 }
 
 async function applyFont(fontId: string) {
+  if (applyingFontId.value) return;
   const nextThemeSettings = cloneThemeSettings(themeSettings.value);
   const entry = nextThemeSettings.fonts.entries.find((item) => item.id === fontId);
   if (!entry) return;
-  entry.enabled = true;
-  entry.updatedAt = Date.now();
-  nextThemeSettings.fonts.activeFontId = fontId;
+  applyingFontId.value = fontId;
+  try {
+    if (!await validateFontEntryCanLoad(entry, '应用')) return;
+    entry.enabled = true;
+    entry.updatedAt = Date.now();
+    nextThemeSettings.fonts.activeFontId = fontId;
+    await saveThemeSettings(nextThemeSettings);
+    feedbackMessage.value = `已应用 ${entry.name}。`;
+  } finally {
+    applyingFontId.value = '';
+  }
+}
+
+async function validateActiveFontOnOpen() {
+  const activeEntry = activeFontEntry.value;
+  if (!activeEntry) return;
+  if (await validateFontEntryCanLoad(activeEntry, '当前字体检测')) return;
+  const nextThemeSettings = cloneThemeSettings(themeSettings.value);
+  nextThemeSettings.fonts.activeFontId = '';
   await saveThemeSettings(nextThemeSettings);
-  feedbackMessage.value = `已应用 ${entry.name}。`;
+  feedbackMessage.value = `字体 ${activeEntry.name} 加载失败，已恢复系统默认。`;
 }
 
 async function removeFont(fontId: string) {
@@ -458,8 +899,65 @@ async function resetFont() {
   feedbackMessage.value = '已恢复系统默认字体。';
 }
 
+async function applyThemeStyle(styleId: string) {
+  const nextThemeSettings = cloneThemeSettings(themeSettings.value);
+  const scope = nextThemeSettings[activeStyleScopeId.value];
+  const styleName = styleId === activeDefaultStylePresetId.value
+    ? `默认${activeStyleLabel.value}样式`
+    : scope.presets.find((entry) => entry.id === styleId)?.name ?? `${activeStyleLabel.value}样式`;
+  scope.activePresetId = styleId === activeDefaultStylePresetId.value ? '' : styleId;
+  await saveThemeSettings(nextThemeSettings);
+  feedbackMessage.value = styleId === activeDefaultStylePresetId.value ? `已恢复默认${activeStyleLabel.value}样式。` : `已应用 ${styleName}。`;
+}
+
+async function removeThemeStyle(styleId: string) {
+  const nextThemeSettings = cloneThemeSettings(themeSettings.value);
+  const scope = nextThemeSettings[activeStyleScopeId.value];
+  scope.presets = scope.presets.filter((entry) => entry.id !== styleId);
+  if (scope.activePresetId === styleId) scope.activePresetId = '';
+  await saveThemeSettings(nextThemeSettings);
+  feedbackMessage.value = `已删除${activeStyleLabel.value}样式。`;
+}
+
+function countCssLines(css: string) {
+  return css.split('\n').length;
+}
+
+function formatStyleMeta(entry: ThemeStylePreset) {
+  const time = entry.updatedAt ? new Date(entry.updatedAt).toLocaleDateString('zh-CN') : '未知日期';
+  return `${entry.source === 'imported' ? '导入' : '自定义'} · ${time}`;
+}
+
+function getDownloadFileName(presets: ThemeStylePreset[]) {
+  const baseName = presets.length === 1 ? presets[0].name : `LINK${activeStyleLabel.value}样式-${presets.length}个`;
+  return `${baseName.replace(/[\/:*?"<>|]+/g, '-').slice(0, 48) || `LINK${activeStyleLabel.value}样式`}.png`;
+}
+
+function downloadDataUrl(dataUrl: string, fileName: string) {
+  const link = document.createElement('a');
+  link.href = dataUrl;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+}
+
+function exportSelectedThemeStyles() {
+  const selectedIds = new Set(selectedExportStyleIds.value);
+  const presets = stylePresets.value.filter((entry) => selectedIds.has(entry.id));
+  if (!presets.length) {
+    styleExportError.value = '请至少选择一个已保存的样式预设。';
+    return;
+  }
+  const dataUrl = encodeThemeStylePresetsToPng(presets);
+  downloadDataUrl(dataUrl, getDownloadFileName(presets));
+  styleExportError.value = '';
+  showStyleExporter.value = false;
+  feedbackMessage.value = `已导出 ${presets.length} 个${activeStyleLabel.value}样式 PNG。`;
+}
+
 function fontPreviewStyle(entry: ThemeFontEntry) {
-  return { fontFamily: entry.family };
+  return { fontFamily: `${getQuotedFontFamily(entry.family)}, var(--app-default-font-family)` };
 }
 
 function isStylesheetFontUrl(url: string) {
@@ -528,6 +1026,13 @@ function formatFontMeta(entry: ThemeFontEntry) {
   opacity: 0.7;
 }
 
+.header-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
 .header-add-button {
   position: relative;
   z-index: 2;
@@ -538,9 +1043,10 @@ function formatFontMeta(entry: ThemeFontEntry) {
   min-height: 34px;
   padding: 0;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.9);
+  background: transparent;
   color: #057a35;
-  box-shadow: 0 10px 24px rgba(6, 199, 85, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.92);
+  font-family: var(--app-default-font-family);
+  box-shadow: none;
 }
 
 .themes-main {
@@ -551,7 +1057,8 @@ function formatFontMeta(entry: ThemeFontEntry) {
   overflow-x: hidden;
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
-  padding: 10px 16px 18px;
+  scroll-padding-bottom: calc(76px + var(--safe-bottom));
+  padding: 10px 16px calc(76px + var(--safe-bottom));
 }
 
 .themes-panel {
@@ -580,6 +1087,7 @@ function formatFontMeta(entry: ThemeFontEntry) {
 }
 
 .font-library,
+.online-style-library,
 .font-card-list {
   display: grid;
   gap: 12px;
@@ -629,6 +1137,7 @@ function formatFontMeta(entry: ThemeFontEntry) {
   border-radius: 999px;
   background: #f3f6f4;
   color: #363a40;
+  font-family: var(--app-default-font-family);
   font-size: 12px;
   font-weight: 900;
 }
@@ -680,8 +1189,7 @@ function formatFontMeta(entry: ThemeFontEntry) {
   min-width: 0;
 }
 
-.font-copy strong,
-.font-copy p {
+.font-copy strong {
   overflow: hidden;
   margin: 0;
   text-overflow: ellipsis;
@@ -694,7 +1202,15 @@ function formatFontMeta(entry: ThemeFontEntry) {
   font-weight: 900;
 }
 
-.font-copy p,
+.font-copy small {
+  overflow: hidden;
+  color: #7b838d;
+  font-size: 11px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .font-card-footer > span,
 .empty-shell p,
 .sync-feedback {
@@ -710,6 +1226,7 @@ function formatFontMeta(entry: ThemeFontEntry) {
   min-height: 28px;
   padding: 0 10px;
   border-radius: 999px;
+  font-family: var(--app-default-font-family);
   font-size: 11px;
   font-weight: 900;
   white-space: nowrap;
@@ -753,11 +1270,41 @@ function formatFontMeta(entry: ThemeFontEntry) {
   font-size: 12px;
 }
 
+.style-code-field textarea {
+  width: 100%;
+  min-height: 260px;
+  resize: vertical;
+  padding: 12px;
+  border: 1px solid rgba(17, 17, 17, 0.08);
+  border-radius: 16px;
+  background: #101418;
+  color: #eef4f0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.55;
+  outline: none;
+}
+
+.style-code-preview {
+  max-height: 160px;
+  margin: 0;
+  overflow: auto;
+  padding: 12px;
+  border-radius: 14px;
+  background: #101418;
+  color: #dfe9e3;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 10px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
 .font-card-footer {
   display: flex;
   align-items: center;
   gap: 10px;
   min-width: 0;
+  font-family: var(--app-default-font-family);
 }
 
 .font-card-footer > span {
@@ -784,6 +1331,7 @@ function formatFontMeta(entry: ThemeFontEntry) {
   border-radius: 999px;
   background: #f3f6f4;
   color: #363a40;
+  font-family: var(--app-default-font-family);
   font-size: 12px;
   font-weight: 900;
 }
@@ -817,6 +1365,7 @@ function formatFontMeta(entry: ThemeFontEntry) {
   margin: 0;
   padding: 9px 10px;
   border-radius: 12px;
+  font-family: var(--app-default-font-family);
   font-weight: 800;
 }
 
@@ -837,6 +1386,11 @@ function formatFontMeta(entry: ThemeFontEntry) {
   height: 100%;
   min-height: 0;
   overflow: hidden;
+  font-family: var(--app-default-font-family);
+}
+
+.style-export-composer {
+  grid-template-rows: auto minmax(0, 1fr) auto auto;
 }
 
 .composer-hero {
@@ -858,6 +1412,13 @@ function formatFontMeta(entry: ThemeFontEntry) {
   border-radius: 20px;
   background: #eef8f1;
   color: #057a35;
+}
+
+.composer-avatar.composer-avatar {
+  display: grid;
+  color: #057a35;
+  letter-spacing: 0;
+  text-transform: none;
 }
 
 .composer-hero > div {
@@ -906,6 +1467,56 @@ function formatFontMeta(entry: ThemeFontEntry) {
   overflow: auto;
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
+}
+
+.export-preset-list {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  min-height: 0;
+  overflow: auto;
+}
+
+.export-preset-item {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 12px;
+  border-radius: 16px;
+  background: rgba(246, 248, 251, 0.96);
+}
+
+.export-preset-item input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--link-green);
+}
+
+.export-preset-item span {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.export-preset-item strong,
+.export-preset-item small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.export-preset-item strong {
+  color: #111111;
+  font-size: 14px;
+  font-weight: 900;
+}
+
+.export-preset-item small {
+  color: #77808a;
+  font-size: 12px;
+  font-weight: 800;
 }
 
 .form-grid {
@@ -1022,6 +1633,74 @@ function formatFontMeta(entry: ThemeFontEntry) {
   color: #ffffff;
 }
 
+.footer-button:disabled {
+  opacity: 0.58;
+  cursor: default;
+}
+
+.font-error-sheet {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  font-family: var(--app-default-font-family);
+}
+
+.font-error-sheet strong {
+  color: #111111;
+  font-size: 16px;
+  font-weight: 900;
+}
+
+.font-error-sheet p {
+  margin: 0;
+  color: #4f535b;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.font-error-sheet dl {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.font-error-sheet dl > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 10px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.72);
+  box-shadow: inset 0 0 0 1px rgba(17, 17, 17, 0.06);
+}
+
+.font-error-sheet dt,
+.font-error-sheet dd {
+  margin: 0;
+  min-width: 0;
+}
+
+.font-error-sheet dt {
+  color: #9d7a86;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.font-error-sheet dd {
+  overflow-wrap: anywhere;
+  color: #252a31;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.font-error-tip {
+  padding: 10px;
+  border-radius: 14px;
+  background: rgba(239, 68, 90, 0.1);
+  color: #b42b40 !important;
+  font-weight: 800;
+}
+
 :global(.modal-panel .modal-body .font-import-composer.font-import-composer .composer-footer) {
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) !important;
   gap: 0 !important;
@@ -1040,6 +1719,34 @@ function formatFontMeta(entry: ThemeFontEntry) {
 }
 
 :global(.modal-panel .modal-body .font-import-composer.font-import-composer .footer-save) {
+  border-radius: 0 16px 16px 0 !important;
+}
+
+:global(.modal-panel .modal-body .style-import-composer.style-import-composer .composer-footer),
+:global(.modal-panel .modal-body .style-export-composer.style-export-composer .composer-footer) {
+  display: grid !important;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  gap: 0 !important;
+  width: 100% !important;
+}
+
+:global(.modal-panel .modal-body .style-import-composer.style-import-composer .footer-button),
+:global(.modal-panel .modal-body .style-export-composer.style-export-composer .footer-button) {
+  display: inline-flex !important;
+  justify-content: center !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  min-height: 42px !important;
+  border-radius: 0 !important;
+}
+
+:global(.modal-panel .modal-body .style-import-composer.style-import-composer .footer-cancel),
+:global(.modal-panel .modal-body .style-export-composer.style-export-composer .footer-cancel) {
+  border-radius: 16px 0 0 16px !important;
+}
+
+:global(.modal-panel .modal-body .style-import-composer.style-import-composer .footer-save),
+:global(.modal-panel .modal-body .style-export-composer.style-export-composer .footer-save) {
   border-radius: 0 16px 16px 0 !important;
 }
 
@@ -1064,6 +1771,7 @@ function formatFontMeta(entry: ThemeFontEntry) {
   padding: 6px 2px;
   border-radius: 13px;
   color: var(--muted);
+  font-family: var(--app-default-font-family);
   font-size: 10px;
   font-weight: 800;
 }
@@ -1107,7 +1815,9 @@ function formatFontMeta(entry: ThemeFontEntry) {
   }
 
   .font-card-top {
-    grid-template-columns: 42px minmax(0, 1fr);
+    grid-template-columns: 42px minmax(0, 1fr) max-content;
+    align-items: center;
+    gap: 10px;
   }
 
   .font-mark {
@@ -1117,18 +1827,34 @@ function formatFontMeta(entry: ThemeFontEntry) {
   }
 
   .status-pill {
-    grid-column: 2;
-    justify-self: start;
+    grid-column: auto;
+    justify-self: end;
+    margin-left: 0;
+    padding-inline: 8px;
+    font-size: 10px;
   }
 
   .font-card-footer {
+    display: grid;
     align-items: stretch;
-    flex-direction: column;
+    gap: 8px;
   }
 
-  .font-card-footer > div,
-  .card-action {
+  .font-card-footer > span {
+    margin-right: 0;
+  }
+
+  .font-card-footer > div {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
     width: 100%;
+  }
+
+  .card-action {
+    min-width: 0;
+    width: 100%;
+    padding-inline: 8px;
   }
 }
 </style>

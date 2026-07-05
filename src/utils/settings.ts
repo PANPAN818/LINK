@@ -1,4 +1,4 @@
-import type { ApiVendor, ApiVendorModel, AppKeepAliveSettings, AppRingtoneSettings, AppSettings, AppThemeSettings, ChatModelOverrides, CharacterRingtoneSettings, GitHubBackupSettings, ImageModelScope, ImageModelSelection, ImagePromptPreset, ImageProviderType, MinimaxTtsAudioFormat, MinimaxTtsSettings, NovelAiImageSettings, OpenAiImageSettings, OpenAiTtsAudioFormat, OpenAiTtsSettings, PollinationsImageSettings, RingtoneAsset, RingtoneEventType, ThemeFontEntry, ThemeFontSource, TtsProviderType } from '@/types/domain';
+import type { ApiVendor, ApiVendorModel, AppKeepAliveSettings, AppRingtoneSettings, AppSettings, AppThemeSettings, ChatModelOverrides, CharacterRingtoneSettings, GitHubBackupSettings, ImageModelScope, ImageModelSelection, ImagePromptPreset, ImageProviderType, MinimaxTtsAudioFormat, MinimaxTtsSettings, NovelAiImageSettings, OpenAiImageSettings, OpenAiTtsAudioFormat, OpenAiTtsSettings, PollinationsImageSettings, RingtoneAsset, RingtoneEventType, ThemeFontEntry, ThemeFontSource, ThemeStylePreset, ThemeStylePresetSource, ThemeStyleScopeSettings, TtsProviderType } from '@/types/domain';
 import { createId } from './id';
 
 export const novelAiOfficialApiUrl = 'https://image.novelai.net';
@@ -153,14 +153,15 @@ export function createDefaultKeepAliveSettings(): AppKeepAliveSettings {
 }
 
 export function createDefaultThemeSettings(): AppThemeSettings {
+  const emptyStyleScope = { activePresetId: '', presets: [] } satisfies ThemeStyleScopeSettings;
   return {
     fonts: {
       activeFontId: '',
       entries: []
     },
-    global: {},
-    online: {},
-    offline: {}
+    global: { ...emptyStyleScope },
+    online: { ...emptyStyleScope },
+    offline: { ...emptyStyleScope }
   };
 }
 
@@ -500,6 +501,37 @@ function normalizeThemeFontEntry(entry: Partial<ThemeFontEntry> | null | undefin
   };
 }
 
+function normalizeThemeStylePresetSource(source: string | null | undefined): ThemeStylePresetSource {
+  return source === 'imported' ? 'imported' : 'custom';
+}
+
+function normalizeThemeStylePreset(entry: Partial<ThemeStylePreset> | null | undefined, index: number): ThemeStylePreset | null {
+  const css = String(entry?.css ?? '').trim();
+  if (!css) return null;
+  const now = Date.now();
+  return {
+    id: String(entry?.id ?? '').trim() || createId('theme-style'),
+    name: String(entry?.name ?? '').trim() || `线上样式 ${index + 1}`,
+    css,
+    source: normalizeThemeStylePresetSource(entry?.source),
+    createdAt: Math.max(0, Number(entry?.createdAt ?? now) || now),
+    updatedAt: Math.max(0, Number(entry?.updatedAt ?? now) || now)
+  };
+}
+
+function normalizeThemeStyleScope(settings: Partial<ThemeStyleScopeSettings> | null | undefined): ThemeStyleScopeSettings {
+  const presets = Array.isArray(settings?.presets)
+    ? settings.presets
+        .map((entry, index) => normalizeThemeStylePreset(entry, index))
+        .filter((entry): entry is ThemeStylePreset => Boolean(entry))
+    : [];
+  const activePresetId = String(settings?.activePresetId ?? '').trim();
+  return {
+    activePresetId: presets.some((entry) => entry.id === activePresetId) ? activePresetId : '',
+    presets
+  };
+}
+
 export function normalizeThemeSettings(settings: Partial<AppThemeSettings> | null | undefined): AppThemeSettings {
   const entries = Array.isArray(settings?.fonts?.entries)
     ? settings.fonts.entries
@@ -513,9 +545,9 @@ export function normalizeThemeSettings(settings: Partial<AppThemeSettings> | nul
       activeFontId: entries.some((entry) => entry.id === activeFontId && entry.enabled) ? activeFontId : '',
       entries
     },
-    global: {},
-    online: {},
-    offline: {}
+    global: normalizeThemeStyleScope(settings?.global),
+    online: normalizeThemeStyleScope(settings?.online),
+    offline: normalizeThemeStyleScope(settings?.offline)
   };
 }
 

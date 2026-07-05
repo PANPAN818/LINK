@@ -13,6 +13,7 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { useRoute } from 'vue-router';
 import MobileShell from '@/components/layout/MobileShell.vue';
 import AppModal from '@/components/common/AppModal.vue';
 import FirstRunDisclaimer from '@/components/common/FirstRunDisclaimer.vue';
@@ -21,13 +22,17 @@ import GlobalVoomNotice from '@/components/common/GlobalVoomNotice.vue';
 import { syncKeepAlive } from '@/services/keepAlive';
 import { useAppStore } from '@/stores/appStore';
 import { useMusicPlayerStore } from '@/stores/musicPlayerStore';
-import type { ThemeFontEntry } from '@/types/domain';
+import type { ThemeFontEntry, ThemeStylePreset, ThemeStyleScopeSettings } from '@/types/domain';
+import { defaultOfflineThemeCss, defaultOfflineThemePresetId, defaultOnlineThemeCss, defaultOnlineThemePresetId } from '@/utils/themeStyles';
 
 const store = useAppStore();
+const route = useRoute();
 const musicPlayer = useMusicPlayerStore();
 const musicAudioRef = ref<HTMLAudioElement | null>(null);
 let githubAutoBackupTimer: number | undefined;
 const themeFontStyleId = 'link-theme-fonts';
+const onlineThemeStyleId = 'link-online-theme-styles';
+const offlineThemeStyleId = 'link-offline-theme-styles';
 const systemFontStack = '-apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif';
 
 const showDisclaimer = computed(() => store.ready && !store.settings?.disclaimerAccepted);
@@ -37,6 +42,17 @@ const githubBackupScheduleKey = computed(() => {
   return [backup.owner, backup.repo, backup.branch, backup.path, backup.intervalMinutes].join('|');
 });
 const themeFontSettings = computed(() => store.settings?.themeSettings.fonts ?? { activeFontId: '', entries: [] as ThemeFontEntry[] });
+const onlineThemeSettings = computed(() => store.settings?.themeSettings.online ?? { activePresetId: '', presets: [] });
+const offlineThemeSettings = computed(() => store.settings?.themeSettings.offline ?? { activePresetId: '', presets: [] });
+const routeConversationId = computed(() => {
+  if (!['chat-room', 'offline-room'].includes(String(route.name ?? ''))) return '';
+  const rawId = route.params.id;
+  return Array.isArray(rawId) ? String(rawId[0] ?? '') : String(rawId ?? '');
+});
+const routeCharacter = computed(() => {
+  const conversation = routeConversationId.value ? store.conversationById(routeConversationId.value) : null;
+  return conversation ? store.characterById(conversation.charId) : null;
+});
 const keepAliveSettings = computed(() => store.settings?.keepAlive ?? null);
 
 function sanitizeCssText(value: string) {
@@ -68,6 +84,34 @@ function getThemeFontStyleElement() {
   return styleElement;
 }
 
+function getOnlineThemeStyleElement() {
+  let styleElement = document.getElementById(onlineThemeStyleId) as HTMLStyleElement | null;
+  if (!styleElement) {
+    styleElement = document.createElement('style');
+    styleElement.id = onlineThemeStyleId;
+    document.head.appendChild(styleElement);
+  }
+  return styleElement;
+}
+
+function getOfflineThemeStyleElement() {
+  let styleElement = document.getElementById(offlineThemeStyleId) as HTMLStyleElement | null;
+  if (!styleElement) {
+    styleElement = document.createElement('style');
+    styleElement.id = offlineThemeStyleId;
+    document.head.appendChild(styleElement);
+  }
+  return styleElement;
+}
+
+function setAppFontFamily(fontFamilyStack: string) {
+  const targets = [document.documentElement, document.body, document.getElementById('app')].filter((target): target is HTMLElement => Boolean(target));
+  targets.forEach((target) => {
+    if (fontFamilyStack) target.style.setProperty('--app-font-family', fontFamilyStack);
+    else target.style.removeProperty('--app-font-family');
+  });
+}
+
 function applyThemeFonts() {
   if (typeof document === 'undefined') return;
 
@@ -91,8 +135,37 @@ function applyThemeFonts() {
   getThemeFontStyleElement().textContent = [...stylesheetImports, ...fontFaces].join('\n');
 
   const fontFamilyStack = getThemeFontFamilyStack(activeFontEntry);
-  if (fontFamilyStack) document.documentElement.style.setProperty('--app-font-family', fontFamilyStack);
-  else document.documentElement.style.removeProperty('--app-font-family');
+  setAppFontFamily(fontFamilyStack);
+}
+
+function resolveThemePresetCss(settings: ThemeStyleScopeSettings, defaultPresetId: string, defaultCss: string, localPresetId = '') {
+  const localId = localPresetId.trim();
+  if (localId === defaultPresetId) return defaultCss;
+  const localPreset = localId ? settings.presets.find((entry: ThemeStylePreset) => entry.id === localId) : null;
+  if (localPreset?.css.trim()) return localPreset.css.trim();
+
+  const globalPreset = settings.activePresetId ? settings.presets.find((entry: ThemeStylePreset) => entry.id === settings.activePresetId) : null;
+  return globalPreset?.css.trim() || defaultCss;
+}
+
+function applyOnlineThemeStyles() {
+  if (typeof document === 'undefined') return;
+  getOnlineThemeStyleElement().textContent = resolveThemePresetCss(
+    onlineThemeSettings.value,
+    defaultOnlineThemePresetId,
+    defaultOnlineThemeCss,
+    routeCharacter.value?.themeStyleBindings?.onlinePresetId
+  );
+}
+
+function applyOfflineThemeStyles() {
+  if (typeof document === 'undefined') return;
+  getOfflineThemeStyleElement().textContent = resolveThemePresetCss(
+    offlineThemeSettings.value,
+    defaultOfflineThemePresetId,
+    defaultOfflineThemeCss,
+    routeCharacter.value?.themeStyleBindings?.offlinePresetId
+  );
 }
 
 function clearGitHubAutoBackupTimer() {
@@ -135,6 +208,12 @@ watch(
 );
 
 watch(themeFontSettings, applyThemeFonts, { immediate: true, deep: true });
+watch(onlineThemeSettings, applyOnlineThemeStyles, { immediate: true, deep: true });
+watch(offlineThemeSettings, applyOfflineThemeStyles, { immediate: true, deep: true });
+watch(routeCharacter, () => {
+  applyOnlineThemeStyles();
+  applyOfflineThemeStyles();
+}, { immediate: true, deep: true });
 watch(keepAliveSettings, syncKeepAlive, { immediate: true, deep: true });
 
 onMounted(() => {
@@ -143,8 +222,10 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   clearGitHubAutoBackupTimer();
-  document.documentElement.style.removeProperty('--app-font-family');
+  setAppFontFamily('');
   document.getElementById(themeFontStyleId)?.remove();
+  document.getElementById(onlineThemeStyleId)?.remove();
+  document.getElementById(offlineThemeStyleId)?.remove();
   musicPlayer.setAudioElement(null);
 });
 

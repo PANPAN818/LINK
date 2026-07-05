@@ -112,6 +112,7 @@ export interface CharacterProfile {
   profile?: CharacterVisualProfile;
   mindState?: CharacterMindState;
   modelOverrides?: ChatModelOverrides;
+  themeStyleBindings?: CharacterThemeStyleBindings;
 }
 
 export type VoomFrequency = 'very-low' | 'low' | 'medium' | 'high' | 'very-high' | 'always';
@@ -124,6 +125,11 @@ export interface ChatModelOverrides {
   summary: string;
   voom: string;
   theater: string;
+}
+
+export interface CharacterThemeStyleBindings {
+  onlinePresetId: string;
+  offlinePresetId: string;
 }
 
 export interface ChatAppearanceSettings {
@@ -887,11 +893,27 @@ export interface ThemeFontSettings {
   entries: ThemeFontEntry[];
 }
 
+export type ThemeStylePresetSource = 'custom' | 'imported';
+
+export interface ThemeStylePreset {
+  id: string;
+  name: string;
+  css: string;
+  source: ThemeStylePresetSource;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface ThemeStyleScopeSettings {
+  activePresetId: string;
+  presets: ThemeStylePreset[];
+}
+
 export interface AppThemeSettings {
   fonts: ThemeFontSettings;
-  global: Record<string, never>;
-  online: Record<string, never>;
-  offline: Record<string, never>;
+  global: ThemeStyleScopeSettings;
+  online: ThemeStyleScopeSettings;
+  offline: ThemeStyleScopeSettings;
 }
 
 export type FriendsDisplayScope = 'active-user' | 'all-users';

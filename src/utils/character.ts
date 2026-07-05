@@ -1,4 +1,4 @@
-import type { CharacterInitialProfile, CharacterProfile, CharacterProfileHistoryEntry, CharacterProfileHistoryField, VisualProfile } from '@/types/domain';
+import type { CharacterInitialProfile, CharacterProfile, CharacterProfileHistoryEntry, CharacterProfileHistoryField, CharacterThemeStyleBindings, VisualProfile } from '@/types/domain';
 import { normalizeVisualProfile, removeVisualProfileAvatar, toCharacterVisualProfile } from '@/utils/profile';
 import { normalizeChatModelOverrides } from '@/utils/settings';
 import { normalizeVoomFrequency } from '@/utils/voom';
@@ -77,6 +77,13 @@ function normalizeCharacterProfileHistory(history: unknown): CharacterProfileHis
     .sort((a, b) => a.createdAt - b.createdAt);
 }
 
+function normalizeCharacterThemeStyleBindings(bindings: Partial<CharacterThemeStyleBindings> | null | undefined): CharacterThemeStyleBindings {
+  return {
+    onlinePresetId: String(bindings?.onlinePresetId ?? '').trim(),
+    offlinePresetId: String(bindings?.offlinePresetId ?? '').trim()
+  };
+}
+
 export function getCharacterInitialProfile(character: Pick<CharacterProfile, 'initialProfile' | 'nickname' | 'name'>): CharacterInitialProfile {
   const nickname = String(character.initialProfile?.nickname ?? '').trim()
     || String(character.name ?? '').trim()
@@ -124,6 +131,7 @@ export function normalizeCharacterProfile(character: CharacterProfile, fallbackU
     localWorldBookIds,
     voomFrequency,
     modelOverrides: normalizeChatModelOverrides(character.modelOverrides),
+    themeStyleBindings: normalizeCharacterThemeStyleBindings(character.themeStyleBindings),
     profile,
     ...(boundUserProfile ? { boundUserProfile } : {}),
     ...(initialProfile ? { initialProfile } : {}),

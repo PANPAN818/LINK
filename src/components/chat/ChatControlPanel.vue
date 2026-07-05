@@ -337,6 +337,28 @@
       </section>
 
       <section v-else-if="activeTab === 'beauty'" class="panel-section beauty-panel">
+        <section class="settings-block local-theme-style-block">
+          <header class="section-header">
+            <div>
+              <span>Local presets</span>
+              <strong>角色局部样式</strong>
+            </div>
+          </header>
+          <div class="local-theme-style-grid">
+            <label class="field local-theme-style-field">
+              <span>线上预设</span>
+              <select :value="characterDraft.themeStyleBindings?.onlinePresetId ?? ''" @change="updateCharacterThemeStyleBinding('online', $event)">
+                <option v-for="option in onlineThemeStyleOptions" :key="option.id" :value="option.id">{{ option.name }}</option>
+              </select>
+            </label>
+            <label class="field local-theme-style-field">
+              <span>线下预设</span>
+              <select :value="characterDraft.themeStyleBindings?.offlinePresetId ?? ''" @change="updateCharacterThemeStyleBinding('offline', $event)">
+                <option v-for="option in offlineThemeStyleOptions" :key="option.id" :value="option.id">{{ option.name }}</option>
+              </select>
+            </label>
+          </div>
+        </section>
         <section class="settings-block">
           <header class="section-header">
             <div>
@@ -733,11 +755,12 @@ import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue';
 import AppModal from '@/components/common/AppModal.vue';
 import AvatarCropperModal from '@/components/image/AvatarCropperModal.vue';
 import { useAppStore } from '@/stores/appStore';
-import type { CharacterProfile, ChatAppearanceSettings, ConversationMemoryRecord, ConversationSettings } from '@/types/domain';
+import type { CharacterProfile, ChatAppearanceSettings, ConversationMemoryRecord, ConversationSettings, ThemeStylePreset } from '@/types/domain';
 import { readImageFileFromInput } from '@/utils/imageFile';
 import { collectIncrementalGrandSummaries, estimateTokenCount, getConversationActiveMessages, getConversationFloorCount, getEffectiveHiddenFloorRanges, getGrandSummaryHiddenRange, isIncrementalGrandSummary, normalizeConversationSettings } from '@/utils/memory';
 import { parseMemorySummaryBlocks, type MemorySummaryBlock } from '@/utils/memorySummary';
 import { defaultProfileAvatar } from '@/utils/profile';
+import { defaultOfflineThemePresetId, defaultOnlineThemePresetId } from '@/utils/themeStyles';
 import { normalizeVoomFrequency, voomFrequencyOptions } from '@/utils/voom';
 
 type ColorField = 'userBubbleColor' | 'userTextColor' | 'characterBubbleColor' | 'characterTextColor' | 'narrationBubbleColor' | 'narrationTextColor';
@@ -746,6 +769,7 @@ type RgbParts = Record<RgbChannel, number>;
 type ConfirmTone = 'primary' | 'danger';
 type ConfirmAction = () => Promise<void> | void;
 type MemoryNumberField = 'summarizeEvery' | 'grandSummaryEvery' | 'grandSummaryHiddenStartFloor' | 'grandSummaryVisibleTailFloors' | 'autoMergeThreshold' | 'autoMergeBatchSize';
+type ThemeStyleBindingScope = 'online' | 'offline';
 
 type IdleWindow = Window & {
   requestIdleCallback?: (callback: () => void, options?: { timeout?: number }) => number;
@@ -810,7 +834,7 @@ const memoryNumberDraft = reactive<Record<MemoryNumberField, string>>({
   autoMergeThreshold: String(draft.memory.autoMergeThreshold),
   autoMergeBatchSize: String(draft.memory.autoMergeBatchSize)
 });
-const characterDraft = reactive<CharacterProfile>({ ...props.character, localWorldBookIds: [...props.character.localWorldBookIds] });
+const characterDraft = reactive<CharacterProfile>(cloneCharacterForDraft(props.character));
 const confirmDialog = reactive<ConfirmDialogState>({
   open: false,
   eyebrow: '',
@@ -919,6 +943,8 @@ const userAvatarPreview = computed(() => boundUserVisualProfile.value?.avatar ||
 const userAvatarAlt = computed(() => boundUserVisualProfile.value?.nickname || boundUser.value?.nickname || boundUser.value?.name || '我');
 const backgroundImageOptions = computed(() => draft.appearance.backgroundImages);
 const localWorldBooks = computed(() => store.worldBooks.filter((book) => book.scope === 'local'));
+const onlineThemeStyleOptions = computed(() => createThemeStyleOptions('online', store.settings?.themeSettings.online.presets ?? []));
+const offlineThemeStyleOptions = computed(() => createThemeStyleOptions('offline', store.settings?.themeSettings.offline.presets ?? []));
 const bubblePreviewStyle = computed(() => ({
   backgroundColor: draft.appearance.backgroundColor,
   backgroundImage: draft.appearance.backgroundImage ? `url(${draft.appearance.backgroundImage})` : 'none'
@@ -1143,9 +1169,31 @@ watch(
 
 watch(
   () => props.character,
-  (nextCharacter) => Object.assign(characterDraft, { ...nextCharacter, localWorldBookIds: [...nextCharacter.localWorldBookIds] }),
+  (nextCharacter) => Object.assign(characterDraft, cloneCharacterForDraft(nextCharacter)),
   { immediate: true, deep: true }
 );
+
+function cloneCharacterForDraft(character: CharacterProfile): CharacterProfile {
+  return {
+    ...character,
+    localWorldBookIds: [...character.localWorldBookIds],
+    themeStyleBindings: {
+      onlinePresetId: String(character.themeStyleBindings?.onlinePresetId ?? '').trim(),
+      offlinePresetId: String(character.themeStyleBindings?.offlinePresetId ?? '').trim()
+    }
+  };
+}
+
+function createThemeStyleOptions(scope: ThemeStyleBindingScope, presets: ThemeStylePreset[]) {
+  const defaultPresetId = scope === 'online' ? defaultOnlineThemePresetId : defaultOfflineThemePresetId;
+  const defaultPresetName = scope === 'online' ? '默认线上样式' : '默认线下样式';
+  const globalPresetName = scope === 'online' ? '跟随全局线上样式' : '跟随全局线下样式';
+  return [
+    { id: '', name: globalPresetName },
+    { id: defaultPresetId, name: defaultPresetName },
+    ...presets.map((preset) => ({ id: preset.id, name: preset.name }))
+  ];
+}
 
 function saveDraft() {
   void store.saveConversationSettings({ ...draft, conversationId: props.conversationId });
@@ -1772,7 +1820,24 @@ function hasHiddenRange(memory: ConversationMemoryRecord) {
 }
 
 function saveCharacterDraft() {
-  void store.saveCharacter({ ...characterDraft, localWorldBookIds: [...characterDraft.localWorldBookIds] });
+  void store.saveCharacter({
+    ...characterDraft,
+    localWorldBookIds: [...characterDraft.localWorldBookIds],
+    themeStyleBindings: {
+      onlinePresetId: String(characterDraft.themeStyleBindings?.onlinePresetId ?? '').trim(),
+      offlinePresetId: String(characterDraft.themeStyleBindings?.offlinePresetId ?? '').trim()
+    }
+  });
+}
+
+function updateCharacterThemeStyleBinding(scope: ThemeStyleBindingScope, event: Event) {
+  const presetId = (event.target as HTMLSelectElement).value.trim();
+  characterDraft.themeStyleBindings = {
+    onlinePresetId: String(characterDraft.themeStyleBindings?.onlinePresetId ?? '').trim(),
+    offlinePresetId: String(characterDraft.themeStyleBindings?.offlinePresetId ?? '').trim(),
+    [`${scope}PresetId`]: presetId
+  };
+  saveCharacterDraft();
 }
 
 function toggleLocalWorldBook(bookId: string, event: Event) {
@@ -1855,6 +1920,30 @@ function applyEditedAvatar(value: string) {
 .panel-section {
   display: grid;
   gap: 14px;
+}
+
+.local-theme-style-block {
+  display: grid;
+  gap: 12px;
+}
+
+.local-theme-style-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.local-theme-style-field select {
+  width: 100%;
+  min-height: 40px;
+  padding: 0 12px;
+  border: 1px solid rgba(17, 17, 17, 0.08);
+  border-radius: 14px;
+  outline: none;
+  background: rgba(255, 255, 255, 0.86);
+  color: #202326;
+  font: inherit;
+  font-weight: 850;
 }
 
 .memory-hero,
@@ -5120,6 +5209,10 @@ function applyEditedAvatar(value: string) {
 }
 
 @media (max-width: 360px) {
+  .local-theme-style-grid {
+    grid-template-columns: 1fr;
+  }
+
   .beauty-panel .background-tool-panel {
     grid-template-columns: 1fr;
   }
