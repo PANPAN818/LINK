@@ -118,7 +118,7 @@
                   </div>
                   <div class="entry-action-row">
                     <button class="entry-switch" :class="{ active: activeEntry.enabled }" type="button" @click="toggleLoreEntry(activeEntryIndex)">
-                      <span>{{ activeEntry.enabled ? '开启条目' : '关闭条目' }}</span>
+                      <span>{{ activeEntry.enabled ? '已开启' : '已关闭' }}</span>
                     </button>
                     <button class="entry-delete-button" type="button" :disabled="draft.entries.length <= 1" aria-label="删除条目" @click="removeLoreEntry(activeEntryIndex)">
                       <span>删除条目</span>

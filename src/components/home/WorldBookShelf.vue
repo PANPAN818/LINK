@@ -16,6 +16,7 @@
             <span class="book-glow" aria-hidden="true"></span>
             <span class="cover-wrap">
               <img class="cover-image" :src="resolveWorldBookCover(entry)" :alt="`${entry.title || 'World book'} 封面`" />
+              <span class="book-status-badge" :class="{ active: entry.enabled }">{{ entry.enabled ? 'ON' : 'OFF' }}</span>
               <i class="cover-spine"></i>
             </span>
             <span class="book-copy">
@@ -210,6 +211,35 @@ defineExpose({
   height: 100%;
   object-fit: cover;
   pointer-events: none;
+}
+
+.book-status-badge {
+  position: absolute;
+  top: 0;
+  right: 8px;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  min-height: 24px;
+  padding: 3px 0 6px;
+  border: 1px solid rgba(255, 255, 255, 0.72);
+  border-top: 0;
+  background: linear-gradient(180deg, rgba(247, 249, 248, 0.96), rgba(216, 223, 219, 0.92));
+  color: #5e6862;
+  clip-path: polygon(0 0, 100% 0, 100% 100%, 50% calc(100% - 4px), 0 100%);
+  font-size: 6px;
+  font-weight: 900;
+  line-height: 1;
+  letter-spacing: 0;
+  text-transform: uppercase;
+  box-shadow: 0 6px 10px rgba(16, 24, 20, 0.12);
+}
+
+.book-status-badge.active {
+  background: linear-gradient(180deg, rgba(222, 251, 233, 0.98), rgba(109, 210, 145, 0.92));
+  color: #1d6035;
 }
 
 .cover-spine {
