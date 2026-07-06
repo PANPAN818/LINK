@@ -15,7 +15,10 @@
       <button v-else class="icon-button" type="button" aria-label="退出线下模式" @click="$emit('online')">
         <MessageCircle :size="24" />
       </button>
-      <button class="icon-button" type="button" aria-label="通话">
+      <button v-if="mode === 'online'" class="icon-button" type="button" aria-label="进入线下模式" :disabled="offlineDisabled" @click="$emit('offline')">
+        <DoorOpen :size="24" />
+      </button>
+      <button v-else class="icon-button" type="button" aria-label="通话">
         <Phone :size="24" />
       </button>
       <button class="icon-button" type="button" aria-label="更多" @click="$emit('open-menu')">
@@ -28,13 +31,14 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import { useRouter } from 'vue-router';
-import { ChevronLeft, MessageCircle, Menu, Phone, Search } from 'lucide-vue-next';
+import { ChevronLeft, DoorOpen, MessageCircle, Menu, Phone, Search } from 'lucide-vue-next';
 import type { CharacterProfile, ChatMode } from '@/types/domain';
 import { getCharacterDisplayName } from '@/utils/character';
 
 const props = defineProps<{
   character: CharacterProfile;
   mode: ChatMode;
+  offlineDisabled?: boolean;
 }>();
 
 defineEmits<{
@@ -91,5 +95,10 @@ const displayName = computed(() => getCharacterDisplayName(props.character));
 
 .icon-row {
   gap: var(--top-icon-gap);
+}
+
+.icon-button:disabled {
+  opacity: 0.45;
+  cursor: default;
 }
 </style>

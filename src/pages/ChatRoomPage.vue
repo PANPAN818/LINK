@@ -3,7 +3,8 @@
     <ChatHeader
       :character="character"
       mode="online"
-      @offline="showOfflineConfirm = true"
+      :offline-disabled="chatActionLocked"
+      @offline="enterOffline"
       @search="openChatSearch"
       @open-menu="openChatSettings"
     />
@@ -196,10 +197,6 @@
         <button type="button" :class="{ busy: currentConversationReplying }" :aria-disabled="currentConversationReplying" @click="regenerateReply">
           <RefreshCw :size="20" />
           <span>重新回复</span>
-        </button>
-        <button type="button" :disabled="chatActionLocked" @click="openOfflineConfirmFromMenu">
-          <DoorOpen :size="20" />
-          <span>进入线下模式</span>
         </button>
         <button type="button" :disabled="chatActionLocked" @click="openNarrationPanel">
           <MessageSquareText :size="20" />
@@ -532,17 +529,6 @@
       </section>
     </AppModal>
 
-    <AppModal v-model="showOfflineConfirm" title="进入线下模式" :show-header="false" variant="ins">
-      <section class="offline-confirm">
-        <h3>进入线下模式？</h3>
-        <p>将切换到线下模式，开启长篇小说式对话。</p>
-        <div class="offline-confirm-actions">
-          <button class="secondary-action" type="button" @click="showOfflineConfirm = false">取消</button>
-          <button class="primary-action" type="button" @click="enterOffline">进入</button>
-        </div>
-      </section>
-    </AppModal>
-
     <AppModal v-model="showUserProfile" title="我的主页" :show-header="false" variant="profile-ins">
       <UserProfileSheet v-if="conversationUser" :user="conversationUser" :posts="store.sortedVoomPosts" @save="saveUserProfile" />
     </AppModal>
@@ -567,7 +553,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { ArchiveX, BookmarkPlus, CheckSquare, Clapperboard, ContactRound, Copy, DoorOpen, Grid3X3, MapPin, MessageSquareText, Pencil, Quote, RefreshCw, RotateCcw, SlidersHorizontal, Sparkles, Trash2, UserMinus, UserRound, Wallet, X } from 'lucide-vue-next';
+import { ArchiveX, BookmarkPlus, CheckSquare, Clapperboard, ContactRound, Copy, Grid3X3, MapPin, MessageSquareText, Pencil, Quote, RefreshCw, RotateCcw, SlidersHorizontal, Sparkles, Trash2, UserMinus, UserRound, Wallet, X } from 'lucide-vue-next';
 import AppModal from '@/components/common/AppModal.vue';
 import ChatHeader from '@/components/chat/ChatHeader.vue';
 import ChatModelSwitchPanel from '@/components/chat/ChatModelSwitchPanel.vue';
@@ -672,7 +658,6 @@ const showUserProfile = ref(false);
 const showActionMenu = ref(false);
 const showRegeneratePrompt = ref(false);
 const showModelSwitch = ref(false);
-const showOfflineConfirm = ref(false);
 const showStickers = ref(false);
 const stickerPanelHeight = ref(0);
 const showImagePanel = ref(false);
@@ -1191,12 +1176,6 @@ function openNarrationPanel() {
   showActionMenu.value = false;
   narrationDraft.value = '';
   showNarrationPanel.value = true;
-}
-
-function openOfflineConfirmFromMenu() {
-  if (chatActionLocked.value) return;
-  showActionMenu.value = false;
-  showOfflineConfirm.value = true;
 }
 
 async function sendTransferMessage() {
@@ -2013,7 +1992,7 @@ async function saveCharacterProfile(nextCharacter: CharacterProfile) {
 }
 
 async function enterOffline() {
-  showOfflineConfirm.value = false;
+  if (chatActionLocked.value) return;
   await store.updateConversationMode(props.id, 'offline');
   await router.replace({ name: 'offline-room', params: { id: props.id } });
 }
@@ -3738,41 +3717,6 @@ onBeforeUnmount(() => {
 
 .action-menu .danger-menu-action svg {
   color: #e5484d;
-}
-
-.offline-confirm {
-  display: grid;
-  gap: 12px;
-  color: #202329;
-}
-
-.offline-confirm h3 {
-  margin: 0;
-  font-size: 18px;
-  font-weight: 900;
-}
-
-.offline-confirm p {
-  margin: 0;
-  color: #62666d;
-  font-size: 14px;
-  line-height: 1.55;
-}
-
-.offline-confirm-actions {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px;
-  margin-top: 4px;
-}
-
-.offline-confirm-actions button {
-  min-height: 42px;
-}
-
-.offline-confirm-actions .primary-action {
-  background: #dfe3e8;
-  color: #202329;
 }
 
 @keyframes typing {

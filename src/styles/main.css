@@ -366,12 +366,12 @@ a {
     font-size: var(--ios-control-font-size) !important;
   }
 
-  #app .mobile-shell .screen :is(h1:not(.top-title), h2, h3, .memory-hero strong, .publisher-copy strong, .picker-copy strong, .sheet-copy strong, .offline-confirm h3, .delete-confirm-sheet h3) {
+  #app .mobile-shell .screen :is(h1:not(.top-title), h2, h3, .memory-hero strong, .publisher-copy strong, .picker-copy strong, .sheet-copy strong, .delete-confirm-sheet h3) {
     font-size: var(--compact-heading-font-size);
     line-height: 1.2;
   }
 
-  #app .mobile-shell .screen :is(p, li, label, .field-hint, .panel-copy, .module-description, .placeholder-panel p, .publisher-copy span, .picker-copy span, .offline-confirm p, .delete-confirm-sheet p) {
+  #app .mobile-shell .screen :is(p, li, label, .field-hint, .panel-copy, .module-description, .placeholder-panel p, .publisher-copy span, .picker-copy span, .delete-confirm-sheet p) {
     font-size: var(--compact-copy-font-size);
     line-height: 1.45;
   }

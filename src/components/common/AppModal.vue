@@ -245,8 +245,7 @@ defineEmits<{
 .modal-panel .modal-body :deep(.panel-copy),
 .modal-panel .modal-body :deep(.placeholder-panel p),
 .modal-panel .modal-body :deep(.import-preview p),
-.modal-panel .modal-body :deep(.picker-empty p),
-.modal-panel .modal-body :deep(.offline-confirm p) {
+.modal-panel .modal-body :deep(.picker-empty p) {
   font-size: 12px !important;
   line-height: 1.5 !important;
 }
@@ -283,7 +282,6 @@ defineEmits<{
 .modal-panel .modal-body :deep(.section-head h3),
 .modal-panel .modal-body :deep(.editor-heading h3),
 .modal-panel .modal-body :deep(.confirm-card h3),
-.modal-panel .modal-body :deep(.offline-confirm h3),
 .modal-panel .modal-body :deep(.upload-card strong),
 .modal-panel .modal-body :deep(.placeholder-panel strong),
 .modal-panel .modal-body :deep(.import-preview strong) {
