@@ -362,9 +362,9 @@
           <CheckSquare :size="19" />
           <span>多选</span>
         </button>
-        <button type="button" :disabled="!activeMessage || isActiveMessageFavorited" @click="favoriteActiveMessage">
+        <button type="button" :disabled="!canFavoriteActiveMessage || isActiveMessageFavorited" @click="favoriteActiveMessage">
           <BookmarkPlus :size="19" />
-          <span>{{ isActiveMessageFavorited ? '已收藏' : '收藏' }}</span>
+          <span>{{ favoriteActionLabel }}</span>
         </button>
         <button type="button" :disabled="!canRecallActiveMessage" @click="recallActiveMessage">
           <RotateCcw :size="19" />
@@ -798,7 +798,13 @@ const activeMessageTransferIsReceipt = computed(() => Boolean(activeMessage.valu
 const canRecallActiveMessage = computed(() => Boolean(activeMessage.value && activeMessage.value.sender === 'user' && !activeMessageIsSynthetic.value));
 const canQuoteActiveMessage = computed(() => Boolean(activeMessage.value && canQuoteMessage(activeMessage.value)));
 const canEditActiveMessage = computed(() => Boolean(activeMessage.value && !activeMessageIsSynthetic.value && !activeMessageTransferIsReceipt.value && !activeMessage.value.theaterLink));
+const canFavoriteActiveMessage = computed(() => Boolean(activeMessage.value && !activeMessageIsSynthetic.value && store.canFavoriteMessage(activeMessage.value)));
 const isActiveMessageFavorited = computed(() => Boolean(activeMessage.value && store.isMessageFavorited(activeMessage.value.id)));
+const favoriteActionLabel = computed(() => {
+  if (isActiveMessageFavorited.value) return '已收藏';
+  if (!canFavoriteActiveMessage.value) return '不可收藏';
+  return '收藏';
+});
 const canRegenerateActiveVoice = computed(() => Boolean(activeMessage.value?.sender === 'char'
   && activeMessage.value.voice?.transcript.trim()
   && !activeMessageIsSynthetic.value));
@@ -1742,8 +1748,9 @@ function startSelectionFromActive() {
 
 async function favoriteActiveMessage() {
   const message = activeMessage.value;
-  if (!message || isActiveMessageFavorited.value) return;
-  await store.addFavoriteMessage(message);
+  if (!message || !canFavoriteActiveMessage.value || isActiveMessageFavorited.value) return;
+  const favorite = await store.addFavoriteMessage(message);
+  if (!favorite) return;
   showMessageMenu.value = false;
   store.showConfigAlert('已加入收藏。', '收藏成功');
 }

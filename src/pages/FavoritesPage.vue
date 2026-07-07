@@ -18,12 +18,12 @@
           <div class="favorites-hero-copy">
             <span class="eyebrow">LINK Collection</span>
             <h2>把聊天里的心动瞬间收进这里</h2>
-            <p>图片、贴纸、位置、语音和文字按社交动态的节奏轻轻排好，随时回到原聊天。</p>
+            <p>文字、语音和图片按社交动态的节奏轻轻排好，随时回看心动瞬间。</p>
           </div>
           <div class="favorites-metrics" aria-label="收藏统计">
             <span>
-              <strong>{{ mediaCount }}</strong>
-              <small>Media</small>
+              <strong>{{ imageCount }}</strong>
+              <small>Image</small>
             </span>
             <span>
               <strong>{{ textCount }}</strong>
@@ -54,7 +54,7 @@
         <section v-if="!favoriteItems.length" class="favorites-state favorites-state--empty">
           <Bookmark :size="24" />
           <h2>还没有收藏</h2>
-          <p>在聊天里长按消息气泡、图片、Stickers、转账或定位，点收藏后会出现在这里。</p>
+          <p>在聊天里长按文字、语音条或图片，点收藏后会出现在这里。</p>
         </section>
 
         <section v-else-if="!filteredFavorites.length" class="favorites-state favorites-state--empty">
@@ -71,11 +71,10 @@
             :class="[`favorite-card--${item.kind}`, { 'favorite-card--visual': hasVisualPreview(item) }]"
           >
             <header class="favorite-card-head">
-              <img v-if="favoriteAuthorAvatar(item)" class="favorite-avatar" :src="favoriteAuthorAvatar(item)" :alt="item.authorName" />
-              <span v-else class="favorite-avatar favorite-avatar--empty">{{ item.authorName.slice(0, 1) }}</span>
+              <img v-if="favoriteAuthorAvatar(item)" class="favorite-avatar" :src="favoriteAuthorAvatar(item)" :alt="favoriteAuthorName(item)" />
+              <span v-else class="favorite-avatar favorite-avatar--empty">{{ favoriteAuthorName(item).slice(0, 1) }}</span>
               <div class="favorite-author">
-                <strong>{{ item.authorName }}</strong>
-                <span>{{ cardMeta(item) }}</span>
+                <strong>{{ favoriteAuthorName(item) }}</strong>
               </div>
               <button class="favorite-delete-button" type="button" aria-label="删除收藏" @click="deleteFavorite(item.id)">
                 <X :size="17" stroke-width="2.35" />
@@ -84,69 +83,19 @@
 
             <figure v-if="item.message.image" class="favorite-visual-card favorite-visual-card--image">
               <img v-if="item.message.image.url" :src="item.message.image.url" :alt="item.message.image.description" />
-              <figcaption>{{ item.message.image.description }}</figcaption>
             </figure>
 
-            <figure v-else-if="item.message.sticker" class="favorite-visual-card favorite-visual-card--sticker">
-              <img :src="getStickerDisplayImageUrl(item.message.sticker)" :alt="item.message.sticker.description" />
-              <figcaption>{{ item.message.sticker.description }}</figcaption>
-            </figure>
-
-            <section v-else-if="item.message.location" class="favorite-rich-card favorite-rich-card--location">
-              <MapPin :size="22" stroke-width="2.25" />
-              <div>
-                <small>Location</small>
-                <strong>{{ item.message.location.name }}</strong>
-                <span v-if="item.message.location.address">{{ item.message.location.address }}</span>
-                <em>{{ item.message.location.distance }}</em>
-              </div>
-            </section>
-
-            <section v-else-if="item.message.transfer" class="favorite-rich-card favorite-rich-card--transfer">
-              <WalletCards :size="22" stroke-width="2.25" />
-              <div>
-                <small>{{ transferStatusLabel(item) }}</small>
-                <strong>¥{{ item.message.transfer.amount }}</strong>
-                <em>{{ item.message.transfer.note || '无备注' }}</em>
-              </div>
-            </section>
-
-            <section v-else-if="item.message.theaterLink" class="favorite-rich-card favorite-rich-card--link">
-              <Globe2 :size="22" stroke-width="2.25" />
-              <div>
-                <small>Link</small>
-                <strong>{{ item.message.theaterLink.title }}</strong>
-                <em>{{ item.message.theaterLink.summary }}</em>
-              </div>
-            </section>
-
-            <section v-else-if="item.message.voice" class="favorite-rich-card favorite-rich-card--voice">
-              <Mic2 :size="22" stroke-width="2.25" />
+            <button v-else-if="item.message.voice" class="favorite-rich-card favorite-rich-card--voice" type="button" :class="{ playing: activeFavoriteVoiceId === item.id, loading: loadingFavoriteVoiceId === item.id }" :disabled="loadingFavoriteVoiceId === item.id" :aria-label="favoriteVoicePlayLabel(item)" @click="toggleFavoriteVoice(item)">
               <div>
                 <small>{{ formatVoiceDuration(item.message.voice.duration) }}</small>
-                <strong>Voice note</strong>
                 <p>{{ item.message.voice.transcript }}</p>
               </div>
-            </section>
-
-            <section v-else-if="item.message.offlineInvitation" class="favorite-rich-card favorite-rich-card--invite">
-              <MessageCircle :size="22" stroke-width="2.25" />
-              <div>
-                <small>Offline RP</small>
-                <strong>{{ offlineInvitationLabel(item.message.offlineInvitation.status) }}</strong>
-                <p>{{ item.message.offlineInvitation.prompt }}</p>
-              </div>
-            </section>
+            </button>
 
             <p v-else class="favorite-text" :class="{ narration: item.kind === 'narration' }">{{ item.summary }}</p>
 
             <footer class="favorite-card-foot">
-              <span class="favorite-kind-pill">{{ kindLabel(item) }}</span>
               <span class="favorite-time">{{ formatFavoriteTime(item.favoritedAt) }}</span>
-              <button type="button" @click="openConversation(item)">
-                <MessageCircle :size="15" stroke-width="2.35" />
-                <span>查看聊天</span>
-              </button>
             </footer>
           </article>
         </section>
@@ -156,46 +105,45 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, onBeforeUnmount, ref } from 'vue';
 import { useRouter } from 'vue-router';
-import { Bookmark, FileText, Globe2, Images, LoaderCircle, MapPin, MessageCircle, Mic2, Sparkles, WalletCards, X } from 'lucide-vue-next';
+import { Bookmark, FileText, Images, LoaderCircle, Mic2, Sparkles, X } from 'lucide-vue-next';
 import { useAppStore } from '@/stores/appStore';
-import type { ChatOfflineInvitationStatus, Conversation, FavoriteMessageKind, FavoriteMessageRecord } from '@/types/domain';
-import { getStickerDisplayImageUrl } from '@/utils/stickers';
+import type { FavoriteMessageRecord } from '@/types/domain';
 
-type FavoriteFilter = 'all' | 'media' | 'text' | 'voice' | 'places' | 'money';
+type FavoriteFilter = 'all' | 'image' | 'text' | 'voice';
 
 const router = useRouter();
 const store = useAppStore();
 const activeFilter = ref<FavoriteFilter>('all');
+const activeFavoriteVoiceId = ref('');
+const loadingFavoriteVoiceId = ref('');
+let activeFavoriteAudio: HTMLAudioElement | null = null;
 
 const favoriteItems = computed(() => store.sortedFavorites);
-const mediaCount = computed(() => favoriteItems.value.filter(isMediaFavorite).length);
+const imageCount = computed(() => favoriteItems.value.filter(isImageFavorite).length);
 const textCount = computed(() => favoriteItems.value.filter((item) => item.kind === 'text' || item.kind === 'narration').length);
 const voiceCount = computed(() => favoriteItems.value.filter((item) => item.kind === 'voice').length);
 const favoriteFilters = computed(() => [
   { id: 'all' as FavoriteFilter, label: '全部', icon: Bookmark, count: favoriteItems.value.length },
-  { id: 'media' as FavoriteFilter, label: '媒体', icon: Images, count: mediaCount.value },
+  { id: 'image' as FavoriteFilter, label: '图片', icon: Images, count: imageCount.value },
   { id: 'text' as FavoriteFilter, label: '文字', icon: FileText, count: textCount.value },
-  { id: 'voice' as FavoriteFilter, label: '语音', icon: Mic2, count: voiceCount.value },
-  { id: 'places' as FavoriteFilter, label: '地点', icon: MapPin, count: favoriteItems.value.filter((item) => item.kind === 'location').length },
-  { id: 'money' as FavoriteFilter, label: '转账', icon: WalletCards, count: favoriteItems.value.filter((item) => item.kind === 'transfer').length }
+  { id: 'voice' as FavoriteFilter, label: '语音', icon: Mic2, count: voiceCount.value }
 ]);
 const filteredFavorites = computed(() => favoriteItems.value.filter((item) => matchesFilter(item, activeFilter.value)));
 
 void store.hydrate();
 
-function isMediaFavorite(item: FavoriteMessageRecord) {
-  return item.kind === 'image' || item.kind === 'sticker' || item.kind === 'theaterLink';
+function isImageFavorite(item: FavoriteMessageRecord) {
+  return item.kind === 'image' && Boolean(item.message.image?.url);
 }
 
 function matchesFilter(item: FavoriteMessageRecord, filter: FavoriteFilter) {
   if (filter === 'all') return true;
-  if (filter === 'media') return isMediaFavorite(item);
-  if (filter === 'text') return item.kind === 'text' || item.kind === 'narration' || item.kind === 'offlineInvitation';
+  if (filter === 'image') return isImageFavorite(item);
+  if (filter === 'text') return item.kind === 'text' || item.kind === 'narration';
   if (filter === 'voice') return item.kind === 'voice';
-  if (filter === 'places') return item.kind === 'location';
-  return item.kind === 'transfer';
+  return false;
 }
 
 function goBack() {
@@ -203,16 +151,10 @@ function goBack() {
   else void router.push({ name: 'home' });
 }
 
-function cardMeta(item: FavoriteMessageRecord) {
-  const modeLabel = item.mode === 'offline' ? '线下 RP' : '线上聊天';
-  const targetName = item.characterName || item.userName || 'LINK';
-  return `${targetName} · ${modeLabel}`;
-}
-
-function transferStatusLabel(item: FavoriteMessageRecord) {
-  const status = item.message.transfer?.status ?? 'pending';
-  const label = ({ pending: '等待处理', accepted: '已接收', rejected: '已拒绝' } as const)[status];
-  return item.message.transfer?.responseToMessageId ? `转账回执 · ${label}` : label;
+function favoriteAuthorName(item: FavoriteMessageRecord) {
+  if (item.sender === 'char') return item.characterName || item.authorName;
+  if (item.sender === 'user') return item.userName || item.authorName;
+  return item.authorName;
 }
 
 function favoriteAuthorAvatar(item: FavoriteMessageRecord) {
@@ -236,73 +178,84 @@ function formatFavoriteTime(timestamp: number) {
   }).format(timestamp);
 }
 
-function offlineInvitationLabel(status: ChatOfflineInvitationStatus) {
-  return ({ pending: '等待开启', accepted: '已开启', rejected: '已拒绝' } as const)[status];
-}
-
-function kindLabel(item: FavoriteMessageRecord) {
-  const labels: Record<FavoriteMessageKind, string> = {
-    text: 'Text',
-    image: 'Photo',
-    sticker: 'Sticker',
-    voice: 'Voice',
-    location: 'Place',
-    transfer: 'Pay',
-    theaterLink: 'Link',
-    offlineInvitation: 'RP',
-    narration: 'Note'
-  };
-  return labels[item.kind];
-}
-
 function hasVisualPreview(item: FavoriteMessageRecord) {
-  return Boolean(item.message.image || item.message.sticker);
+  return isImageFavorite(item);
 }
 
 async function deleteFavorite(favoriteId: string) {
   await store.deleteFavorite(favoriteId);
 }
 
-function uniqueIds(ids: string[]) {
-  return [...new Set(ids.filter(Boolean))];
+function liveMessageForFavorite(item: FavoriteMessageRecord) {
+  return store.messagesForConversation(item.conversationId).find((message) => message.id === item.sourceMessageId);
 }
 
-function findFavoriteConversation(item: FavoriteMessageRecord): Conversation | null {
-  const directIds = uniqueIds([item.conversationId, item.message.conversationId]);
-  for (const id of directIds) {
-    const conversation = store.conversationById(id);
-    if (conversation) return conversation;
-  }
-  if (item.characterId) {
-    const conversation = store.conversations.find((entry) => entry.charId === item.characterId);
-    if (conversation) return conversation;
-  }
-  if (item.userId) {
-    const conversation = store.conversations.find((entry) => entry.userId === item.userId);
-    if (conversation) return conversation;
-  }
-  return null;
+function favoriteVoiceAudioUrl(item: FavoriteMessageRecord) {
+  return item.message.voice?.audioUrl || liveMessageForFavorite(item)?.voice?.audioUrl || '';
 }
 
-function favoriteRouteMode(item: FavoriteMessageRecord, conversation: Conversation) {
-  const liveMessage = store.messagesForConversation(conversation.id).find((message) => message.id === item.sourceMessageId);
-  return liveMessage?.mode ?? item.message.mode ?? item.mode ?? conversation.activeMode;
+function canGenerateFavoriteVoice(item: FavoriteMessageRecord) {
+  return item.sender === 'char' && Boolean(item.message.voice?.transcript.trim() || liveMessageForFavorite(item)?.voice?.transcript.trim());
 }
 
-async function openConversation(item: FavoriteMessageRecord) {
-  await store.hydrate();
-  const conversation = findFavoriteConversation(item);
-  if (!conversation) {
-    void router.push({ name: 'chats' });
-    return;
+function favoriteVoicePlayLabel(item: FavoriteMessageRecord) {
+  if (loadingFavoriteVoiceId.value === item.id) return '正在生成收藏语音';
+  if (activeFavoriteVoiceId.value === item.id) return '暂停收藏语音';
+  return favoriteVoiceAudioUrl(item) ? '播放收藏语音' : canGenerateFavoriteVoice(item) ? '生成并播放收藏语音' : '暂无缓存语音';
+}
+
+async function resolveFavoriteVoiceAudioUrl(item: FavoriteMessageRecord) {
+  const cachedAudioUrl = favoriteVoiceAudioUrl(item);
+  if (cachedAudioUrl) return cachedAudioUrl;
+  if (!canGenerateFavoriteVoice(item)) throw new Error('这条收藏语音暂无缓存音频。');
+  loadingFavoriteVoiceId.value = item.id;
+  try {
+    return await store.generateMessageVoiceAudio(item.sourceMessageId);
+  } finally {
+    loadingFavoriteVoiceId.value = '';
   }
-  const mode = favoriteRouteMode(item, conversation);
-  void router.push({
-    name: mode === 'offline' ? 'offline-room' : 'chat-room',
-    params: { id: conversation.id },
-    query: { focus: item.sourceMessageId }
+}
+
+function stopFavoriteVoice() {
+  if (activeFavoriteAudio) {
+    activeFavoriteAudio.pause();
+    activeFavoriteAudio.onended = null;
+    activeFavoriteAudio.onerror = null;
+  }
+  activeFavoriteAudio = null;
+  activeFavoriteVoiceId.value = '';
+}
+
+function playFavoriteVoice(item: FavoriteMessageRecord, audioUrl: string) {
+  stopFavoriteVoice();
+  const audio = new Audio(audioUrl);
+  activeFavoriteAudio = audio;
+  activeFavoriteVoiceId.value = item.id;
+  audio.onended = stopFavoriteVoice;
+  audio.onerror = () => {
+    stopFavoriteVoice();
+    store.showConfigAlert('当前浏览器无法播放这条收藏语音。', '播放失败');
+  };
+  void audio.play().catch(() => {
+    stopFavoriteVoice();
+    store.showConfigAlert('当前浏览器阻止了语音播放，请再点一次语音条。', '播放失败');
   });
 }
+
+async function toggleFavoriteVoice(item: FavoriteMessageRecord) {
+  if (activeFavoriteVoiceId.value === item.id && activeFavoriteAudio && !activeFavoriteAudio.paused) {
+    stopFavoriteVoice();
+    return;
+  }
+  try {
+    playFavoriteVoice(item, await resolveFavoriteVoiceAudioUrl(item));
+  } catch (error) {
+    stopFavoriteVoice();
+    store.showConfigAlert(error instanceof Error ? error.message : '收藏语音播放失败，请检查 TTS 配置。', '播放失败');
+  }
+}
+
+onBeforeUnmount(stopFavoriteVoice);
 </script>
 
 <style scoped>
@@ -564,8 +517,7 @@ async function openConversation(item: FavoriteMessageRecord) {
   min-width: 0;
 }
 
-.favorite-author strong,
-.favorite-author span {
+.favorite-author strong {
   display: block;
   min-width: 0;
   overflow: hidden;
@@ -577,13 +529,6 @@ async function openConversation(item: FavoriteMessageRecord) {
   color: #171717;
   font-size: 14px;
   font-weight: 930;
-}
-
-.favorite-author span {
-  margin-top: 4px;
-  color: #8a8a82;
-  font-size: 11px;
-  font-weight: 760;
 }
 
 .favorite-delete-button {
@@ -613,31 +558,6 @@ async function openConversation(item: FavoriteMessageRecord) {
   object-fit: cover;
 }
 
-.favorite-visual-card--sticker {
-  display: grid;
-  justify-items: center;
-  padding: 24px 16px 0;
-  background:
-    linear-gradient(135deg, rgba(255, 239, 243, 0.72), rgba(240, 247, 241, 0.86)),
-    #f7f7f4;
-}
-
-.favorite-visual-card--sticker img {
-  width: min(54vw, 230px);
-  height: min(54vw, 230px);
-  object-fit: contain;
-}
-
-.favorite-visual-card figcaption {
-  width: 100%;
-  padding: 12px 14px 14px;
-  color: #555a53;
-  font-size: 12px;
-  font-weight: 720;
-  line-height: 1.55;
-  overflow-wrap: anywhere;
-}
-
 .favorite-rich-card,
 .favorite-text {
   margin: 0 14px 2px;
@@ -648,11 +568,20 @@ async function openConversation(item: FavoriteMessageRecord) {
 
 .favorite-rich-card {
   display: grid;
-  grid-template-columns: 42px minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   align-items: center;
   gap: 12px;
+  width: calc(100% - 28px);
   min-width: 0;
   padding: 15px;
+  border: 0;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.favorite-rich-card--voice {
+  background: transparent;
 }
 
 .favorite-rich-card > svg {
@@ -662,26 +591,6 @@ async function openConversation(item: FavoriteMessageRecord) {
   border-radius: 16px;
   background: #ffffff;
   color: #171717;
-}
-
-.favorite-rich-card--location > svg {
-  background: #eaf5ff;
-  color: #377fc2;
-}
-
-.favorite-rich-card--transfer > svg {
-  background: #fff4d8;
-  color: #a46b00;
-}
-
-.favorite-rich-card--voice > svg {
-  background: #f0edf8;
-  color: #6652a8;
-}
-
-.favorite-rich-card--link > svg {
-  background: #eaf7ee;
-  color: #16824d;
 }
 
 .favorite-rich-card > div {
@@ -713,11 +622,6 @@ async function openConversation(item: FavoriteMessageRecord) {
   line-height: 1.28;
 }
 
-.favorite-rich-card--transfer strong {
-  font-size: 24px;
-  line-height: 1.05;
-}
-
 .favorite-rich-card span,
 .favorite-rich-card em,
 .favorite-rich-card p {
@@ -729,7 +633,12 @@ async function openConversation(item: FavoriteMessageRecord) {
   line-height: 1.48;
 }
 
+.favorite-rich-card--voice:active {
+  transform: translateY(1px);
+}
+
 .favorite-text {
+  background: transparent;
   padding: 16px;
   font-size: 14px;
   font-weight: 700;
@@ -744,24 +653,10 @@ async function openConversation(item: FavoriteMessageRecord) {
 }
 
 .favorite-card-foot {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 8px;
+  display: flex;
+  justify-content: flex-end;
   min-width: 0;
   padding: 12px 14px 14px;
-}
-
-.favorite-kind-pill {
-  display: inline-flex;
-  align-items: center;
-  min-height: 26px;
-  padding: 0 9px;
-  border-radius: 999px;
-  background: #f1f1ec;
-  color: #666a64;
-  font-size: 10px;
-  font-weight: 930;
 }
 
 .favorite-time {
@@ -770,25 +665,11 @@ async function openConversation(item: FavoriteMessageRecord) {
   color: #9a9b94;
   font-size: 11px;
   font-weight: 760;
+  text-align: right;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.favorite-card-foot button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  min-height: 34px;
-  padding: 0 12px;
-  border-radius: 999px;
-  background: #171717;
-  color: #ffffff;
-  font-size: 12px;
-  font-weight: 900;
-}
-
-.favorite-card-foot button:active,
 .favorite-filter:active,
 .favorites-title-button:active {
   transform: translateY(1px);
@@ -900,8 +781,9 @@ async function openConversation(item: FavoriteMessageRecord) {
   }
 
   .favorite-rich-card {
-    grid-template-columns: 38px minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr);
     gap: 10px;
+    width: calc(100% - 24px);
     padding: 13px;
   }
 

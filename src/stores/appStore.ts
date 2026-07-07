@@ -765,14 +765,19 @@ export const useAppStore = defineStore('app', () => {
     const rawMusicThreads = snapshot.musicCommentThreads ?? [];
     const changedIdentityMusicThreads = musicCommentThreads.value.filter((thread, index) => thread !== rawMusicThreads[index]);
     const rawFavorites = snapshot.favorites ?? [];
+    const keptFavoriteIds = new Set(favorites.value.map((favorite) => favorite.id));
+    const removedFavoriteIds = rawFavorites
+      .filter((favorite) => favorite?.id && !keptFavoriteIds.has(favorite.id))
+      .map((favorite) => favorite.id);
     const changedIdentityFavorites = favorites.value.filter((favorite, index) => JSON.stringify(favorite) !== JSON.stringify(rawFavorites[index]));
-    if (changedIdentityMessages.length || changedIdentityPosts.length || changedIdentityTheaters.length || changedIdentityMusicThreads.length || changedIdentityFavorites.length) {
+    if (changedIdentityMessages.length || changedIdentityPosts.length || changedIdentityTheaters.length || changedIdentityMusicThreads.length || changedIdentityFavorites.length || removedFavoriteIds.length) {
       await Promise.all([
         ...changedIdentityMessages.map((message) => putEntity('messages', message)),
         ...changedIdentityPosts.map((post) => putEntity('voomPosts', createPersistableVoomPost(post))),
         ...changedIdentityTheaters.map((theater) => putEntity('smallTheaters', theater)),
         ...changedIdentityMusicThreads.map((thread) => putEntity('musicCommentThreads', thread)),
-        ...changedIdentityFavorites.map((favorite) => putEntity('favorites', favorite))
+        ...changedIdentityFavorites.map((favorite) => putEntity('favorites', favorite)),
+        ...removedFavoriteIds.map((favoriteId) => deleteEntity('favorites', favoriteId))
       ]);
     }
     conversationSettings.value = snapshot.conversationSettings.map((entry) => normalizeConversationSettings({
@@ -1869,6 +1874,13 @@ export const useAppStore = defineStore('app', () => {
     return 'text';
   }
 
+  function canFavoriteMessage(message: ChatMessage) {
+    if (message.voice) return true;
+    if (message.image) return Boolean(message.image.url);
+    if (message.sticker || message.location || message.transfer || message.theaterLink || message.offlineInvitation) return false;
+    return Boolean(message.content.trim() || message.displayStyle === 'narration');
+  }
+
   function normalizeFavorites(entries: FavoriteMessageRecord[]) {
     return entries
       .filter((entry) => entry?.id && entry.sourceMessageId && entry.message)
@@ -1894,6 +1906,7 @@ export const useAppStore = defineStore('app', () => {
           favoritedAt: Number.isFinite(entry.favoritedAt) ? entry.favoritedAt : Date.now()
         };
       })
+      .filter((entry) => canFavoriteMessage(entry.message))
       .sort((left, right) => right.favoritedAt - left.favoritedAt);
   }
 
@@ -1969,6 +1982,7 @@ export const useAppStore = defineStore('app', () => {
   }
 
   async function addFavoriteMessage(message: ChatMessage) {
+    if (!canFavoriteMessage(message)) return null;
     const existing = favorites.value.find((entry) => entry.sourceMessageId === message.id);
     if (existing) return existing;
     const favorite = createFavoriteSnapshot(message);
@@ -6562,6 +6576,7 @@ export const useAppStore = defineStore('app', () => {
     nextReplyTokenCountForConversationAsync,
     lastMessageForConversation,
     createMessageQuoteSnapshot,
+    canFavoriteMessage,
     isMessageFavorited,
     addFavoriteMessage,
     deleteFavorite,
