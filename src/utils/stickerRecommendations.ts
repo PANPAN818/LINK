@@ -2,6 +2,7 @@ import type { ChatMessage, Sticker, StickerGroup } from '@/types/domain';
 
 export const RECOMMENDED_STICKER_GROUP_ID = 'sticker_group_recommended';
 export const RECOMMENDED_STICKER_GROUP_NAME = '推荐';
+export const RECOMMENDED_STICKER_LIMIT = 25;
 
 interface StickerRecommendationInput {
   query: string;
@@ -104,7 +105,7 @@ function scoreTextMatch(target: string, terms: string[], fullQuery: string) {
 }
 
 export function recommendStickers(input: StickerRecommendationInput) {
-  const limit = Math.max(1, Math.floor(input.limit ?? 8));
+  const limit = Math.max(1, Math.floor(input.limit ?? RECOMMENDED_STICKER_LIMIT));
   const query = normalizeText(input.query).slice(-24);
   const terms = createQueryTerms(input.query);
   const groupNameById = new Map(input.groups.map((group) => [group.id, normalizeText(group.name)]));

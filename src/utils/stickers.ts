@@ -13,7 +13,7 @@ export interface StickerImportDraft {
 
 export const RECENT_STICKER_GROUP_ID = 'sticker_group_recent';
 export const RECENT_STICKER_GROUP_NAME = '最近';
-export const RECENT_STICKER_LIMIT = 12;
+export const RECENT_STICKER_LIMIT = 25;
 export const LEGACY_GANADI_STICKER_GROUP_ID = 'sticker_group_default';
 export const LEGACY_GANADI_STICKER_GROUP_NAME = 'ganadi';
 export const LEGACY_GANADI_STICKER_IDS = new Set([

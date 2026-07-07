@@ -509,7 +509,7 @@ import { readChatImageFile } from '@/utils/imageFile';
 import { useKeyboardScrollGuard } from '@/utils/keyboardScrollGuard';
 import { normalizeUserProfile, normalizeVisualProfile } from '@/utils/profile';
 import { getSelectedImageModelOption } from '@/utils/settings';
-import { recommendStickers } from '@/utils/stickerRecommendations';
+import { RECOMMENDED_STICKER_LIMIT, recommendStickers } from '@/utils/stickerRecommendations';
 import { isVoomNarrationMessage, mergeVoomLikeMessages } from '@/utils/voomMessages';
 
 type BrowserSpeechRecognitionAlternative = {
@@ -778,7 +778,7 @@ const stickerRecommendationBase = computed(() => {
     messages: store.messagesForConversation(props.id),
     conversationId: props.id,
     boundGroupIds: chatSettings.value.characterStickerGroupIds,
-    limit: 12
+    limit: RECOMMENDED_STICKER_LIMIT
   });
 });
 const composerStickerSuggestions = computed(() => composerText.value.trim() ? stickerRecommendationBase.value.slice(0, 6) : []);
