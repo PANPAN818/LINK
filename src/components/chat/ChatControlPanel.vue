@@ -3950,17 +3950,17 @@ function applyEditedAvatar(value: string) {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 38px;
+  min-height: 32px;
   max-width: 100%;
-  padding: 0 clamp(10px, 2.8vw, 12px);
-  border: 1px solid rgba(6, 199, 85, 0.16);
-  border-radius: 999px;
-  background: linear-gradient(135deg, rgba(232, 249, 239, 0.98), rgba(255, 242, 247, 0.96));
-  color: #16643e;
+  padding: 0 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(17, 17, 17, 0.07);
+  background: rgba(255, 255, 255, 0.82);
+  color: #50585c;
   font-size: 11px;
-  font-weight: 850;
+  font-weight: 800;
   white-space: nowrap;
-  box-shadow: 0 10px 20px rgba(31, 120, 74, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.92);
   touch-action: manipulation;
 }
 
