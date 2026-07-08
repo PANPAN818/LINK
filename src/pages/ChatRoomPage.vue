@@ -175,51 +175,39 @@
     <AppModal v-model="showActionMenu" title="更多操作" :show-header="false" variant="ins">
       <section class="action-menu">
         <button type="button" @click="openCharacterProfile">
-          <ContactRound :size="20" />
           <span>角色主页</span>
         </button>
         <button type="button" @click="openUserProfile">
-          <UserRound :size="20" />
           <span>我的主页</span>
         </button>
         <button type="button" :disabled="chatActionLocked" @click="openLocationPanel">
-          <MapPin :size="20" />
           <span>发送定位</span>
         </button>
         <button type="button" :disabled="chatActionLocked" @click="openTransferPanel">
-          <Wallet :size="20" />
           <span>转账</span>
         </button>
         <button type="button" @click="openModelSwitch">
-          <SlidersHorizontal :size="20" />
           <span>模型切换</span>
         </button>
         <button type="button" :class="{ busy: currentConversationReplying }" :aria-disabled="currentConversationReplying" @click="regenerateReply">
-          <RefreshCw :size="20" />
           <span>重新回复</span>
         </button>
         <button type="button" :disabled="chatActionLocked" @click="openNarrationPanel">
-          <MessageSquareText :size="20" />
           <span>添加旁白</span>
         </button>
         <button type="button" @click="openGobangPlaceholder">
-          <Grid3X3 :size="20" />
           <span>五子棋</span>
         </button>
         <button type="button" :class="{ busy: generatingVoom }" :aria-disabled="generatingVoom" @click="generateVoomPost">
-          <Sparkles :size="20" />
           <span>{{ generatingVoom ? '生成中' : '生成 VOOM' }}</span>
         </button>
         <button type="button" @click="openSmallTheater">
-          <Clapperboard :size="20" />
           <span>小剧场</span>
         </button>
         <button class="danger-menu-action" type="button" :disabled="chatActionLocked" @click="openDeleteFriendConfirm">
-          <UserMinus :size="20" />
           <span>删除好友</span>
         </button>
         <button class="danger-menu-action" type="button" :disabled="chatActionLocked" @click="openClearHistoryConfirm">
-          <ArchiveX :size="20" />
           <span>清空记忆</span>
         </button>
       </section>
@@ -360,35 +348,27 @@
     <AppModal v-model="showMessageMenu" title="消息操作" :show-header="false" variant="ins">
       <section class="message-action-menu">
         <button type="button" @click="copyActiveMessage">
-          <Copy :size="19" />
           <span>复制</span>
         </button>
         <button type="button" @click="deleteActiveMessage">
-          <Trash2 :size="19" />
           <span>删除</span>
         </button>
         <button type="button" @click="startSelectionFromActive">
-          <CheckSquare :size="19" />
           <span>多选</span>
         </button>
         <button type="button" :disabled="!canFavoriteActiveMessage || isActiveMessageFavorited" @click="favoriteActiveMessage">
-          <BookmarkPlus :size="19" />
           <span>{{ favoriteActionLabel }}</span>
         </button>
         <button type="button" :disabled="!canRecallActiveMessage" @click="recallActiveMessage">
-          <RotateCcw :size="19" />
           <span>撤回</span>
         </button>
         <button v-if="canRegenerateActiveVoice" type="button" :disabled="regeneratingActiveVoice" @click="regenerateActiveVoice">
-          <RefreshCw :size="19" />
           <span>{{ regeneratingActiveVoice ? '生成中' : '重新生成语音' }}</span>
         </button>
         <button type="button" :disabled="!canQuoteActiveMessage" @click="quoteActiveMessage">
-          <Quote :size="19" />
           <span>引用</span>
         </button>
         <button type="button" :disabled="!canEditActiveMessage" @click="openEditActiveMessage">
-          <Pencil :size="19" />
           <span>编辑</span>
         </button>
       </section>
@@ -500,7 +480,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { ArchiveX, BookmarkPlus, CheckSquare, Clapperboard, ContactRound, Copy, Grid3X3, MapPin, MessageSquareText, Pencil, Quote, RefreshCw, RotateCcw, SlidersHorizontal, Sparkles, Trash2, UserMinus, UserRound, Wallet, X } from 'lucide-vue-next';
+import { Trash2, X } from 'lucide-vue-next';
 import AppModal from '@/components/common/AppModal.vue';
 import ChatHeader from '@/components/chat/ChatHeader.vue';
 import ChatModelSwitchPanel from '@/components/chat/ChatModelSwitchPanel.vue';
@@ -3070,9 +3050,9 @@ onBeforeUnmount(() => {
 }
 
 .message-action-menu button {
-  display: grid;
-  place-items: center;
-  gap: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   min-height: 68px;
   padding: 8px 4px;
   border-radius: 8px;
@@ -3088,10 +3068,6 @@ onBeforeUnmount(() => {
 
 .message-action-menu button:disabled {
   opacity: 0.38;
-}
-
-.message-action-menu svg {
-  color: #141414;
 }
 
 .edit-message-sheet {
@@ -3225,12 +3201,9 @@ onBeforeUnmount(() => {
 }
 
 .action-menu button {
-  display: grid;
-  grid-template-columns: auto auto;
+  display: flex;
   align-items: center;
   justify-content: center;
-  justify-items: center;
-  gap: 9px;
   min-height: 58px;
   padding: 8px 10px;
   border-radius: 8px;
@@ -3261,15 +3234,6 @@ onBeforeUnmount(() => {
 }
 
 .action-menu .danger-menu-action {
-  color: #e5484d;
-}
-
-.action-menu svg {
-  flex: 0 0 auto;
-  color: #141414;
-}
-
-.action-menu .danger-menu-action svg {
   color: #e5484d;
 }
 

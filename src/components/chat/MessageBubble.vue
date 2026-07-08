@@ -16,20 +16,23 @@
         :style="swipeStyle"
         @click.capture="suppressClickAfterSwipe"
         @click="handleBubbleClick"
-        @contextmenu.prevent="emitLongPress"
+        @contextmenu.prevent.stop="emitLongPress"
+        @copy.prevent.stop="suppressNativeSelection"
+        @dragstart.prevent.stop="suppressNativeSelection"
         @pointercancel="handlePointerCancel"
         @pointerdown="handlePointerDown"
         @pointerleave="handlePointerLeave"
         @pointermove="handlePointerMove"
         @pointerup="handlePointerUp"
+        @selectstart.prevent.stop="suppressNativeSelection"
       >
         <div class="bubble" :class="{ narration: message.displayStyle === 'narration', sticker: message.sticker, image: message.image, voice: message.voice, location: message.location, transfer: message.transfer, theaterLink: message.theaterLink, offlineInvitation: message.offlineInvitation }" :style="bubbleStyle">
           <template v-if="message.sticker">
-            <img class="sticker-image" :src="getStickerDisplayImageUrl(message.sticker)" :alt="message.sticker.description" />
+            <img class="sticker-image" :src="getStickerDisplayImageUrl(message.sticker)" :alt="message.sticker.description" draggable="false" />
           </template>
           <template v-else-if="message.image">
             <figure class="chat-image-card" :class="[`chat-image-card--${message.image.kind}`, { interactive: message.sender === 'char' }]" :style="imageCardStyle" @click="handleImageCardClick">
-              <img v-if="message.image.url && !isBrokenImageSource(message.image.url)" :src="message.image.url" :alt="message.image.description" @error="markBrokenImageSource(message.image.url)" />
+              <img v-if="message.image.url && !isBrokenImageSource(message.image.url)" :src="message.image.url" :alt="message.image.description" draggable="false" @error="markBrokenImageSource(message.image.url)" />
               <figcaption v-if="message.image.kind === 'description' || isBrokenImageSource(message.image.url)">{{ message.image.description }}</figcaption>
             </figure>
           </template>
@@ -147,7 +150,7 @@
             <strong>{{ quoteAuthorLabel }}</strong>
             <span>{{ quoteText }}</span>
           </p>
-          <img v-if="quoteThumbnail" class="quote-thumbnail" :src="quoteThumbnail" :alt="quoteText" />
+          <img v-if="quoteThumbnail" class="quote-thumbnail" :src="quoteThumbnail" :alt="quoteText" draggable="false" />
         </div>
       </div>
         <div v-if="showMessageMeta" class="message-meta">
@@ -265,6 +268,7 @@ const store = useAppStore();
 let longPressTimer: number | undefined;
 let longPressStart: { x: number; y: number } | null = null;
 let longPressTriggered = false;
+let suppressingSelection = false;
 let swipeStart: { x: number; y: number; pointerId: number } | null = null;
 let swipeTracking = false;
 let suppressNextClick = false;
@@ -568,13 +572,43 @@ function clearLongPressTimer() {
   longPressTimer = undefined;
 }
 
+function clearNativeTextSelection() {
+  window.getSelection()?.removeAllRanges();
+}
+
+function handleSelectionChange() {
+  if (!suppressingSelection) return;
+  clearNativeTextSelection();
+}
+
+function startSuppressingNativeSelection() {
+  if (suppressingSelection) return;
+  suppressingSelection = true;
+  document.addEventListener('selectionchange', handleSelectionChange);
+}
+
+function stopSuppressingNativeSelection() {
+  if (!suppressingSelection) return;
+  suppressingSelection = false;
+  document.removeEventListener('selectionchange', handleSelectionChange);
+  clearNativeTextSelection();
+}
+
+function suppressNativeSelection(event: Event) {
+  event.preventDefault();
+  event.stopPropagation();
+  clearNativeTextSelection();
+}
+
 function startLongPress(event: PointerEvent) {
   if (props.selectionMode || event.button !== 0) return;
   longPressStart = { x: event.clientX, y: event.clientY };
   longPressTriggered = false;
   clearLongPressTimer();
+  startSuppressingNativeSelection();
   longPressTimer = window.setTimeout(() => {
     longPressTriggered = true;
+    clearNativeTextSelection();
     emit('long-press', props.message);
   }, 520);
 }
@@ -588,6 +622,7 @@ function trackPointerMove(event: PointerEvent) {
 function cancelLongPress() {
   clearLongPressTimer();
   longPressStart = null;
+  stopSuppressingNativeSelection();
 }
 
 function resetSwipe() {
@@ -688,9 +723,13 @@ function handleAvatarClick() {
   else emit('open-profile');
 }
 
-function emitLongPress() {
+function emitLongPress(event?: Event) {
   if (props.selectionMode) return;
+  event?.preventDefault();
+  event?.stopPropagation();
   clearLongPressTimer();
+  clearNativeTextSelection();
+  stopSuppressingNativeSelection();
   emit('long-press', props.message);
 }
 
@@ -838,7 +877,10 @@ watch(() => props.message.id, () => {
   stopVoicePlayback();
 });
 
-onBeforeUnmount(stopVoicePlayback);
+onBeforeUnmount(() => {
+  stopVoicePlayback();
+  stopSuppressingNativeSelection();
+});
 </script>
 
 <style scoped>
@@ -968,9 +1010,22 @@ onBeforeUnmount(stopVoicePlayback);
   min-width: 0;
   cursor: default;
   touch-action: pan-y;
-  user-select: text;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
   transform: translate3d(var(--swipe-quote-offset, 0), 0, 0);
   transition: transform 0.18s ease;
+}
+
+.bubble-stack *,
+.message-row img {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.message-row img {
+  -webkit-user-drag: none;
 }
 
 .bubble-stack.swiping {
