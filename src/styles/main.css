@@ -2,7 +2,8 @@
   color: #111111;
   background: #f4f5f6;
   --app-default-font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
-  font-family: var(--app-font-family, var(--app-default-font-family));
+  --app-current-font-family: var(--app-font-family, var(--app-default-font-family));
+  font-family: var(--app-current-font-family);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
@@ -63,6 +64,7 @@ html {
 body {
   min-width: 320px;
   overflow: hidden;
+  font-family: var(--app-current-font-family);
   font-size: var(--compact-page-font-size);
   overscroll-behavior: none;
   -webkit-tap-highlight-color: transparent;

@@ -380,7 +380,7 @@ async function runCleanupAction(action: DataCleanupAction) {
 
 .data-core strong {
   color: rgba(35, 31, 37, 0.9);
-  font-family: 'Iowan Old Style', 'Palatino Linotype', 'Times New Roman', 'Songti SC', serif;
+  font-family: var(--app-current-font-family);
   font-size: 38px;
   font-weight: 650;
   line-height: 1;
@@ -477,7 +477,7 @@ async function runCleanupAction(action: DataCleanupAction) {
   display: block;
   margin: 4px 0 0;
   color: #231f25;
-  font-family: 'Iowan Old Style', 'Palatino Linotype', 'Times New Roman', 'Songti SC', serif;
+  font-family: var(--app-current-font-family);
   font-size: 24px;
   font-weight: 650;
   line-height: 1.12;

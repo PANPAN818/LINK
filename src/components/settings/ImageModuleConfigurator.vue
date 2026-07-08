@@ -1227,7 +1227,7 @@ function removeVendor() {
 .section-head h3 {
   margin: 0;
   color: #231f25;
-  font-family: 'Iowan Old Style', 'Palatino Linotype', 'Times New Roman', 'Songti SC', serif;
+  font-family: var(--app-current-font-family);
   font-size: 15px;
   line-height: 1.2;
   font-weight: 800;

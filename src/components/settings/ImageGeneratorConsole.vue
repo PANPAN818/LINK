@@ -230,7 +230,7 @@ defineExpose({
   place-items: center;
   min-height: 220px;
   color: rgba(41, 35, 42, 0.74);
-  font-family: 'Iowan Old Style', 'Palatino Linotype', 'Times New Roman', 'Songti SC', serif;
+  font-family: var(--app-current-font-family);
   font-size: 30px;
   letter-spacing: 0.14em;
 }
@@ -309,7 +309,7 @@ defineExpose({
   display: block;
   margin-top: 4px;
   color: #231f25;
-  font-family: 'Iowan Old Style', 'Palatino Linotype', 'Times New Roman', 'Songti SC', serif;
+  font-family: var(--app-current-font-family);
   font-size: 24px;
   font-weight: 600;
   overflow-wrap: anywhere;

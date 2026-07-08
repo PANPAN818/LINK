@@ -331,7 +331,7 @@ function excerpt(content: string) {
 .hero-copy h2,
 .section-head h3 {
   margin: 0;
-  font-family: 'Iowan Old Style', 'Palatino Linotype', 'Times New Roman', 'Songti SC', serif;
+  font-family: var(--app-current-font-family);
   color: #34231b;
 }
 
@@ -398,7 +398,7 @@ function excerpt(content: string) {
 }
 
 .stack-card-front strong {
-  font-family: 'Iowan Old Style', 'Palatino Linotype', 'Times New Roman', 'Songti SC', serif;
+  font-family: var(--app-current-font-family);
   font-size: 40px;
   font-weight: 600;
 }
@@ -422,7 +422,7 @@ function excerpt(content: string) {
 }
 
 .summary-card strong {
-  font-family: 'Iowan Old Style', 'Palatino Linotype', 'Times New Roman', 'Songti SC', serif;
+  font-family: var(--app-current-font-family);
   color: #39261f;
   font-size: 30px;
   font-weight: 600;
@@ -810,7 +810,7 @@ function excerpt(content: string) {
 
 .confirm-card h3 {
   margin: 0;
-  font-family: 'Iowan Old Style', 'Palatino Linotype', 'Times New Roman', 'Songti SC', serif;
+  font-family: var(--app-current-font-family);
   color: #34231b;
   font-size: clamp(24px, 7.6vw, 28px);
   font-weight: 600;

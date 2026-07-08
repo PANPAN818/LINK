@@ -77,7 +77,7 @@ defineEmits<{
   border-radius: 14px 14px 0 0;
   background: #ffffff;
   box-shadow: 0 -18px 60px rgba(0, 0, 0, 0.15);
-  font-family: var(--app-default-font-family);
+  font-family: var(--app-current-font-family);
   font-size: 12px;
   line-height: 1.45;
 }
@@ -86,7 +86,7 @@ defineEmits<{
 .modal-panel :deep(input),
 .modal-panel :deep(textarea),
 .modal-panel :deep(select) {
-  font-family: var(--app-default-font-family);
+  font-family: var(--app-current-font-family);
 }
 
 .modal-panel-fixed {

@@ -1149,7 +1149,7 @@ function exportSelectedThemeStyles() {
 }
 
 function fontPreviewStyle(entry: ThemeFontEntry) {
-  return { fontFamily: `${getQuotedFontFamily(entry.family)}, var(--app-default-font-family)` };
+  return { fontFamily: `${getQuotedFontFamily(entry.family)}, var(--app-current-font-family)` };
 }
 
 function isStylesheetFontUrl(url: string) {
@@ -1237,7 +1237,7 @@ function formatFontMeta(entry: ThemeFontEntry) {
   border-radius: 999px;
   background: transparent;
   color: #057a35;
-  font-family: var(--app-default-font-family);
+  font-family: var(--app-current-font-family);
   box-shadow: none;
 }
 
@@ -1324,7 +1324,7 @@ function formatFontMeta(entry: ThemeFontEntry) {
 
 .global-card-head > strong {
   color: #057a35;
-  font-family: var(--app-default-font-family);
+  font-family: var(--app-current-font-family);
   font-size: 17px;
   font-weight: 900;
 }
@@ -1352,7 +1352,7 @@ function formatFontMeta(entry: ThemeFontEntry) {
   border-radius: 14px;
   background: #f3f6f4;
   color: #30363d;
-  font-family: var(--app-default-font-family);
+  font-family: var(--app-current-font-family);
   font-size: 12px;
   font-weight: 900;
 }
@@ -1406,7 +1406,7 @@ function formatFontMeta(entry: ThemeFontEntry) {
   border-radius: 999px;
   background: #f3f6f4;
   color: #363a40;
-  font-family: var(--app-default-font-family);
+  font-family: var(--app-current-font-family);
   font-size: 12px;
   font-weight: 900;
 }
@@ -1495,7 +1495,7 @@ function formatFontMeta(entry: ThemeFontEntry) {
   min-height: 28px;
   padding: 0 10px;
   border-radius: 999px;
-  font-family: var(--app-default-font-family);
+  font-family: var(--app-current-font-family);
   font-size: 11px;
   font-weight: 900;
   white-space: nowrap;
@@ -1573,7 +1573,7 @@ function formatFontMeta(entry: ThemeFontEntry) {
   align-items: center;
   gap: 10px;
   min-width: 0;
-  font-family: var(--app-default-font-family);
+  font-family: var(--app-current-font-family);
 }
 
 .font-card-footer > span {
@@ -1626,7 +1626,7 @@ function formatFontMeta(entry: ThemeFontEntry) {
   border-radius: 999px;
   background: #f3f6f4;
   color: #363a40;
-  font-family: var(--app-default-font-family);
+  font-family: var(--app-current-font-family);
   font-size: 12px;
   font-weight: 900;
 }
@@ -1660,7 +1660,7 @@ function formatFontMeta(entry: ThemeFontEntry) {
   margin: 0;
   padding: 9px 10px;
   border-radius: 12px;
-  font-family: var(--app-default-font-family);
+  font-family: var(--app-current-font-family);
   font-weight: 800;
 }
 
@@ -1681,7 +1681,7 @@ function formatFontMeta(entry: ThemeFontEntry) {
   height: 100%;
   min-height: 0;
   overflow: hidden;
-  font-family: var(--app-default-font-family);
+  font-family: var(--app-current-font-family);
 }
 
 .style-export-composer {
@@ -2018,7 +2018,7 @@ function formatFontMeta(entry: ThemeFontEntry) {
   display: grid;
   gap: 12px;
   min-width: 0;
-  font-family: var(--app-default-font-family);
+  font-family: var(--app-current-font-family);
 }
 
 .font-error-sheet strong {
@@ -2147,7 +2147,7 @@ function formatFontMeta(entry: ThemeFontEntry) {
   padding: 6px 2px;
   border-radius: 13px;
   color: var(--muted);
-  font-family: var(--app-default-font-family);
+  font-family: var(--app-current-font-family);
   font-size: 10px;
   font-weight: 800;
 }
