@@ -1320,6 +1320,78 @@ interface TextApiContentPart {
   image_url?: { url: string };
 }
 
+function isGifDataUrl(url: string) {
+  return /^data:image\/gif(?:;[^,]*)?,/i.test(url.trim());
+}
+
+function isLikelyGifImageUrl(url: string) {
+  const trimmed = url.trim();
+  if (isGifDataUrl(trimmed)) return true;
+  try {
+    return /\.gif$/i.test(new URL(trimmed).pathname);
+  } catch {
+    return /\.gif(?:[?#].*)?$/i.test(trimmed);
+  }
+}
+
+function isFetchableLocalImageUrl(url: string) {
+  return /^blob:/i.test(url.trim());
+}
+
+function loadImageForVision(url: string) {
+  return new Promise<HTMLImageElement>((resolve, reject) => {
+    const image = new Image();
+    image.decoding = 'async';
+    image.addEventListener('load', () => resolve(image));
+    image.addEventListener('error', () => reject(new Error('图片加载失败。')));
+    image.src = url;
+  });
+}
+
+async function snapshotImageDataUrlAsPng(dataUrl: string) {
+  if (typeof document === 'undefined') return dataUrl;
+  const image = await loadImageForVision(dataUrl);
+  const width = image.naturalWidth || image.width;
+  const height = image.naturalHeight || image.height;
+  if (!width || !height) return dataUrl;
+
+  const maxDimension = 720;
+  const scale = Math.min(1, maxDimension / Math.max(width, height));
+  const outputWidth = Math.max(1, Math.round(width * scale));
+  const outputHeight = Math.max(1, Math.round(height * scale));
+  const canvas = document.createElement('canvas');
+  canvas.width = outputWidth;
+  canvas.height = outputHeight;
+  const context = canvas.getContext('2d');
+  if (!context) return dataUrl;
+  context.drawImage(image, 0, 0, outputWidth, outputHeight);
+  return canvas.toDataURL('image/png');
+}
+
+async function prepareVisionImageUrl(url: string) {
+  const trimmed = url.trim();
+  if (!trimmed) return '';
+  if (!isLikelyGifImageUrl(trimmed) && !isFetchableLocalImageUrl(trimmed)) return trimmed;
+
+  const dataUrl = isGifDataUrl(trimmed)
+    ? trimmed
+    : await fetchGeneratedImageUrlAsDataUrl(trimmed, isLikelyGifImageUrl(trimmed) ? 'image/gif' : 'image/png');
+  return isGifDataUrl(dataUrl) ? snapshotImageDataUrlAsPng(dataUrl) : dataUrl;
+}
+
+async function getPreparedVisualImageParts(input: GenerateReplyInput): Promise<TextApiContentPart[]> {
+  const parts = await Promise.all(getVisualImageParts(input).map(async (part) => {
+    if (part.type !== 'image_url') return part;
+    try {
+      const url = await prepareVisionImageUrl(part.image_url?.url ?? '');
+      return url ? { ...part, image_url: { url } } : null;
+    } catch {
+      return null;
+    }
+  }));
+  return parts.filter((part): part is TextApiContentPart => Boolean(part));
+}
+
 function getVisualImageParts(input: GenerateReplyInput): TextApiContentPart[] {
   const stickerParts = input.stickerVisionEnabled ? input.messages
     .slice(-12)
@@ -1948,7 +2020,7 @@ export async function generateImageByProvider(
 export async function generateRoleplayReply(input: GenerateReplyInput): Promise<string> {
   requireTextGenerationConfig(input.settings, input.modelOverride, '角色回复');
   const prompt = buildPrompt(input);
-  const apiReply = await callTextApi(input.settings, prompt, input.modelOverride, getVisualImageParts(input));
+  const apiReply = await callTextApi(input.settings, prompt, input.modelOverride, await getPreparedVisualImageParts(input));
   if (apiReply) {
     try {
       const parsed = JSON.parse(extractJsonContent(apiReply)) as unknown;
