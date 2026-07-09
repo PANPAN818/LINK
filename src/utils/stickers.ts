@@ -86,7 +86,42 @@ function inferImageMimeType(url: string) {
   if (/\.avif$/i.test(pathname)) return 'image/avif';
   if (/\.bmp$/i.test(pathname)) return 'image/bmp';
   if (/\.svg$/i.test(pathname)) return 'image/svg+xml';
-  return 'image/png';
+  return '';
+}
+
+function bytesStartWith(bytes: Uint8Array, signature: number[]) {
+  if (bytes.length < signature.length) return false;
+  return signature.every((byte, index) => bytes[index] === byte);
+}
+
+function bytesMatchAscii(bytes: Uint8Array, offset: number, value: string) {
+  if (bytes.length < offset + value.length) return false;
+  for (let index = 0; index < value.length; index += 1) {
+    if (bytes[offset + index] !== value.charCodeAt(index)) return false;
+  }
+  return true;
+}
+
+function inferImageMimeTypeFromBytes(bytes: Uint8Array) {
+  if (bytesStartWith(bytes, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) return 'image/png';
+  if (bytesStartWith(bytes, [0xff, 0xd8, 0xff])) return 'image/jpeg';
+  if (bytesMatchAscii(bytes, 0, 'GIF87a') || bytesMatchAscii(bytes, 0, 'GIF89a')) return 'image/gif';
+  if (bytesMatchAscii(bytes, 0, 'RIFF') && bytesMatchAscii(bytes, 8, 'WEBP')) return 'image/webp';
+  if (bytesMatchAscii(bytes, 4, 'ftyp') && ['avif', 'avis'].some((brand) => bytesMatchAscii(bytes, 8, brand) || bytesMatchAscii(bytes, 16, brand))) return 'image/avif';
+  if (bytesStartWith(bytes, [0x42, 0x4d])) return 'image/bmp';
+
+  const prefix = new TextDecoder('utf-8', { fatal: false }).decode(bytes.slice(0, 512)).trimStart();
+  if (/^(?:<\?xml\s[^>]*>\s*)?<svg[\s>]/i.test(prefix)) return 'image/svg+xml';
+  return '';
+}
+
+async function inferImageMimeTypeFromBlob(blob: Blob) {
+  const bytes = new Uint8Array(await blob.slice(0, 512).arrayBuffer());
+  return inferImageMimeTypeFromBytes(bytes);
+}
+
+function isGenericBinaryMimeType(mimeType: string) {
+  return !mimeType || /^(?:application\/octet-stream|binary\/octet-stream|application\/x-binary)$/i.test(mimeType);
 }
 
 function createImageDownloadUrl(url: string) {
@@ -142,12 +177,14 @@ export async function localizeStickerImageUrl(imageUrl: string) {
   if (!downloadedBlob.size) throw new Error('贴纸图片下载结果为空。');
   if (downloadedBlob.size > maxStickerImageBytes) throw new Error('贴纸图片超过 12MB，无法写入本地缓存。');
 
-  const mimeType = downloadedBlob.type || contentType || inferImageMimeType(trimmed);
+  const declaredMimeType = downloadedBlob.type || contentType;
+  const sniffedMimeType = await inferImageMimeTypeFromBlob(downloadedBlob);
+  const mimeType = sniffedMimeType || (isGenericBinaryMimeType(declaredMimeType) ? inferImageMimeType(trimmed) : declaredMimeType);
   if (!mimeType.startsWith('image/')) {
     throw new Error(`贴纸链接返回的不是图片内容：${mimeType || '未知类型'}。`);
   }
 
-  return readBlobAsDataUrl(downloadedBlob.type ? downloadedBlob : new Blob([downloadedBlob], { type: mimeType }));
+  return readBlobAsDataUrl(downloadedBlob.type === mimeType ? downloadedBlob : new Blob([downloadedBlob], { type: mimeType }));
 }
 
 export async function cacheStickerImageUrl(imageUrl: string, readImageUrl?: () => Promise<string>) {
