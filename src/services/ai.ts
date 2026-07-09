@@ -55,7 +55,7 @@ export type RoleplayReplySegment =
   | { type: 'reply'; content: string; translation?: string }
   | { type: 'narration'; content: string }
   | { type: 'sticker'; stickers: string[] }
-  | { type: 'image'; description: string }
+  | { type: 'image'; description: string; generationPrompt?: string }
   | { type: 'voice'; content: string; translation?: string; duration?: number }
   | { type: 'location'; name: string; address?: string; distance: string }
   | { type: 'transfer'; amount: string; note?: string }
@@ -67,7 +67,7 @@ export interface RoleplayReplyResult {
   plotChoices?: string[];
   replyTranslations?: string[];
   narrations?: string[];
-  images?: Array<{ description: string }>;
+  images?: Array<{ description: string; generationPrompt?: string }>;
   stickers?: string[];
   stickerPlacements?: RoleplayStickerPlacement[];
   segments?: RoleplayReplySegment[];
@@ -108,6 +108,7 @@ export interface ConversationSummaryIdentityRule {
 export interface ImageGenerationOverrides {
   positivePrompt?: string;
   negativePrompt?: string;
+  referenceImage?: string;
   width?: number;
   height?: number;
   size?: string;
@@ -1046,6 +1047,24 @@ function normalizeImageDescriptions(value: unknown): string[] {
   return [];
 }
 
+function normalizeImageGenerationPrompt(value: unknown): string {
+  if (typeof value === 'string' || typeof value === 'number') return String(value).trim();
+  return '';
+}
+
+function normalizeRoleplayImages(value: unknown): Array<{ description: string; generationPrompt?: string }> {
+  if (Array.isArray(value)) return value.flatMap((item) => normalizeRoleplayImages(item));
+  if (value && typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    const generationPrompt = normalizeImageGenerationPrompt(record.generationPrompt ?? record.imageGenerationPrompt ?? record.englishPrompt ?? record.promptEn ?? record.promptEnglish);
+    const descriptions = normalizeImageDescriptions(record.description ?? record.imageDescription ?? record.content ?? record.text ?? record.message ?? record.prompt);
+    if (descriptions.length) {
+      return descriptions.map((description) => ({ description, ...(generationPrompt ? { generationPrompt } : {}) }));
+    }
+  }
+  return normalizeImageDescriptions(value).map((description) => ({ description }));
+}
+
 function normalizeLocationText(value: unknown): string {
   if (typeof value === 'string' || typeof value === 'number') return String(value).trim();
   return '';
@@ -1145,8 +1164,9 @@ function normalizeRoleplaySegment(value: unknown, narrationEnabled: boolean): Ro
   }
 
   if (type === 'image') {
-    return normalizeImageDescriptions(record.description ?? record.imageDescription ?? record.prompt ?? record.content ?? record.text ?? record.message)
-      .map((description) => ({ type: 'image' as const, description }));
+    const generationPrompt = normalizeImageGenerationPrompt(record.generationPrompt ?? record.imageGenerationPrompt ?? record.englishPrompt ?? record.promptEn ?? record.promptEnglish);
+    return normalizeImageDescriptions(record.description ?? record.imageDescription ?? record.content ?? record.text ?? record.message ?? record.prompt)
+      .map((description) => ({ type: 'image' as const, description, ...(generationPrompt ? { generationPrompt } : {}) }));
   }
 
   if (type === 'voice') {
@@ -1598,6 +1618,7 @@ interface VoomMomentPayload {
   content: string;
   contentTranslation?: string;
   imageDescription?: string;
+  imageGenerationPrompt?: string;
   likes: string[];
   comments: Array<Pick<VoomComment, 'authorName' | 'content' | 'contentTranslation' | 'parentId'> & { draftId?: string }>;
 }
@@ -1707,6 +1728,7 @@ function parseVoomMomentPayload(rawContent: string): VoomMomentPayload {
     if (!content) throw new Error('VOOM 文案模型返回的 JSON 缺少 content。');
     const contentTranslation = normalizeTranslationText(parsed.contentTranslation ?? parsed.translation ?? parsed.translationZh ?? parsed.chineseTranslation);
     const imageDescription = String(parsed.imageDescription ?? '').trim();
+    const imageGenerationPrompt = String(parsed.imageGenerationPrompt ?? parsed.generationPrompt ?? parsed.englishImagePrompt ?? parsed.promptEn ?? '').trim();
     const likes = Array.isArray(parsed.likes)
       ? [...new Set(parsed.likes.map((item) => String(item ?? '').trim()).filter(Boolean))]
       : [];
@@ -1714,6 +1736,7 @@ function parseVoomMomentPayload(rawContent: string): VoomMomentPayload {
       content,
       ...(contentTranslation ? { contentTranslation } : {}),
       ...(imageDescription ? { imageDescription } : {}),
+      ...(imageGenerationPrompt ? { imageGenerationPrompt } : {}),
       likes,
       comments: normalizeVoomMomentComments(parsed.comments)
     };
@@ -2079,6 +2102,7 @@ export async function generatePollinationsImage(settings: AppSettings, overrides
   const config = settings.imagePollinations;
   const positivePrompt = overrides.positivePrompt ?? config.positivePrompt;
   const negativePrompt = overrides.negativePrompt ?? config.negativePrompt;
+  const referenceImage = overrides.referenceImage ?? config.referenceImage;
 
   if (!config.apiKey.trim()) {
     throw new Error('请先填写 Pollinations API Key。文档要求生成请求使用 Bearer key。');
@@ -2097,7 +2121,7 @@ export async function generatePollinationsImage(settings: AppSettings, overrides
   url.searchParams.set('safe', config.safe);
   url.searchParams.set('quality', config.quality);
   url.searchParams.set('transparent', String(config.transparent));
-  if (config.referenceImage.trim()) url.searchParams.set('image', config.referenceImage.trim());
+  if (referenceImage.trim()) url.searchParams.set('image', referenceImage.trim());
   if (negativePrompt.trim()) {
     url.searchParams.set('negative', negativePrompt.trim());
   }
@@ -2212,8 +2236,7 @@ export async function generateRoleplayReply(input: GenerateReplyInput): Promise<
         input.mode === 'online' && Boolean(input.narrationModeEnabled)
       );
       const messageActions = normalizeRoleplayMessageActions(parsedRecordAny);
-      const images = normalizeImageDescriptions(parsedRecordAny.images ?? parsedRecordAny.imageMessages ?? parsedRecordAny.pictures)
-        .map((description) => ({ description }));
+      const images = normalizeRoleplayImages(parsedRecordAny.images ?? parsedRecordAny.imageMessages ?? parsedRecordAny.pictures);
       const profileUpdateRecord = parsedRecord.profileUpdate && typeof parsedRecord.profileUpdate === 'object'
         ? parsedRecord.profileUpdate as Record<string, unknown>
         : null;
@@ -2276,7 +2299,7 @@ export async function generateRoleplayReply(input: GenerateReplyInput): Promise<
 }
 
 export async function generateVoomPost(context: PromptContext, settings?: AppSettings, modelOverride = ''): Promise<Omit<VoomPost, 'id' | 'createdAt'>> {
-  const { content, contentTranslation, imageDescription, likes, comments } = await generateVoomPayload(context, settings, modelOverride);
+  const { content, contentTranslation, imageDescription, imageGenerationPrompt, likes, comments } = await generateVoomPayload(context, settings, modelOverride);
   const characterName = getCharacterAiName(context.character);
   const characterAuthorAliases = new Set([context.character.id, context.character.name, context.character.nickname, characterName]
     .map((name) => name.trim().toLocaleLowerCase())
@@ -2293,6 +2316,7 @@ export async function generateVoomPost(context: PromptContext, settings?: AppSet
     content,
     contentTranslation,
     imageDescription,
+    imageGenerationPrompt,
     likes,
     comments: resolvedComments
   };

@@ -88,6 +88,21 @@
             <span>反向提示词</span>
             <textarea v-model="activeNegativePromptModel" :placeholder="activePromptPlaceholders.negative" />
           </label>
+
+          <label class="field">
+            <span>默认负面词</span>
+            <textarea v-model="activeDefaultNegativePromptModel" placeholder="用于聊天配图和 VOOM 配图的通用质量、脸部、手部负面词" />
+          </label>
+
+          <label class="field">
+            <span>聊天配图模板</span>
+            <textarea v-model="activeOnlineChatTemplateModel" placeholder="可使用 {basePrompt} {generationPrompt} {sceneDescription} {characterAppearance} {faceConsistency}" />
+          </label>
+
+          <label class="field">
+            <span>VOOM 配图模板</span>
+            <textarea v-model="activeVoomTemplateModel" placeholder="可使用 {basePrompt} {generationPrompt} {sceneDescription} {characterAppearance} {faceConsistency} {postContent}" />
+          </label>
         </section>
 
       </section>
@@ -281,6 +296,21 @@
             <span>反向提示词</span>
             <textarea v-model="activeNegativePromptModel" :placeholder="activePromptPlaceholders.negative" />
           </label>
+
+          <label class="field">
+            <span>默认负面词</span>
+            <textarea v-model="activeDefaultNegativePromptModel" placeholder="用于聊天配图和 VOOM 配图的通用质量、脸部、手部负面词" />
+          </label>
+
+          <label class="field">
+            <span>聊天配图模板</span>
+            <textarea v-model="activeOnlineChatTemplateModel" placeholder="可使用 {basePrompt} {generationPrompt} {sceneDescription} {characterAppearance} {faceConsistency}" />
+          </label>
+
+          <label class="field">
+            <span>VOOM 配图模板</span>
+            <textarea v-model="activeVoomTemplateModel" placeholder="可使用 {basePrompt} {generationPrompt} {sceneDescription} {characterAppearance} {faceConsistency} {postContent}" />
+          </label>
         </section>
 
       </section>
@@ -408,6 +438,21 @@
           <label class="field">
             <span>反向提示词</span>
             <textarea v-model="activeNegativePromptModel" :placeholder="activePromptPlaceholders.negative" />
+          </label>
+
+          <label class="field">
+            <span>默认负面词</span>
+            <textarea v-model="activeDefaultNegativePromptModel" placeholder="用于聊天配图和 VOOM 配图的通用质量、脸部、手部负面词" />
+          </label>
+
+          <label class="field">
+            <span>聊天配图模板</span>
+            <textarea v-model="activeOnlineChatTemplateModel" placeholder="可使用 {basePrompt} {generationPrompt} {sceneDescription} {characterAppearance} {faceConsistency}" />
+          </label>
+
+          <label class="field">
+            <span>VOOM 配图模板</span>
+            <textarea v-model="activeVoomTemplateModel" placeholder="可使用 {basePrompt} {generationPrompt} {sceneDescription} {characterAppearance} {faceConsistency} {postContent}" />
           </label>
         </section>
 
@@ -802,6 +847,18 @@ const activeNegativePromptModel = computed({
   get: () => resolveActivePromptPreset(activeModuleId.value)?.negativePrompt ?? '',
   set: (negativePrompt: string) => updateActivePromptPreset(activeModuleId.value, { negativePrompt })
 });
+const activeDefaultNegativePromptModel = computed({
+  get: () => resolveActivePromptPreset(activeModuleId.value)?.defaultNegativePrompt ?? '',
+  set: (defaultNegativePrompt: string) => updateActivePromptPreset(activeModuleId.value, { defaultNegativePrompt })
+});
+const activeOnlineChatTemplateModel = computed({
+  get: () => resolveActivePromptPreset(activeModuleId.value)?.onlineChatTemplate ?? '',
+  set: (onlineChatTemplate: string) => updateActivePromptPreset(activeModuleId.value, { onlineChatTemplate })
+});
+const activeVoomTemplateModel = computed({
+  get: () => resolveActivePromptPreset(activeModuleId.value)?.voomTemplate ?? '',
+  set: (voomTemplate: string) => updateActivePromptPreset(activeModuleId.value, { voomTemplate })
+});
 
 function setActivePromptPreset(moduleId: ImageModuleId, presetId: string) {
   const settings = getPromptSettings(moduleId);
@@ -845,7 +902,10 @@ function addPromptPreset(moduleId: ImageModuleId) {
     id: createId('prompt_preset'),
     name: `预设 ${settings.promptPresets.length + 1}`,
     positivePrompt: settings.positivePrompt,
-    negativePrompt: settings.negativePrompt
+    negativePrompt: settings.negativePrompt,
+    defaultNegativePrompt: resolveActivePromptPreset(moduleId)?.defaultNegativePrompt ?? '',
+    onlineChatTemplate: resolveActivePromptPreset(moduleId)?.onlineChatTemplate ?? '',
+    voomTemplate: resolveActivePromptPreset(moduleId)?.voomTemplate ?? ''
   };
 
   updatePromptSettings(moduleId, {

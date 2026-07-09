@@ -1,4 +1,4 @@
-import type { CharacterInitialProfile, CharacterProfile, CharacterProfileHistoryEntry, CharacterProfileHistoryField, CharacterThemeStyleBindings, VisualProfile } from '@/types/domain';
+import type { CharacterImageProfile, CharacterInitialProfile, CharacterProfile, CharacterProfileHistoryEntry, CharacterProfileHistoryField, CharacterThemeStyleBindings, VisualProfile } from '@/types/domain';
 import { normalizeVisualProfile, removeVisualProfileAvatar, toCharacterVisualProfile } from '@/utils/profile';
 import { normalizeChatModelOverrides } from '@/utils/settings';
 import { normalizeVoomFrequency } from '@/utils/voom';
@@ -82,6 +82,17 @@ function normalizeCharacterThemeStyleBindings(bindings: Partial<CharacterThemeSt
   };
 }
 
+function normalizeCharacterImageProfile(profile: Partial<CharacterImageProfile> | null | undefined): CharacterImageProfile | undefined {
+  const normalized = {
+    appearancePrompt: String(profile?.appearancePrompt ?? '').trim(),
+    facePrompt: String(profile?.facePrompt ?? '').trim(),
+    referenceImage: String(profile?.referenceImage ?? '').trim(),
+    referenceImageEnabled: profile?.referenceImageEnabled !== false,
+    seed: String(profile?.seed ?? '').trim()
+  };
+  return normalized.appearancePrompt || normalized.facePrompt || normalized.referenceImage || normalized.seed ? normalized : undefined;
+}
+
 export function getCharacterInitialProfile(character: Pick<CharacterProfile, 'initialProfile' | 'nickname' | 'name'>): CharacterInitialProfile {
   const nickname = String(character.initialProfile?.nickname ?? '').trim()
     || String(character.name ?? '').trim()
@@ -132,6 +143,7 @@ export function normalizeCharacterProfile(character: CharacterProfile, fallbackU
     voomFrequency,
     modelOverrides: normalizeChatModelOverrides(character.modelOverrides),
     themeStyleBindings: normalizeCharacterThemeStyleBindings(character.themeStyleBindings),
+    imageProfile: normalizeCharacterImageProfile(character.imageProfile),
     profile,
     ...(boundUserProfile ? { boundUserProfile } : {}),
     ...(initialProfile ? { initialProfile } : {}),

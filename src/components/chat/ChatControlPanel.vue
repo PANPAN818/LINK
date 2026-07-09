@@ -611,6 +611,60 @@
         </label>
       </section>
 
+      <section v-else-if="activeTab === 'image'" class="panel-section image-profile-panel">
+        <section class="settings-block image-profile-block" aria-label="角色生图外观档案">
+          <header class="section-header">
+            <div>
+              <span>Image identity</span>
+              <strong>生图外观档案</strong>
+            </div>
+          </header>
+
+          <label class="field wide-field">
+            <span>整体形象英文档案</span>
+            <textarea v-model="characterDraft.imageProfile.appearancePrompt" rows="5" placeholder="Hair, outfit style, body type, vibe, recurring visual details..." @change="saveCharacterDraft"></textarea>
+          </label>
+
+          <label class="field wide-field">
+            <span>脸部固定英文档案</span>
+            <textarea v-model="characterDraft.imageProfile.facePrompt" rows="4" placeholder="Face shape, eyes, nose, mouth, skin tone, hairstyle framing..." @change="saveCharacterDraft"></textarea>
+          </label>
+
+          <div class="image-profile-grid">
+            <label class="field compact-field">
+              <span>固定种子</span>
+              <input v-model="characterDraft.imageProfile.seed" type="text" placeholder="可留空" @change="saveCharacterDraft" />
+              <small>同角色固定 seed 能提升构图和脸部稳定性。</small>
+            </label>
+            <label class="switch-card image-reference-toggle">
+              <input v-model="characterDraft.imageProfile.referenceImageEnabled" type="checkbox" @change="saveCharacterDraft" />
+              <span class="switch-track"></span>
+              <div>
+                <strong>启用参考图</strong>
+                <span>Pollinations 会实际传入参考图。</span>
+              </div>
+            </label>
+          </div>
+
+          <section class="image-reference-card">
+            <div class="image-reference-preview">
+              <img v-if="characterDraft.imageProfile.referenceImage" :src="characterDraft.imageProfile.referenceImage" alt="角色参考图预览" />
+              <span v-else>Reference</span>
+            </div>
+            <div class="image-reference-fields">
+              <label class="field">
+                <span>参考图 URL</span>
+                <input v-model="characterDraft.imageProfile.referenceImage" type="text" placeholder="https://..." @change="saveCharacterDraft" />
+              </label>
+              <label class="upload-card image-reference-upload">
+                <strong>导入本地参考图</strong>
+                <input type="file" accept="image/*" @change="readReferenceImage" />
+              </label>
+            </div>
+          </section>
+        </section>
+      </section>
+
       <section v-else class="panel-section other-panel">
         <section class="settings-block">
           <header class="section-header">
@@ -781,7 +835,7 @@ import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue';
 import AppModal from '@/components/common/AppModal.vue';
 import AvatarCropperModal from '@/components/image/AvatarCropperModal.vue';
 import { useAppStore } from '@/stores/appStore';
-import type { CharacterProfile, ChatAppearanceSettings, ConversationMemoryRecord, ConversationSettings, ThemeStylePreset } from '@/types/domain';
+import type { CharacterImageProfile, CharacterProfile, ChatAppearanceSettings, ConversationMemoryRecord, ConversationSettings, ThemeStylePreset } from '@/types/domain';
 import { readImageFileFromInput } from '@/utils/imageFile';
 import { collectIncrementalGrandSummaries, estimateTokenCount, getConversationActiveMessages, getConversationFloorCount, getEffectiveHiddenFloorRanges, getGrandSummaryHiddenRange, isIncrementalGrandSummary, normalizeConversationSettings } from '@/utils/memory';
 import { parseMemorySummaryBlocks, type MemorySummaryBlock } from '@/utils/memorySummary';
@@ -799,6 +853,7 @@ type ThemeStyleBindingScope = 'online' | 'offline';
 type MemoryEventField = Extract<MemorySummaryBlock, { kind: 'event' }>['fields'][number];
 type MemoryEventBlock = Extract<MemorySummaryBlock, { kind: 'event' }>;
 type MemoryListBlock = Extract<MemorySummaryBlock, { kind: 'list' }>;
+type CharacterDraft = CharacterProfile & { imageProfile: CharacterImageProfile };
 
 type IdleWindow = Window & {
   requestIdleCallback?: (callback: () => void, options?: { timeout?: number }) => number;
@@ -843,7 +898,7 @@ const props = defineProps<{
 }>();
 
 const store = useAppStore();
-export type PanelTab = 'memory' | 'beauty' | 'profile' | 'other';
+export type PanelTab = 'memory' | 'beauty' | 'profile' | 'image' | 'other';
 
 const activeTab = computed(() => props.activeTab);
 const summarizing = ref(false);
@@ -863,7 +918,7 @@ const memoryNumberDraft = reactive<Record<MemoryNumberField, string>>({
   autoMergeThreshold: String(draft.memory.autoMergeThreshold),
   autoMergeBatchSize: String(draft.memory.autoMergeBatchSize)
 });
-const characterDraft = reactive<CharacterProfile>(cloneCharacterForDraft(props.character));
+const characterDraft = reactive<CharacterDraft>(cloneCharacterForDraft(props.character));
 const confirmDialog = reactive<ConfirmDialogState>({
   open: false,
   eyebrow: '',
@@ -1256,15 +1311,31 @@ watch(
   { immediate: true, deep: true }
 );
 
-function cloneCharacterForDraft(character: CharacterProfile): CharacterProfile {
+function cloneCharacterForDraft(character: CharacterProfile): CharacterDraft {
   return {
     ...character,
     localWorldBookIds: [...character.localWorldBookIds],
+    imageProfile: createCharacterImageProfileDraft(character.imageProfile),
     themeStyleBindings: {
       onlinePresetId: String(character.themeStyleBindings?.onlinePresetId ?? '').trim(),
       offlinePresetId: String(character.themeStyleBindings?.offlinePresetId ?? '').trim()
     }
   };
+}
+
+function createCharacterImageProfileDraft(profile: Partial<CharacterImageProfile> | null | undefined): CharacterImageProfile {
+  return {
+    appearancePrompt: String(profile?.appearancePrompt ?? '').trim(),
+    facePrompt: String(profile?.facePrompt ?? '').trim(),
+    referenceImage: String(profile?.referenceImage ?? '').trim(),
+    referenceImageEnabled: profile?.referenceImageEnabled !== false,
+    seed: String(profile?.seed ?? '').trim()
+  };
+}
+
+function normalizeCharacterImageProfileDraft(profile: CharacterImageProfile): CharacterImageProfile | undefined {
+  const normalized = createCharacterImageProfileDraft(profile);
+  return normalized.appearancePrompt || normalized.facePrompt || normalized.referenceImage || normalized.seed ? normalized : undefined;
 }
 
 function createThemeStyleOptions(scope: ThemeStyleBindingScope, presets: ThemeStylePreset[]) {
@@ -1921,6 +1992,7 @@ function saveCharacterDraft() {
   void store.saveCharacter({
     ...characterDraft,
     localWorldBookIds: [...characterDraft.localWorldBookIds],
+    imageProfile: normalizeCharacterImageProfileDraft(characterDraft.imageProfile),
     themeStyleBindings: {
       onlinePresetId: String(characterDraft.themeStyleBindings?.onlinePresetId ?? '').trim(),
       offlinePresetId: String(characterDraft.themeStyleBindings?.offlinePresetId ?? '').trim()
@@ -2005,6 +2077,14 @@ async function readAvatarFile(event: Event) {
   showAvatarEditor.value = true;
 }
 
+async function readReferenceImage(event: Event) {
+  const image = await readImageFileFromInput(event);
+  if (!image) return;
+  characterDraft.imageProfile.referenceImage = image;
+  characterDraft.imageProfile.referenceImageEnabled = true;
+  saveCharacterDraft();
+}
+
 function applyEditedAvatar(value: string) {
   characterDraft.avatar = value;
   saveCharacterDraft();
@@ -2026,6 +2106,71 @@ function applyEditedAvatar(value: string) {
 .local-theme-style-block {
   display: grid;
   gap: 12px;
+}
+
+.image-profile-block {
+  display: grid;
+  gap: 12px;
+}
+
+.image-profile-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 10px;
+}
+
+.image-reference-toggle {
+  min-height: 74px;
+}
+
+.image-reference-card {
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.76);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.68);
+}
+
+.image-reference-preview,
+.image-reference-preview img,
+.image-reference-preview span {
+  width: 92px;
+  height: 92px;
+  border-radius: 16px;
+}
+
+.image-reference-preview {
+  overflow: hidden;
+  background: #ffffff;
+  box-shadow: inset 0 0 0 1px rgba(17, 17, 17, 0.06);
+}
+
+.image-reference-preview img {
+  display: block;
+  object-fit: cover;
+}
+
+.image-reference-preview span {
+  display: grid;
+  place-items: center;
+  color: #8b9095;
+  font-size: 11px;
+  font-weight: 950;
+}
+
+.image-reference-fields {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.image-reference-upload {
+  min-height: 42px;
+  padding: 10px 12px;
 }
 
 .local-theme-style-grid {

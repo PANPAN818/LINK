@@ -198,7 +198,7 @@ export const profileMutationPrompt = `补充输出规则：
   "messages": [
     { "type": "text", "content": "第一条聊天气泡" },
     { "type": "voice", "content": "一条语音里说出的内容", "duration": 4 },
-    { "type": "image", "description": "你要发送的一张图片的画面描述" },
+    { "type": "image", "description": "你要发送的一张图片的中文画面描述", "generationPrompt": "发送给生图模型的英文画面提示词" },
     { "type": "location", "name": "地点名称", "address": "详细地址，可留空", "distance": "你与{{user}}的距离，例如：约2.4公里" },
     { "type": "transfer", "amount": "转账金额，例如 52.00", "note": "转账备注，可留空" },
     { "type": "sticker", "stickers": ["合适的Sticker id"] },
@@ -229,7 +229,8 @@ export const profileMutationPrompt = `补充输出规则：
 2. 不要机械固定发送流程。每轮先按角色人设、当前状态、上下文、对{{user}}的反应和社交软件习惯决定“这次想发什么”：可以只发一个类型，也可以混用多个类型；可以连续发多条 text、voice、sticker、location、transfer 或 image；也可以先发 Sticker 再发文字、先语音再撤回、先引用再补一句、先转账再沉默等，只要符合角色与语境。
 3. text 项显示成聊天气泡：{ "type":"text", "content":"..." }。根据角色习惯、情绪、当前节奏自然决定条数。
 4. voice 项显示成语音条：{ "type":"voice", "content":"语音里说出的文字内容", "duration": 3 }。只在线上模式使用；content 是角色真的用语音说出的内容，duration 写 1-60 秒。
-5. image 项显示成图片：{ "type":"image", "description":"画面描述" }。description 描述图片里有什么和氛围，不要写英文标签、相机参数、画质词或模型术语。
+5. image 项显示成图片：{ "type":"image", "description":"中文画面描述", "generationPrompt":"English image generation prompt" }。description 给用户看，描述图片里有什么和氛围，不要写英文标签、相机参数、画质词或模型术语。
+5.1 generationPrompt 给生图模型使用，必须用自然英文写一段完整画面提示词，包含主体、场景、光线、构图、手机照片/社交动态质感等必要信息，不要出现中文，不要写负面词，不要写具体模型名。
 6. 图片内容由角色性格、当前对话、生活状态和要表达的情绪决定，可以是自拍、随手拍、物品、街景、餐食、房间、作业、工作现场等任何合理画面。
 7. location 项显示成定位卡片：{ "type":"location", "name":"地点名称", "address":"详细地址，可留空", "distance":"你与{{user}}的距离" }。只在线上模式使用；name 是你当前所在或要主动发送的位置，distance 必须写清你与{{user}}的相对距离。
 8. transfer 项显示成转账卡片：{ "type":"transfer", "amount":"金额", "note":"备注，可留空" }。只在线上模式使用；amount 必须是数字字符串，最多两位小数，表示你主动给{{user}}转账，发送后等待{{user}}接收或拒绝。
@@ -906,6 +907,7 @@ export function buildMomentPrompt(context: PromptContext) {
 {
   "content": "朋友圈正文",
   "imageDescription": "这条动态会同时发布的一张配图的文字描述",
+  "imageGenerationPrompt": "English image generation prompt for the VOOM image",
   "likes": ["真实感 NPC 名"],
   "comments": [
     { "id": "c1", "authorName": "真实感 NPC 名", "content": "评论内容", "parentId": "被回复评论的 id，可留空" },
@@ -919,7 +921,8 @@ export function buildMomentPrompt(context: PromptContext) {
 3. 如果最近聊天已经明确角色在某个地点、路上、房间、公司、学校或某个时间段，content 和 imageDescription 必须保持同一时空或给出合理过渡；禁止让角色从 A 地无铺垫瞬移到 B 地。
 4. 除非最近对话或记忆里已经有明确依据，禁止突然写角色已经到达新地点、见了新人物、完成一整段行程、跨到第二天/深夜/清晨。需要移动时，只能写成本轮时间能合理发生的等待、收拾、路上、刚走到附近等连续过程。
 5. 如果当前聊天没有足够事件支撑 VOOM，可以写角色此刻生活里的小切片，但仍要贴合当前时间、角色职业/日程、刚才聊天情绪和已知地点，不要为了换题而强行换背景。
-6. imageDescription 是配图画面描述，不是生图提示词，不要写英文标签、相机参数、画质词或模型术语。
+6. imageDescription 是给用户和动态记录看的中文配图画面描述，不是生图提示词，不要写英文标签、相机参数、画质词或模型术语。
+6.1 imageGenerationPrompt 是真正发送给生图模型的英文提示词，必须承接 imageDescription、content、角色形象和当前时空，用自然英文写出主体、环境、光线、构图、手机照片/朋友圈质感，不要出现中文，不要写负面词，不要写具体模型名。
 7. 配图内容由角色性格、当前聊天、动态正文、最近经历和生活状态决定，不固定题材；可以是自拍、随手拍、物品、街景、餐食、房间、作业、工作现场等任何合理画面，但必须与 content 的时空连续。
 8. imageDescription 描述“画面里有什么”和“看起来是什么氛围”，注意环境场景、时间、图片视角、角色设定形象，构图组成部分等，控制在 40-140 个中文字符。
 9. likes 和 comments 来自本角色真实社交圈里的 NPC，不要包含{{user}}，也不要使用“NPC”这种占位名字。

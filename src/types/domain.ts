@@ -129,6 +129,14 @@ export interface CharacterProfileHistoryEntry {
   sourceReplyBatchId?: string;
 }
 
+export interface CharacterImageProfile {
+  appearancePrompt: string;
+  facePrompt: string;
+  referenceImage: string;
+  referenceImageEnabled: boolean;
+  seed: string;
+}
+
 export interface CharacterProfile {
   id: string;
   nickname: string;
@@ -149,6 +157,7 @@ export interface CharacterProfile {
   mindState?: CharacterMindState;
   modelOverrides?: ChatModelOverrides;
   themeStyleBindings?: CharacterThemeStyleBindings;
+  imageProfile?: CharacterImageProfile;
 }
 
 export type VoomFrequency = 'very-low' | 'low' | 'medium' | 'high' | 'very-high' | 'always';
@@ -427,6 +436,10 @@ export interface ChatImageCandidate {
   id: string;
   image: string;
   description: string;
+  generationPrompt?: string;
+  negativePrompt?: string;
+  referenceImage?: string;
+  seed?: string;
   provider: ChatImageProviderType;
   model?: string;
   size?: string;
@@ -436,6 +449,10 @@ export interface ChatImageCandidate {
 export interface ChatImageAttachment {
   kind: ChatImageAttachmentKind;
   description: string;
+  generationPrompt?: string;
+  negativePrompt?: string;
+  referenceImage?: string;
+  seed?: string;
   aiHint?: string;
   url?: string;
   provider?: ChatImageProviderType;
@@ -585,6 +602,10 @@ export interface VoomImageCandidate {
   id: string;
   image: string;
   description: string;
+  generationPrompt?: string;
+  negativePrompt?: string;
+  referenceImage?: string;
+  seed?: string;
   provider: VoomImageProviderType;
   model?: string;
   size?: string;
@@ -607,6 +628,10 @@ export interface VoomPost {
   contentTranslation?: string;
   image?: string;
   imageDescription?: string;
+  imageGenerationPrompt?: string;
+  imageNegativePrompt?: string;
+  imageReferenceImage?: string;
+  imageSeed?: string;
   imageProvider?: VoomImageProviderType;
   imageCandidates?: VoomImageCandidate[];
   createdAt: number;
@@ -783,6 +808,9 @@ export interface ImagePromptPreset {
   name: string;
   positivePrompt: string;
   negativePrompt: string;
+  defaultNegativePrompt?: string;
+  onlineChatTemplate?: string;
+  voomTemplate?: string;
 }
 
 export type NovelAiEndpointMode = 'proxy' | 'official' | 'custom';

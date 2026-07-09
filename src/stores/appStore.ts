@@ -1587,6 +1587,10 @@ export const useAppStore = defineStore('app', () => {
       id: input.id || createId('voom-image'),
       image: input.image,
       description: input.description,
+      generationPrompt: input.generationPrompt,
+      negativePrompt: input.negativePrompt,
+      referenceImage: input.referenceImage,
+      seed: input.seed,
       provider: input.provider,
       model: input.model,
       size: input.size,
@@ -1599,6 +1603,10 @@ export const useAppStore = defineStore('app', () => {
       id: input.id || createId('chat-image'),
       image: input.image,
       description: input.description,
+      generationPrompt: input.generationPrompt,
+      negativePrompt: input.negativePrompt,
+      referenceImage: input.referenceImage,
+      seed: input.seed,
       provider: input.provider,
       model: input.model,
       size: input.size,
@@ -5307,7 +5315,8 @@ export const useAppStore = defineStore('app', () => {
             }
             if (segment.type === 'image') {
               const description = String(segment.description ?? '').trim();
-              return description ? [{ type: 'image', description }] : [];
+              const generationPrompt = String(segment.generationPrompt ?? '').trim();
+              return description ? [{ type: 'image', description, ...(generationPrompt ? { generationPrompt } : {}) }] : [];
             }
             if (segment.type === 'voice') {
               const content = String(segment.content ?? '').trim();
@@ -5336,8 +5345,11 @@ export const useAppStore = defineStore('app', () => {
           .slice(0, 12)
         : [];
       const replyImages = (parsedReply.images ?? [])
-        .map((image) => String(image.description ?? '').trim())
-        .filter(Boolean)
+        .map((image) => ({
+          description: String(image.description ?? '').trim(),
+          generationPrompt: String(image.generationPrompt ?? '').trim()
+        }))
+        .filter((image) => image.description)
         .slice(0, 3);
       const narrationMessages = conversation.activeMode === 'online' && chatSettings.narrationModeEnabled
         ? (parsedReply.narrations ?? [])
@@ -5473,8 +5485,8 @@ export const useAppStore = defineStore('app', () => {
       const appendOrderedStickerMessages = (stickersToSend: Sticker[]) => {
         orderedCharMessages.push(...createStickerMessages(stickersToSend));
       };
-      const createImageMessage = async (description: string) => {
-        const image = await createCharacterImageAttachment(description);
+      const createImageMessage = async (description: string, generationPrompt = '') => {
+        const image = await createCharacterImageAttachment(description, generationPrompt, character.id);
         if (!image) return null;
         return {
           id: createId('msg'),
@@ -5565,11 +5577,11 @@ export const useAppStore = defineStore('app', () => {
         while (usedMusicActionNoticeIndexes.size < musicActionNotices.length) appendMusicActionNotice(targetMessages);
       };
       const sentImageDescriptionKeys = new Set<string>();
-      const appendImageMessage = async (description: string, targetMessages: ChatMessage[]) => {
-        const imageKey = normalizeDuplicateKey(description);
+      const appendImageMessage = async (description: string, targetMessages: ChatMessage[], generationPrompt = '') => {
+        const imageKey = normalizeDuplicateKey(`${description}\n${generationPrompt}`);
         if (!imageKey || sentImageDescriptionKeys.has(imageKey)) return;
         sentImageDescriptionKeys.add(imageKey);
-        const imageMessage = await createImageMessage(description);
+        const imageMessage = await createImageMessage(description, generationPrompt);
         if (imageMessage) targetMessages.push(imageMessage);
       };
       const appendPlacedStickers = (replyIndex: number, position: 'before' | 'after') => {
@@ -5614,7 +5626,7 @@ export const useAppStore = defineStore('app', () => {
               appendOrderedStickerMessages(resolveCharacterStickerSelections(segment.stickers, availableCharacterStickers));
               break;
             case 'image':
-              await appendImageMessage(segment.description, orderedCharMessages);
+              await appendImageMessage(segment.description, orderedCharMessages, segment.generationPrompt);
               break;
             case 'location': {
               orderedCharMessages.push(createLocationMessage(segment));
@@ -5656,8 +5668,8 @@ export const useAppStore = defineStore('app', () => {
       } else {
         replyStickerPlacements.forEach((placement) => appendStickerMessages(placement.stickers));
       }
-      for (const imageDescription of replyImages) {
-        await appendImageMessage(imageDescription, charMessagesAfterNarration);
+      for (const image of replyImages) {
+        await appendImageMessage(image.description, charMessagesAfterNarration, image.generationPrompt);
       }
       appendStickerMessages(replyStickers);
       const charMessages: ChatMessage[] = orderedSegments.length ? orderedCharMessages : [...charNarrationMessages, ...charMessagesAfterNarration];
@@ -6622,35 +6634,118 @@ export const useAppStore = defineStore('app', () => {
     ].join(', ');
   }
 
-  function buildVoomImagePositivePrompt(basePrompt: string, imageDescription: string, post: VoomPost) {
-    return [basePrompt, buildVoomPortraitPrompt(post), imageDescription].filter(Boolean).join(', ');
+  function normalizePromptPieces(...pieces: Array<string | undefined>) {
+    return pieces.map((piece) => String(piece ?? '').trim()).filter(Boolean).join('\n');
   }
 
-  function buildVoomImageNegativePrompt(basePrompt: string) {
-    if (!isVoomPortraitPromptRequired()) return basePrompt;
-    return [
-      basePrompt,
-      '无人物, 空镜, 纯风景, 纯物品, 抽象背景, 看不到人物, no person, empty scene, scenery only, object only, abstract image, background only, missing person'
-    ].filter(Boolean).join(', ');
+  function fillImageSceneTemplate(template: string, values: Record<string, string>) {
+    const source = template.trim() || '{basePrompt}\n{characterAppearance}\n{faceConsistency}\n{generationPrompt}\n{sceneDescription}';
+    return source.replace(/\{(basePrompt|sceneDescription|generationPrompt|characterAppearance|faceConsistency|postContent)\}/g, (_match, key: string) => values[key] ?? '')
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .join('\n');
   }
 
-  async function generateChatImageCandidate(description: string) {
+  function getImageCharacterProfile(characterId: string) {
+    const character = characterById(characterId);
+    return character?.imageProfile;
+  }
+
+  function buildCharacterAppearancePrompt(characterId: string) {
+    const imageProfile = getImageCharacterProfile(characterId);
+    return normalizePromptPieces(
+      imageProfile?.appearancePrompt ? `Character appearance: ${imageProfile.appearancePrompt}` : '',
+      imageProfile?.facePrompt ? `Face identity lock: ${imageProfile.facePrompt}` : ''
+    );
+  }
+
+  function getCharacterImageReference(characterId: string) {
+    const imageProfile = getImageCharacterProfile(characterId);
+    if (!imageProfile?.referenceImageEnabled) return '';
+    return imageProfile.referenceImage.trim();
+  }
+
+  function getCharacterImageSeed(characterId: string) {
+    return getImageCharacterProfile(characterId)?.seed.trim() ?? '';
+  }
+
+  function buildImageNegativePrompt(basePrompt: string, defaultNegativePrompt = '', extraNegativePrompt = '') {
+    return normalizePromptPieces(basePrompt, defaultNegativePrompt, extraNegativePrompt);
+  }
+
+  function buildLocalImageGenerationPrompt(sceneDescription: string, scope: 'onlineChat' | 'voom', characterId: string, post?: VoomPost) {
+    const character = characterById(characterId);
+    const authorName = character ? getCharacterAiName(character) : 'the character';
+    const scopeText = scope === 'voom'
+      ? `A casual LINK VOOM social feed image posted by ${authorName}.`
+      : `A private mobile chat image sent by ${authorName}.`;
+    return normalizePromptPieces(
+      scopeText,
+      post?.content ? `Post text context: ${post.content}` : '',
+      `Scene: ${sceneDescription}`
+    );
+  }
+
+  function buildFinalImagePrompt(input: {
+    scope: 'onlineChat' | 'voom';
+    characterId: string;
+    description: string;
+    generationPrompt?: string;
+    basePrompt: string;
+    template?: string;
+    post?: VoomPost;
+  }) {
+    const generationPrompt = String(input.generationPrompt ?? '').trim() || buildLocalImageGenerationPrompt(input.description, input.scope, input.characterId, input.post);
+    const characterAppearance = buildCharacterAppearancePrompt(input.characterId);
+    const faceConsistency = getCharacterImageReference(input.characterId)
+      ? 'Use the character reference image as identity guidance; keep the same facial structure, eyes, nose, mouth, hairstyle, and overall likeness across generations.'
+      : 'Keep the same character identity and consistent facial features across generations.';
+    const postContent = input.post?.content?.trim() ?? '';
+    const templatePrompt = fillImageSceneTemplate(input.template ?? '', {
+      basePrompt: input.basePrompt,
+      sceneDescription: input.description,
+      generationPrompt,
+      characterAppearance,
+      faceConsistency,
+      postContent
+    });
+    const voomPortraitPrompt = input.scope === 'voom' ? buildVoomPortraitPrompt(input.post ?? {} as VoomPost) : '';
+    return {
+      generationPrompt,
+      positivePrompt: normalizePromptPieces(templatePrompt, voomPortraitPrompt)
+    };
+  }
+
+  async function generateChatImageCandidate(description: string, generationPrompt = '', characterId = '') {
     const imageDescription = description.trim();
     const selectedModel = getSelectedImageModelOption(settings.value, 'onlineChat');
     if (!imageDescription || !settings.value || !selectedModel) return null;
 
     const provider = selectedModel.provider;
     const promptPreset = getImagePromptPresetForProvider(settings.value, provider);
-    const positivePrompt = [promptPreset.positivePrompt, imageDescription].filter(Boolean).join(', ');
+    const promptBundle = buildFinalImagePrompt({
+      scope: 'onlineChat',
+      characterId,
+      description: imageDescription,
+      generationPrompt,
+      basePrompt: promptPreset.positivePrompt,
+      template: promptPreset.onlineChatTemplate
+    });
+    const referenceImage = getCharacterImageReference(characterId);
+    const seed = getCharacterImageSeed(characterId);
+    const negativePrompt = buildImageNegativePrompt(promptPreset.negativePrompt, promptPreset.defaultNegativePrompt);
     const imageSize = getImageGenerationSize(settings.value, provider);
     let imageSettings = settings.value;
     const imageOverrides = {
-      positivePrompt,
-      negativePrompt: promptPreset.negativePrompt,
+      positivePrompt: promptBundle.positivePrompt,
+      negativePrompt,
+      referenceImage,
       size: imageSize.size,
       width: imageSize.width,
       height: imageSize.height,
-      model: selectedModel.model
+      model: selectedModel.model,
+      seed
     };
 
     if (provider === 'openai') {
@@ -6670,6 +6765,10 @@ export const useAppStore = defineStore('app', () => {
     return createChatImageCandidate({
       image: imageUrl,
       description: imageDescription,
+      generationPrompt: promptBundle.generationPrompt,
+      negativePrompt,
+      referenceImage,
+      seed,
       provider: result.provider,
       model: selectedModel.label,
       size: getVoomImageSizeLabel(result.provider)
@@ -6680,6 +6779,10 @@ export const useAppStore = defineStore('app', () => {
     return {
       kind: 'generated',
       description: candidate.description,
+      generationPrompt: candidate.generationPrompt,
+      negativePrompt: candidate.negativePrompt,
+      referenceImage: candidate.referenceImage,
+      seed: candidate.seed,
       url: candidate.image,
       provider: candidate.provider,
       model: candidate.model,
@@ -6697,11 +6800,11 @@ export const useAppStore = defineStore('app', () => {
     };
   }
 
-  async function createCharacterImageAttachment(description: string) {
+  async function createCharacterImageAttachment(description: string, generationPrompt = '', characterId = '') {
     const imageDescription = description.trim();
     if (!imageDescription) return null;
     try {
-      const candidate = await generateChatImageCandidate(imageDescription);
+      const candidate = await generateChatImageCandidate(imageDescription, generationPrompt, characterId);
       return candidate ? imageAttachmentFromCandidate(candidate) : createChatImageDescriptionAttachment(imageDescription);
     } catch (error) {
       showConfigAlert(error instanceof Error ? error.message : '聊天图片生成失败，已改为文字描述卡片。', '无法生成聊天图片');
@@ -6738,7 +6841,9 @@ export const useAppStore = defineStore('app', () => {
     }
     regeneratingChatImageMessageIds.add(normalizedMessageId);
     try {
-      const candidate = await generateChatImageCandidate(imageDescription);
+      const imageGenerationPrompt = existingMessage.image.generationPrompt ?? existingMessage.image.candidates?.at(-1)?.generationPrompt ?? '';
+      const characterId = conversationById(existingMessage.conversationId)?.charId ?? '';
+      const candidate = await generateChatImageCandidate(imageDescription, imageGenerationPrompt, characterId);
       if (!candidate) return null;
       const candidates = [...(existingMessage.image.candidates ?? []), candidate];
       return updateChatMessageImage(normalizedMessageId, {
@@ -6792,17 +6897,33 @@ export const useAppStore = defineStore('app', () => {
     regeneratingVoomImagePostIds.add(normalizedPostId);
     const provider = selectedModel.provider;
     const promptPreset = getImagePromptPresetForProvider(settings.value, provider);
-    const positivePrompt = buildVoomImagePositivePrompt(promptPreset.positivePrompt, imageDescription, post);
-    const negativePrompt = buildVoomImageNegativePrompt(promptPreset.negativePrompt);
+    const promptBundle = buildFinalImagePrompt({
+      scope: 'voom',
+      characterId: post.charId,
+      description: imageDescription,
+      generationPrompt: post.imageGenerationPrompt,
+      basePrompt: promptPreset.positivePrompt,
+      template: promptPreset.voomTemplate,
+      post
+    });
+    const referenceImage = getCharacterImageReference(post.charId);
+    const seed = getCharacterImageSeed(post.charId);
+    const negativePrompt = buildImageNegativePrompt(
+      promptPreset.negativePrompt,
+      promptPreset.defaultNegativePrompt,
+      isVoomPortraitPromptRequired() ? 'no person, empty scene, scenery only, object only, abstract image, background only, missing person' : ''
+    );
     const imageSize = getImageGenerationSize(settings.value, provider);
     let imageSettings = settings.value;
     const imageOverrides = {
-      positivePrompt,
+      positivePrompt: promptBundle.positivePrompt,
       negativePrompt,
+      referenceImage,
       size: imageSize.size,
       width: imageSize.width,
       height: imageSize.height,
-      model: selectedModel.model
+      model: selectedModel.model,
+      seed
     };
 
     if (provider === 'openai') {
@@ -6825,6 +6946,10 @@ export const useAppStore = defineStore('app', () => {
       const nextCandidate = createVoomImageCandidate({
         image: imageUrl,
         description: imageDescription,
+        generationPrompt: promptBundle.generationPrompt,
+        negativePrompt,
+        referenceImage,
+        seed,
         provider: result.provider,
         model: selectedModel.label,
         size: getVoomImageSizeLabel(result.provider)
@@ -6833,6 +6958,10 @@ export const useAppStore = defineStore('app', () => {
         ...latestPost,
         image: imageUrl,
         imageDescription,
+        imageGenerationPrompt: promptBundle.generationPrompt,
+        imageNegativePrompt: negativePrompt,
+        imageReferenceImage: referenceImage,
+        imageSeed: seed,
         imageProvider: result.provider,
         imageCandidates: [...(latestPost.imageCandidates ?? []), nextCandidate]
       };
@@ -6841,7 +6970,7 @@ export const useAppStore = defineStore('app', () => {
         provider: result.provider,
         imageUrl,
         title: `${voomAuthorNameForPost(latestPost)} 的 VOOM 配图`,
-        prompt: positivePrompt,
+        prompt: promptBundle.positivePrompt,
         negativePrompt,
         model: selectedModel.label,
         size: nextCandidate.size || getVoomImageSizeLabel(result.provider),
@@ -6874,17 +7003,33 @@ export const useAppStore = defineStore('app', () => {
     regeneratingVoomImagePostIds.add(post.id);
     const provider = selectedModel.provider;
     const promptPreset = getImagePromptPresetForProvider(settings.value, provider);
-    const positivePrompt = buildVoomImagePositivePrompt(promptPreset.positivePrompt, imageDescription, post);
-    const negativePrompt = buildVoomImageNegativePrompt(promptPreset.negativePrompt);
+    const promptBundle = buildFinalImagePrompt({
+      scope: 'voom',
+      characterId: post.charId,
+      description: imageDescription,
+      generationPrompt: post.imageGenerationPrompt,
+      basePrompt: promptPreset.positivePrompt,
+      template: promptPreset.voomTemplate,
+      post
+    });
+    const referenceImage = getCharacterImageReference(post.charId);
+    const seed = getCharacterImageSeed(post.charId);
+    const negativePrompt = buildImageNegativePrompt(
+      promptPreset.negativePrompt,
+      promptPreset.defaultNegativePrompt,
+      isVoomPortraitPromptRequired() ? 'no person, empty scene, scenery only, object only, abstract image, background only, missing person' : ''
+    );
     const imageSize = getImageGenerationSize(settings.value, provider);
     let imageSettings = settings.value;
     const imageOverrides = {
-      positivePrompt,
+      positivePrompt: promptBundle.positivePrompt,
       negativePrompt,
+      referenceImage,
       size: imageSize.size,
       width: imageSize.width,
       height: imageSize.height,
-      model: selectedModel.model
+      model: selectedModel.model,
+      seed
     };
 
     if (provider === 'openai') {
@@ -6905,6 +7050,10 @@ export const useAppStore = defineStore('app', () => {
       const nextCandidate = createVoomImageCandidate({
         image: imageUrl,
         description: imageDescription,
+        generationPrompt: promptBundle.generationPrompt,
+        negativePrompt,
+        referenceImage,
+        seed,
         provider: result.provider,
         model: selectedModel.label,
         size: getVoomImageSizeLabel(result.provider)
@@ -6913,6 +7062,10 @@ export const useAppStore = defineStore('app', () => {
         ...post,
         image: imageUrl,
         imageDescription,
+        imageGenerationPrompt: promptBundle.generationPrompt,
+        imageNegativePrompt: negativePrompt,
+        imageReferenceImage: referenceImage,
+        imageSeed: seed,
         imageProvider: result.provider,
         imageCandidates: [...(post.imageCandidates ?? []), nextCandidate]
       };
@@ -6920,7 +7073,7 @@ export const useAppStore = defineStore('app', () => {
         provider: result.provider,
         imageUrl,
         title: `${voomAuthorNameForPost(post)} 的 VOOM 配图`,
-        prompt: positivePrompt,
+        prompt: promptBundle.positivePrompt,
         negativePrompt,
         model: selectedModel.label,
         size: nextCandidate.size || getVoomImageSizeLabel(result.provider),

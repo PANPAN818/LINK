@@ -157,6 +157,9 @@ async function compactCharacterProfileInlineImages(character: CharacterProfile):
   const nextAvatar = await compactInlineImageValue(character.avatar, inlineAvatarCompressionOptions);
   if (nextAvatar !== character.avatar) changed = true;
 
+  const nextReferenceImage = await compactInlineImageValue(character.imageProfile?.referenceImage, inlineProfileImageCompressionOptions);
+  if (nextReferenceImage !== character.imageProfile?.referenceImage) changed = true;
+
   const nextBoundUserProfile = await compactVisualProfileInlineImages(character.boundUserProfile);
   if (nextBoundUserProfile !== character.boundUserProfile) changed = true;
 
@@ -171,6 +174,7 @@ async function compactCharacterProfileInlineImages(character: CharacterProfile):
     ? {
         ...character,
         avatar: nextAvatar ?? character.avatar,
+        imageProfile: character.imageProfile ? { ...character.imageProfile, referenceImage: nextReferenceImage ?? character.imageProfile.referenceImage } : character.imageProfile,
         boundUserProfile: nextBoundUserProfile,
         profile: nextProfile
       }

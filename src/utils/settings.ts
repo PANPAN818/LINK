@@ -61,6 +61,26 @@ export const defaultRingtoneUrl = getPublicAssetUrl('default-ringtone.mp3');
 
 export const openAiImageSizeOptions = ['1024x1024', '832x1216', '768x1152', '640x960', '1216x832', '1152x768'];
 
+export const defaultImageNegativePrompt = 'inconsistent face, different identity, face swap, warped face, distorted eyes, asymmetrical eyes, bad anatomy, deformed hands, extra fingers, missing fingers, low quality, blurry, watermark, text artifacts';
+
+export const defaultOnlineChatImagePromptTemplate = [
+  '{basePrompt}',
+  'A private mobile chat photo sent by the character, natural candid composition, believable phone camera framing.',
+  '{characterAppearance}',
+  '{faceConsistency}',
+  '{generationPrompt}',
+  'User-facing Chinese scene note: {sceneDescription}'
+].join('\n');
+
+export const defaultVoomImagePromptTemplate = [
+  '{basePrompt}',
+  'A LINK VOOM social feed image, casual lifestyle photo, natural mobile photography, coherent with the post text.',
+  '{characterAppearance}',
+  '{faceConsistency}',
+  '{generationPrompt}',
+  'User-facing Chinese scene note: {sceneDescription}'
+].join('\n');
+
 export function parseImageSize(size: string) {
   const [width, height] = size.split('x').map((value) => Number.parseInt(value, 10));
   return Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0
@@ -723,7 +743,10 @@ function normalizePromptPreset(preset: Partial<ImagePromptPreset> | null | undef
     id,
     name: String(preset?.name ?? fallbackName).trim(),
     positivePrompt: String(preset?.positivePrompt ?? '').trim(),
-    negativePrompt: String(preset?.negativePrompt ?? '').trim()
+    negativePrompt: String(preset?.negativePrompt ?? '').trim(),
+    defaultNegativePrompt: String(preset?.defaultNegativePrompt ?? defaultImageNegativePrompt).trim(),
+    onlineChatTemplate: String(preset?.onlineChatTemplate ?? defaultOnlineChatImagePromptTemplate).trim(),
+    voomTemplate: String(preset?.voomTemplate ?? defaultVoomImagePromptTemplate).trim()
   };
 }
 
@@ -753,7 +776,10 @@ function normalizePromptPresetState(
         id: options.defaultId,
         name: options.defaultName,
         positivePrompt: options.legacyPositivePrompt,
-        negativePrompt: options.legacyNegativePrompt
+        negativePrompt: options.legacyNegativePrompt,
+        defaultNegativePrompt: defaultImageNegativePrompt,
+        onlineChatTemplate: defaultOnlineChatImagePromptTemplate,
+        voomTemplate: defaultVoomImagePromptTemplate
       }];
 
   const requestedActiveId = String(options.activePresetId ?? '').trim();
@@ -1370,21 +1396,18 @@ export function getSelectedImageModelOption(settings?: AppSettings | null, scope
 
 export function getImagePromptPresetForProvider(settings: AppSettings, provider: ImageProviderType) {
   if (provider === 'openai') {
-    return {
-      positivePrompt: settings.imageOpenAi.positivePrompt,
-      negativePrompt: settings.imageOpenAi.negativePrompt
-    };
+    return settings.imageOpenAi.promptPresets.find((preset) => preset.id === settings.imageOpenAi.activePromptPresetId)
+      ?? settings.imageOpenAi.promptPresets[0]
+      ?? defaultAppSettings.imageOpenAi.promptPresets[0];
   }
   if (provider === 'novelai') {
-    return {
-      positivePrompt: settings.imageNovelAi.positivePrompt,
-      negativePrompt: settings.imageNovelAi.negativePrompt
-    };
+    return settings.imageNovelAi.promptPresets.find((preset) => preset.id === settings.imageNovelAi.activePromptPresetId)
+      ?? settings.imageNovelAi.promptPresets[0]
+      ?? defaultAppSettings.imageNovelAi.promptPresets[0];
   }
-  return {
-    positivePrompt: settings.imagePollinations.positivePrompt,
-    negativePrompt: settings.imagePollinations.negativePrompt
-  };
+  return settings.imagePollinations.promptPresets.find((preset) => preset.id === settings.imagePollinations.activePromptPresetId)
+    ?? settings.imagePollinations.promptPresets[0]
+    ?? defaultAppSettings.imagePollinations.promptPresets[0];
 }
 
 export function normalizeAppSettings(settings?: Partial<AppSettings> | null): AppSettings {

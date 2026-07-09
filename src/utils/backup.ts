@@ -1,5 +1,5 @@
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
-import type { AppSettings, AppSnapshot, ChatImageAttachment, ChatImageCandidate, ChatMessage, ChatMessageQuote, ChatVoiceAttachment, ConversationMemoryRecord, FavoriteMessageRecord, GeneratedImageRecord, Sticker, VoomImageCandidate, VoomPost, WorldBookEntry } from '@/types/domain';
+import type { AppSettings, AppSnapshot, CharacterProfile, ChatImageAttachment, ChatImageCandidate, ChatMessage, ChatMessageQuote, ChatVoiceAttachment, ConversationMemoryRecord, FavoriteMessageRecord, GeneratedImageRecord, Sticker, VoomImageCandidate, VoomPost, WorldBookEntry } from '@/types/domain';
 
 export interface LinkBackupFile {
   app: 'LINK';
@@ -140,6 +140,18 @@ function sanitizeVoomPostForBackup(post: VoomPost): VoomPost {
   };
 }
 
+function sanitizeCharacterForBackup(character: CharacterProfile): CharacterProfile {
+  return {
+    ...character,
+    imageProfile: character.imageProfile
+      ? {
+          ...character.imageProfile,
+          referenceImage: stripLargeInlineAsset(character.imageProfile.referenceImage)
+        }
+      : character.imageProfile
+  };
+}
+
 function sanitizeWorldBookForBackup(entry: WorldBookEntry): WorldBookEntry {
   return {
     ...entry,
@@ -205,6 +217,7 @@ function sanitizeSettingsForBackup(settings: AppSettings): AppSettings {
 
 function sanitizeSnapshotForBackup(snapshot: AppSnapshot): AppSnapshot {
   const safeSnapshot = cloneSnapshot(snapshot);
+  safeSnapshot.characters = safeSnapshot.characters.map((character) => sanitizeCharacterForBackup(character));
   safeSnapshot.messages = safeSnapshot.messages.map((message) => sanitizeMessageForBackup(message));
   safeSnapshot.voomPosts = safeSnapshot.voomPosts.map((post) => sanitizeVoomPostForBackup(post));
   const activeVoomImages = new Set(safeSnapshot.voomPosts.map((post) => post.image?.trim()).filter(Boolean));

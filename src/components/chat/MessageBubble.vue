@@ -211,6 +211,7 @@
 
       <div class="image-actions">
         <button class="image-secondary" type="button" @click="toggleImageFlip">翻转</button>
+        <button class="image-secondary" type="button" :disabled="!modalImageSrc" @click="downloadCurrentImage">下载</button>
         <button v-if="imageCandidates.length" class="image-secondary" type="button" :disabled="regeneratingImage || !canApplySelectedCandidate" @click="applySelectedCandidate">应用</button>
         <button
           v-if="canRegenerateImage"
@@ -239,6 +240,7 @@ import { getCharacterDisplayName } from '@/utils/character';
 import { formatChatTime } from '@/utils/time';
 import { defaultConversationSettings } from '@/utils/memory';
 import { defaultProfileAvatar } from '@/utils/profile';
+import { downloadImageUrl } from '@/utils/download';
 import { getStickerDisplayImageUrl } from '@/utils/stickers';
 import { normalizeTranslationText, shouldShowChineseTranslation } from '@/utils/translation';
 
@@ -898,6 +900,15 @@ function applySelectedCandidate() {
   }
   if (!selectedCandidate.value || !canApplySelectedCandidate.value) return;
   emit('apply-image', props.message.id, selectedCandidate.value.id);
+}
+
+async function downloadCurrentImage() {
+  if (!modalImageSrc.value) return;
+  try {
+    await downloadImageUrl(modalImageSrc.value, `link-chat-image-${props.message.id}`);
+  } catch (error) {
+    emit('busy-action', error instanceof Error ? error.message : '图片下载失败。', '下载失败');
+  }
 }
 
 watch(() => props.message.image?.url, () => {

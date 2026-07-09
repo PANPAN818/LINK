@@ -111,6 +111,7 @@
 
         <div class="visual-actions">
           <button class="visual-secondary" type="button" @click="toggleVisualFlip">翻转</button>
+          <button class="visual-secondary" type="button" :disabled="!modalImageSrc || modalImageSrc === '/load.jpg'" @click="downloadCurrentVisual">下载</button>
           <button v-if="visualCandidates.length" class="visual-secondary" type="button" :disabled="regeneratingImage || !canApplySelectedCandidate" @click="applySelectedCandidate">应用</button>
           <button
             v-if="canRegenerateImage"
@@ -135,6 +136,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { BotMessageSquare, Heart, LoaderCircle, MessageCircle, X } from 'lucide-vue-next';
 import AppModal from '@/components/common/AppModal.vue';
 import type { VoomPost } from '@/types/domain';
+import { downloadImageUrl } from '@/utils/download';
 import { formatRelativeDate } from '@/utils/time';
 import { formatContentWithChineseTranslation } from '@/utils/translation';
 import { stripVoomCommentReplyPrefix } from '@/utils/voom';
@@ -347,6 +349,15 @@ function regenerateImage() {
   if (!description) return;
   emit('regenerate-image', props.post.id, description);
   visualFlipped.value = false;
+}
+
+async function downloadCurrentVisual() {
+  if (!modalImageSrc.value || modalImageSrc.value === '/load.jpg') return;
+  try {
+    await downloadImageUrl(modalImageSrc.value, `link-voom-image-${props.post.id}`);
+  } catch (error) {
+    emit('busy-action', error instanceof Error ? error.message : '图片下载失败。', '下载失败');
+  }
 }
 
 watch(() => props.regeneratingImage, (isRegenerating) => {
