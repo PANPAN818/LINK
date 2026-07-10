@@ -13,7 +13,15 @@ const exportPosterHeight = 1350;
 export type ThemeStyleExportScope = 'online' | 'offline';
 
 export const defaultOnlineThemeCss = `/* LINK 线上页默认完整样式。
-   复制后可自由修改；建议所有选择器都保留 .chat-room 前缀，避免影响其他页面。 */
+  复制后可自由修改；建议所有选择器都保留 .chat-room 前缀，避免影响其他页面。
+
+  小白改法：
+  1. 想改整页底色，搜 .chat-room，改 background。
+  2. 想改顶部栏，搜 .chat-header；顶部按钮搜 .icon-button。
+  3. 想改聊天气泡，搜 .bubble；自己的气泡搜 .message-row.user .bubble。
+  4. 想改 5 分钟时间分割，搜 .message-time-divider。
+  5. 想改底部输入栏，搜 .composer；输入框搜 .composer-input；发送按钮搜 .send-button。
+  6. 常用属性：background 改背景，color 改文字，border-radius 改圆角，padding 改内边距，box-shadow 改阴影。 */
 .chat-room {
   background: #f4f7f2;
   color: #111111;
@@ -56,6 +64,27 @@ export const defaultOnlineThemeCss = `/* LINK 线上页默认完整样式。
 .chat-room .typing-indicator,
 .chat-room .message-meta {
   color: #727a82;
+}
+
+.chat-room .message-time-divider {
+  display: flex;
+  justify-content: center;
+  margin: 12px 0 8px;
+  pointer-events: none;
+}
+
+.chat-room .message-time-divider time {
+  max-width: calc(100% - 32px);
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: rgba(245, 246, 248, 0.82);
+  color: #7b828a;
+  font-size: 11px;
+  font-weight: 680;
+  line-height: 1.2;
+  box-shadow: 0 1px 6px rgba(17, 20, 24, 0.06);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
 }
 
 .chat-room .message-row {
@@ -360,7 +389,15 @@ export const defaultOnlineThemeCss = `/* LINK 线上页默认完整样式。
 `;
 
 export const defaultOfflineThemeCss = `/* LINK 线下页默认完整样式。
-   复制后可自由修改；建议所有选择器都保留 .offline-room 前缀，避免影响其他页面。 */
+  复制后可自由修改；建议所有选择器都保留 .offline-room 前缀，避免影响其他页面。
+
+  小白改法：
+  1. 想改整页底色，搜 .offline-room，改 background。
+  2. 想改顶部栏，搜 .offline-topbar；顶部图标按钮搜 .offline-icon-button。
+  3. 想改正文卡片，搜 .chapter-entry；用户段落搜 .chapter-entry--user；角色段落搜 .chapter-entry--char。
+  4. 想改剧情选项，搜 .plot-choice-panel 和 .plot-choice-list button。
+  5. 想改底部输入栏，搜 .offline-composer；输入文字框搜 .offline-composer textarea；发送按钮搜 .send-button。
+  6. 常用属性：background 改背景，color 改文字，border-radius 改圆角，padding 改内边距，box-shadow 改阴影。 */
 .offline-room {
   --offline-ink: #252226;
   --offline-muted: #8f858c;
