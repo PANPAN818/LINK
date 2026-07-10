@@ -1,4 +1,4 @@
-import type { AppSettings, MinimaxTtsSettings, OpenAiTtsSettings, TtsProviderType } from '@/types/domain';
+import type { AppSettings, DoubaoTtsSettings, MinimaxTtsSettings, OpenAiTtsSettings, TtsProviderType } from '@/types/domain';
 import { getResolvedOpenAiTtsConfig, normalizeAppSettings } from '@/utils/settings';
 
 interface TtsAudioPayload {
@@ -18,6 +18,13 @@ const geminiTtsVoices = ['Zephyr', 'Puck', 'Charon', 'Kore', 'Fenrir', 'Leda', '
 function minimaxMimeTypeForFormat(format: MinimaxTtsSettings['audioFormat']) {
   if (format === 'wav') return 'audio/wav';
   if (format === 'pcm') return 'audio/pcm';
+  return 'audio/mpeg';
+}
+
+function doubaoMimeTypeForFormat(format: DoubaoTtsSettings['encoding']) {
+  if (format === 'wav') return 'audio/wav';
+  if (format === 'pcm') return 'audio/pcm';
+  if (format === 'ogg_opus') return 'audio/ogg; codecs=opus';
   return 'audio/mpeg';
 }
 
@@ -148,6 +155,11 @@ function buildMinimaxEndpoint(apiUrl: string, groupId: string) {
   return `${endpoint}${endpoint.includes('?') ? '&' : '?'}GroupId=${encodeURIComponent(groupId.trim())}`;
 }
 
+function createRequestId() {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') return crypto.randomUUID();
+  return `link-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
 function extractJsonErrorMessage(rawText: string, fallback: string) {
   try {
     const payload = JSON.parse(rawText) as Record<string, unknown>;
@@ -260,7 +272,22 @@ function getMinimaxError(payload: unknown) {
   return String(baseResp?.status_msg ?? record.status_msg ?? record.message ?? 'MiniMax TTS 生成失败。').trim();
 }
 
-async function normalizeAudioPayload(candidate: string, mimeType: string): Promise<TtsAudioPayload> {
+function getDoubaoError(payload: unknown) {
+  const record = normalizeObject(payload);
+  if (!record) return '';
+  const code = Number(record.code ?? 3000);
+  if (!Number.isFinite(code) || code === 3000) return '';
+  return String(record.message ?? '豆包 TTS 生成失败。').trim();
+}
+
+function extractDoubaoAudioCandidate(payload: unknown) {
+  const record = normalizeObject(payload);
+  const data = String(record?.data ?? '').trim();
+  if (data) return data;
+  return extractAudioCandidate(payload);
+}
+
+async function normalizeAudioPayload(candidate: string, mimeType: string, fallbackError = 'MiniMax TTS 没有返回可识别的音频内容。'): Promise<TtsAudioPayload> {
   if (candidate.startsWith('data:')) {
     const matchedMime = candidate.match(/^data:([^;,]+)/i)?.[1] || mimeType;
     return { audioUrl: candidate, mimeType: matchedMime };
@@ -273,7 +300,7 @@ async function normalizeAudioPayload(candidate: string, mimeType: string): Promi
   const base64AudioUrl = base64ToDataUrl(candidate, mimeType);
   if (base64AudioUrl) return { audioUrl: base64AudioUrl, mimeType };
 
-  throw new Error('MiniMax TTS 没有返回可识别的音频内容。');
+  throw new Error(fallbackError);
 }
 
 export async function synthesizeMinimaxSpeech(text: string, settings: MinimaxTtsSettings): Promise<TtsAudioResult> {
@@ -327,6 +354,73 @@ export async function synthesizeMinimaxSpeech(text: string, settings: MinimaxTts
 
   const audio = await normalizeAudioPayload(extractAudioCandidate(payload), mimeType);
   return { ...audio, provider: 'minimax', voiceId: settings.voiceId };
+}
+
+export async function synthesizeDoubaoSpeech(text: string, settings: DoubaoTtsSettings): Promise<TtsAudioResult> {
+  const content = text.trim();
+  if (!content) throw new Error('语音内容为空。');
+  if (!settings.apiUrl.trim()) throw new Error('请先填写豆包 TTS API 地址。');
+  if (!settings.appId.trim()) throw new Error('请先填写豆包 App ID。');
+  if (!settings.token.trim()) throw new Error('请先填写豆包 Token。');
+  if (!settings.cluster.trim()) throw new Error('请先填写豆包 Cluster。');
+  if (!settings.voiceType.trim()) throw new Error('请先填写豆包 Voice Type 或克隆音色 ID。');
+
+  const mimeType = doubaoMimeTypeForFormat(settings.encoding);
+  const response = await fetch(settings.apiUrl.trim(), {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer;${settings.token.trim()}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      app: {
+        appid: settings.appId.trim(),
+        token: settings.token.trim(),
+        cluster: settings.cluster.trim()
+      },
+      user: {
+        uid: settings.uid.trim() || 'link-user'
+      },
+      audio: {
+        voice_type: settings.voiceType.trim(),
+        encoding: settings.encoding,
+        rate: settings.sampleRate,
+        speed_ratio: settings.speedRatio,
+        volume_ratio: settings.volumeRatio,
+        pitch_ratio: settings.pitchRatio,
+        ...(settings.emotion.trim() ? { emotion: settings.emotion.trim() } : {}),
+        ...(settings.language.trim() ? { language: settings.language.trim() } : {})
+      },
+      request: {
+        reqid: createRequestId(),
+        text: content,
+        text_type: settings.textType,
+        operation: 'query',
+        silence_duration: settings.silenceDuration,
+        ...(settings.splitSentence ? { split_sentence: 1 } : {}),
+        ...(settings.pureEnglishOpt ? { pure_english_opt: 1 } : {})
+      }
+    })
+  });
+
+  const rawText = await response.text();
+  let payload: unknown = rawText;
+  try {
+    payload = JSON.parse(rawText) as unknown;
+  } catch {
+    if (!response.ok) throw new Error(rawText.trim() || `豆包 TTS 请求失败：${response.status}`);
+  }
+
+  if (!response.ok) {
+    const message = getDoubaoError(payload) || extractJsonErrorMessage(rawText, `豆包 TTS 请求失败：${response.status}`);
+    throw new Error(message);
+  }
+
+  const apiError = getDoubaoError(payload);
+  if (apiError) throw new Error(apiError);
+
+  const audio = await normalizeAudioPayload(extractDoubaoAudioCandidate(payload), mimeType, '豆包 TTS 没有返回可识别的音频内容。');
+  return { ...audio, provider: 'doubao', voiceId: settings.voiceType };
 }
 
 async function synthesizeGeminiNativeSpeech(text: string, endpoint: string, apiKey: string, model: string, voice: string): Promise<TtsAudioResult> {
@@ -413,5 +507,6 @@ export async function synthesizeSpeech(text: string, settings: AppSettings): Pro
   const normalized = normalizeAppSettings(settings);
 
   if (normalized.ttsProvider === 'openai') return synthesizeOpenAiSpeech(text, normalized);
+  if (normalized.ttsProvider === 'doubao') return synthesizeDoubaoSpeech(text, normalized.ttsDoubao);
   return synthesizeMinimaxSpeech(text, normalized.ttsMinimax);
 }

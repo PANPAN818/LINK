@@ -87,6 +87,25 @@ export const defaultSettings: AppSettings = {
     audioFormat: 'mp3',
     channel: 1
   },
+  ttsDoubao: {
+    apiUrl: 'https://openspeech.bytedance.com/api/v1/tts',
+    appId: '',
+    token: '',
+    cluster: 'volcano_tts',
+    voiceType: 'BV700_streaming',
+    uid: 'link-user',
+    encoding: 'mp3',
+    sampleRate: 24000,
+    speedRatio: 1,
+    volumeRatio: 1,
+    pitchRatio: 1,
+    emotion: '',
+    language: '',
+    textType: 'plain',
+    silenceDuration: 125,
+    splitSentence: false,
+    pureEnglishOpt: false
+  },
   imageModel: 'gpt-image-1',
   imageSize: '1024x1024',
   imagePromptPrefix: '',
@@ -167,7 +186,8 @@ export const defaultSettings: AppSettings = {
   },
   imageModelOverrides: {
     voom: { provider: '', model: '' },
-    onlineChat: { provider: '', model: '' }
+    onlineChat: { provider: '', model: '' },
+    callBackground: { provider: '', model: '' }
   },
   voomImageProvider: '',
   voomImageModel: '',

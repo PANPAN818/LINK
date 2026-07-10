@@ -331,6 +331,8 @@ export const useAppStore = defineStore('app', () => {
   const generatingSmallTheaterConversationIds = new Set<string>();
   const regeneratingChatImageMessageIds = new Set<string>();
   const regeneratingVoomImagePostIds = new Set<string>();
+  const activeReplyRunIds = new Map<string, string>();
+  const replyCancelVersions = new Map<string, number>();
   const replyingConversationIds = ref<string[]>([]);
   const loadingReply = computed(() => replyingConversationIds.value.length > 0);
   const replyingVoomCommentPostIds = ref<string[]>([]);
@@ -1349,13 +1351,27 @@ export const useAppStore = defineStore('app', () => {
   }
 
   function startConversationReply(conversationId: string) {
-    if (isConversationReplying(conversationId)) return false;
+    if (isConversationReplying(conversationId)) return '';
+    const runId = createId('replyRun');
+    activeReplyRunIds.set(conversationId, runId);
     replyingConversationIds.value = [...replyingConversationIds.value, conversationId];
-    return true;
+    return runId;
   }
 
-  function finishConversationReply(conversationId: string) {
+  function finishConversationReply(conversationId: string, runId?: string) {
+    if (runId && activeReplyRunIds.get(conversationId) !== runId) return;
+    activeReplyRunIds.delete(conversationId);
     replyingConversationIds.value = replyingConversationIds.value.filter((id) => id !== conversationId);
+  }
+
+  function cancelConversationReply(conversationId: string) {
+    replyCancelVersions.set(conversationId, (replyCancelVersions.get(conversationId) ?? 0) + 1);
+    activeReplyRunIds.delete(conversationId);
+    replyingConversationIds.value = replyingConversationIds.value.filter((id) => id !== conversationId);
+  }
+
+  function isReplyRunCancelled(conversationId: string, cancelVersion: number) {
+    return (replyCancelVersions.get(conversationId) ?? 0) !== cancelVersion;
   }
 
   function proactiveReplyCooldownMs(frequency: VoomFrequency) {
@@ -1896,7 +1912,7 @@ export const useAppStore = defineStore('app', () => {
       rejected: '已拒绝',
       missed: '未接听',
       busy: '忙线',
-      cancelled: '已取消',
+      cancelled: '已取消呼叫',
       ended: '已结束',
       failed: '呼叫失败'
     }[status];
@@ -1938,9 +1954,19 @@ export const useAppStore = defineStore('app', () => {
     };
   }
 
-  function formatCallContent(call: ChatCallAttachment) {
+  function callParticipantNames(conversationId: string) {
+    const conversation = conversationById(conversationId);
+    const character = conversation ? characterById(conversation.charId) : null;
+    const boundUser = character ? userById(character.boundUserId) : null;
+    return {
+      characterName: character ? getCharacterAiName(character) : '角色',
+      userName: getUserAiName(boundUser ?? user.value)
+    };
+  }
+
+  function formatCallContent(call: ChatCallAttachment, names?: { characterName: string; userName: string }) {
     const normalizedCall = normalizeCallAttachment(call);
-    const directionText = normalizedCall.direction === 'incoming' ? '对方发起' : '你发起';
+    const directionText = `${normalizedCall.direction === 'incoming' ? names?.characterName ?? '角色' : names?.userName ?? '用户'}发起`;
     const durationText = formatCallDuration(normalizedCall.duration);
     return `[${callModeLabel(normalizedCall.mode)}] ${directionText} · ${callStatusLabel(normalizedCall.status)}${durationText ? ` · ${durationText}` : ''}`;
   }
@@ -1965,6 +1991,14 @@ export const useAppStore = defineStore('app', () => {
       : null;
     if (preferredMessage) return preferredMessage;
     return [...messages.value].reverse().find(isPendingOutgoingCall) ?? null;
+  }
+
+  function findOutgoingCallResponseTarget(conversationId: string, preferredMessageId?: string) {
+    const normalizedMessageId = String(preferredMessageId ?? '').trim();
+    if (!normalizedMessageId) return null;
+    return messages.value.find((message) => message.id === normalizedMessageId
+      && message.conversationId === conversationId
+      && message.call?.direction === 'outgoing') ?? null;
   }
 
   function estimateJsonBytes(value: unknown) {
@@ -2514,7 +2548,7 @@ export const useAppStore = defineStore('app', () => {
       conversationId,
       sender: callMessageSender(normalizedCall),
       mode: 'online',
-      content: formatCallContent(normalizedCall),
+      content: formatCallContent(normalizedCall, callParticipantNames(conversationId)),
       call: normalizedCall,
       callId: normalizedCall.callId,
       callMode: normalizedCall.mode,
@@ -2542,7 +2576,7 @@ export const useAppStore = defineStore('app', () => {
     const nextMessage: ChatMessage = {
       ...existingMessage,
       sender: callMessageSender(nextCall),
-      content: formatCallContent(nextCall),
+      content: formatCallContent(nextCall, callParticipantNames(existingMessage.conversationId)),
       call: nextCall,
       callId: nextCall.callId,
       callMode: nextCall.mode,
@@ -2609,7 +2643,7 @@ export const useAppStore = defineStore('app', () => {
     if (message.musicListenInvite) return formatMusicListenInviteContent(message.musicListenInvite).trim();
     if (message.theaterLink) return formatSmallTheaterLinkContent(message.theaterLink).trim();
     if (message.offlineInvitation) return formatOfflineInvitationContent(message.offlineInvitation).trim();
-    if (message.call) return formatCallContent(message.call).trim();
+    if (message.call) return formatCallContent(message.call, callParticipantNames(message.conversationId)).trim();
     return message.content.trim();
   }
 
@@ -5733,7 +5767,9 @@ export const useAppStore = defineStore('app', () => {
       return;
     }
 
-    if (!startConversationReply(conversationId)) return;
+    const replyRunId = startConversationReply(conversationId);
+    if (!replyRunId) return;
+    const replyCancelVersion = replyCancelVersions.get(conversationId) ?? 0;
     const generationStartedAt = Date.now();
     try {
       if (chatSettings.stickerVisionEnabled) {
@@ -5748,6 +5784,7 @@ export const useAppStore = defineStore('app', () => {
       });
       if (!replyInputBundle) return;
       const replyPayload = await generateRoleplayReply(replyInputBundle.input);
+      if (isReplyRunCancelled(conversationId, replyCancelVersion)) return [];
       const parsedReply = JSON.parse(replyPayload) as RoleplayReplyResult;
       const replyBatchId = createId('reply');
       const replyVariantFields = options?.replyVariantGroupId
@@ -5885,8 +5922,12 @@ export const useAppStore = defineStore('app', () => {
         : null;
       const callInvite = conversation.activeMode === 'online' ? parsedReply.messageActions?.callInvite ?? null : null;
       const callResponse = conversation.activeMode === 'online' ? parsedReply.messageActions?.callResponse ?? null : null;
+      const directCallResponseTargetMessage = findOutgoingCallResponseTarget(conversationId, options?.callResponseTargetMessageId);
+      if (options?.callResponseTargetMessageId && directCallResponseTargetMessage?.call?.status !== 'ringing') {
+        return [];
+      }
       const callResponseTargetMessage = callResponse
-        ? findPendingOutgoingCallMessage(conversationId, options?.callResponseTargetMessageId)
+        ? directCallResponseTargetMessage ?? findPendingOutgoingCallMessage(conversationId, options?.callResponseTargetMessageId)
         : null;
       const quoteByReplyIndex = new Map<number, ChatMessageQuote>();
       for (const quoteAction of parsedReply.messageActions?.quotes ?? []) {
@@ -6170,6 +6211,7 @@ export const useAppStore = defineStore('app', () => {
       appendStickerMessages(replyStickers);
       const charMessages: ChatMessage[] = orderedSegments.length ? orderedCharMessages : [...charNarrationMessages, ...charMessagesAfterNarration];
       appendRemainingMusicActionNotices(charMessages);
+      if (isReplyRunCancelled(conversationId, replyCancelVersion)) return [];
       if (offlineInvitation) {
         charMessages.push({
           id: createId('msg'),
@@ -6211,7 +6253,7 @@ export const useAppStore = defineStore('app', () => {
           conversationId,
           sender: callMessageSender(call),
           mode: 'online' as const,
-          content: formatCallContent(call),
+          content: formatCallContent(call, callParticipantNames(conversationId)),
           call,
           callId: call.callId,
           callMode: call.mode,
@@ -6253,20 +6295,21 @@ export const useAppStore = defineStore('app', () => {
 
       const shouldGenerateMoment = options?.generateMoment || (chatSettings.autoGenerateVoom && shouldAutoGenerateMoment(chatSettings.voomFrequency));
       if (shouldGenerateMoment) {
-        finishConversationReply(conversationId);
+        finishConversationReply(conversationId, replyRunId);
         void createMomentFromConversation(conversationId).catch((error) => {
           console.error(error);
         });
       }
       return charMessages;
     } catch (error) {
+      if (isReplyRunCancelled(conversationId, replyCancelVersion)) return [];
       if (options?.proactive) {
         console.error(error);
       } else {
         showConfigAlert(error instanceof Error ? error.message : 'AI 回复失败，请检查 API 模型配置。', '回复异常');
       }
     } finally {
-      finishConversationReply(conversationId);
+      finishConversationReply(conversationId, replyRunId);
     }
   }
 
@@ -8100,6 +8143,7 @@ export const useAppStore = defineStore('app', () => {
     isReplyingVoomComments,
     consumeSuppressedVoomNoticeKey,
     isConversationReplying,
+    cancelConversationReply,
     saveUserProfile,
     saveUsers,
     saveAccountProfile,

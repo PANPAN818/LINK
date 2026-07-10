@@ -111,9 +111,11 @@
           </span>
         </div>
 
-        <section v-if="activeCall.mode === 'video'" class="call-video-stage" :class="[callExpressionClass, { speaking: callCharacterSpeaking, active: activeCall.status === 'active' }]" aria-label="角色视频画面">
+        <section v-if="activeCall.mode === 'video'" class="call-video-stage" :class="[callExpressionClass, { speaking: callCharacterSpeaking, active: activeCall.status === 'active' }]" :style="callVideoStageStyle" aria-label="角色视频画面">
           <button class="call-video-character" type="button" :aria-label="`查看${callPeerName}主页`" @click="openCharacterProfile">
+            <span class="call-video-expression call-video-expression--left" aria-hidden="true"></span>
             <img :src="character.avatar" :alt="callPeerName" />
+            <span class="call-video-expression call-video-expression--right" aria-hidden="true"></span>
             <span class="call-video-halo" aria-hidden="true"></span>
             <span class="call-video-mouth" aria-hidden="true"></span>
           </button>
@@ -134,7 +136,7 @@
           <span>{{ activeCallDurationLabel }}</span>
         </section>
 
-        <section v-if="activeCall.mode === 'video'" class="call-self-preview" :class="{ off: !activeCall.cameraEnabled }" aria-label="我的视频">
+        <section v-if="activeCall.mode === 'video'" class="call-self-preview" :class="{ off: !activeCall.cameraEnabled, mirror: localCameraFacingMode === 'user' }" aria-label="我的视频">
           <video v-if="activeCall.cameraEnabled && localCameraActive" ref="localCameraVideoRef" autoplay muted playsinline></video>
           <img v-else-if="conversationUser?.avatar" :src="conversationUser.avatar" alt="" />
           <VideoOff v-else :size="18" />
@@ -142,7 +144,7 @@
         </section>
 
         <section v-if="callTranscriptMessages.length || callReplyWaiting" ref="callSubtitleListRef" class="call-subtitles" aria-label="通话字幕">
-          <article v-for="message in callTranscriptMessages" :key="message.id" :class="['call-subtitle', message.sender]">
+          <article v-for="message in callTranscriptMessages" :key="message.id" :class="['call-subtitle', message.sender, { narration: message.displayStyle === 'narration' }]">
             <span>{{ callMessageText(message) }}</span>
           </article>
           <article v-if="callReplyWaiting" class="call-subtitle char call-subtitle-waiting" aria-label="正在等待角色回复">
@@ -177,6 +179,9 @@
             <button v-if="activeCall.mode === 'video'" class="call-control-button" type="button" :aria-pressed="activeCall.cameraEnabled" aria-label="摄像头" @click="toggleCallCamera">
               <Video v-if="activeCall.cameraEnabled" :size="20" />
               <VideoOff v-else :size="20" />
+            </button>
+            <button v-if="activeCall.mode === 'video'" class="call-control-button" type="button" :disabled="!activeCall.cameraEnabled || !localCameraActive" aria-label="切换前后摄像头" @click="switchCallCameraFacing">
+              <RefreshCw :size="20" />
             </button>
             <button class="call-control-button" type="button" :aria-pressed="activeCall.speakerEnabled" aria-label="扬声器" @click="toggleCallSpeaker">
               <Volume2 v-if="activeCall.speakerEnabled" :size="20" />
@@ -667,7 +672,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { Mic, MicOff, Minimize, Phone, PhoneOff, Video, VideoOff, Volume2, VolumeX, X } from 'lucide-vue-next';
+import { Mic, MicOff, Minimize, Phone, PhoneOff, RefreshCw, Video, VideoOff, Volume2, VolumeX, X } from 'lucide-vue-next';
 import AppModal from '@/components/common/AppModal.vue';
 import ChatHeader from '@/components/chat/ChatHeader.vue';
 import ChatModelSwitchPanel from '@/components/chat/ChatModelSwitchPanel.vue';
@@ -678,12 +683,14 @@ import UserProfileSheet from '@/components/chat/UserProfileSheet.vue';
 import StickerLibraryModal from '@/components/stickers/StickerLibraryModal.vue';
 import { useAppStore, type AppActiveCallState } from '@/stores/appStore';
 import { useMusicPlayerStore } from '@/stores/musicPlayerStore';
-import type { CharacterProfile, ChatCallMode, ChatCallStatus, ChatImageAttachment, ChatLocationAttachment, ChatMessage, ChatMessageQuote, ChatTransferStatus, ChatVoiceAttachment, Sticker, UserProfile } from '@/types/domain';
-import { getCharacterDisplayName } from '@/utils/character';
+import { generateImageByProvider } from '@/services/ai';
+import { synthesizeSpeech } from '@/services/tts';
+import type { AppSettings, CharacterProfile, ChatCallMode, ChatCallStatus, ChatImageAttachment, ChatLocationAttachment, ChatMessage, ChatMessageQuote, ChatTransferStatus, ChatVoiceAttachment, ImageProviderType, Sticker, UserProfile } from '@/types/domain';
+import { getCharacterAiName, getCharacterDisplayName } from '@/utils/character';
 import { readChatImageFile } from '@/utils/imageFile';
 import { useKeyboardScrollGuard } from '@/utils/keyboardScrollGuard';
-import { normalizeUserProfile, normalizeVisualProfile } from '@/utils/profile';
-import { getSelectedImageModelOption } from '@/utils/settings';
+import { getUserAiName, normalizeUserProfile, normalizeVisualProfile } from '@/utils/profile';
+import { defaultImageNegativePrompt, getImagePromptPresetForProvider, getSelectedImageModelOption } from '@/utils/settings';
 import { RECOMMENDED_STICKER_LIMIT, recommendStickers } from '@/utils/stickerRecommendations';
 import { formatChatTimeDivider, shouldShowChatTimeDivider } from '@/utils/time';
 import { isVoomNarrationMessage, mergeVoomLikeMessages } from '@/utils/voomMessages';
@@ -733,6 +740,10 @@ type SpeechRecognitionWindow = Window & {
   webkitSpeechRecognition?: BrowserSpeechRecognitionConstructor;
 };
 
+type AudioContextWindow = Window & {
+  webkitAudioContext?: typeof AudioContext;
+};
+
 type MessageComposerExpose = {
   focusInput: () => void;
 };
@@ -760,9 +771,61 @@ type CallFloatDragState = {
   moved: boolean;
 };
 
+type CallCameraFacingMode = 'user' | 'environment';
+
+type CallVoicePlayback = {
+  messageId: string;
+  audioUrls: Array<Promise<string>>;
+};
+
+type CallSceneId = 'room' | 'campus' | 'cafe' | 'studio' | 'clinic' | 'city';
+
+type CallSceneBackgroundConfig = {
+  label: string;
+  prompt: string;
+  fallbackKeywords: string;
+};
+
+type SelectedImageModelOption = NonNullable<ReturnType<typeof getSelectedImageModelOption>>;
+
 const voiceTranscriptLimit = 500;
 const composerDraftStoragePrefix = 'link.chat.composerDraft.';
 const defaultCallFloatPosition = { x: 16, y: 92 };
+const callBackgroundImageSize = { size: '832x1216', width: 832, height: 1216 };
+const publicCallBackgroundApiBase = 'https://loremflickr.com/1080/1920';
+const callBackgroundNegativePrompt = 'people, person, human, crowd, portrait, face, hands, full body, selfie, model, student, customer, waiter, patient, text, watermark, logo, user interface, phone frame, notification badge, blurry, distorted perspective';
+const callSceneBackgroundConfigs: Record<CallSceneId, CallSceneBackgroundConfig> = {
+  room: {
+    label: '温暖房间',
+    prompt: 'An empty cozy lived-in bedroom or apartment interior, warm ambient light, soft fabric textures, evening calm, intimate private call atmosphere.',
+    fallbackKeywords: 'bedroom,interior,empty'
+  },
+  campus: {
+    label: '校园教室',
+    prompt: 'An empty quiet university library corner or classroom interior, soft daylight, desks and windows, clean academic atmosphere, peaceful and youthful.',
+    fallbackKeywords: 'library,interior,empty'
+  },
+  cafe: {
+    label: '咖啡店',
+    prompt: 'An empty cozy cafe interior with coffee bar details, warm lights, wooden tables, gentle afternoon atmosphere, relaxed private conversation mood.',
+    fallbackKeywords: 'cafe,interior,empty'
+  },
+  studio: {
+    label: '工作室',
+    prompt: 'An empty creative studio interior, soft studio lights, instruments or art supplies in the background, expressive and polished atmosphere.',
+    fallbackKeywords: 'studio,interior,empty'
+  },
+  clinic: {
+    label: '诊疗空间',
+    prompt: 'An empty bright clean clinic room or hospital waiting corner, soft white and mint light, calm medical environment, gentle reassuring atmosphere.',
+    fallbackKeywords: 'hospital,interior,empty'
+  },
+  city: {
+    label: '城市夜景',
+    prompt: 'An empty vertical city night skyline or architecture background, soft neon reflections, distant windows and street lights, cinematic urban atmosphere.',
+    fallbackKeywords: 'cityscape,night,architecture'
+  }
+};
 const composerDrafts = new Map<string, string>();
 
 function composerDraftKey(conversationId: string) {
@@ -917,6 +980,14 @@ const callSpeechNotice = ref('');
 const callSpeechInterimText = ref('');
 const localCameraActive = ref(false);
 const localCameraError = ref('');
+const localCameraFacingMode = ref<CallCameraFacingMode>('user');
+const callVoiceActive = ref(false);
+const callMouthLevel = ref(0);
+const callGeneratedBackgroundUrl = ref('');
+const callPublicBackgroundUrl = ref('');
+const callBackgroundRequestKey = ref('');
+const callBackgroundGenerating = ref(false);
+const callBackgroundRunId = ref(0);
 let voiceRecorder: MediaRecorder | null = null;
 let voiceStream: MediaStream | null = null;
 let voiceChunks: Blob[] = [];
@@ -945,6 +1016,13 @@ let voiceRecognitionRunId = 0;
 let callSpeechFinalText = '';
 let callRecognitionStopping = false;
 let callRecognitionRunId = 0;
+let callVadStream: MediaStream | null = null;
+let callVadContext: AudioContext | null = null;
+let callVadAnalyser: AnalyserNode | null = null;
+let callVadFrame: number | undefined;
+let callVadRunId = 0;
+let callVadLastVoiceAt = 0;
+let callLipSyncFrame: number | undefined;
 
 const initialMessageLimit = 60;
 const messageLoadStep = 30;
@@ -979,7 +1057,7 @@ const conversationUser = computed(() => {
 const chatSettings = computed(() => store.settingsForConversation(props.id));
 const allOnlineMessages = computed(() => {
   const messages = store.messagesForConversation(props.id).filter((message) => message.mode === 'online');
-  const displayMessages = messages.filter((message) => !isVoomNarrationMessage(message) && !(message.callId && !message.call));
+  const displayMessages = messages.filter((message) => !message.contextOnly && !isVoomNarrationMessage(message) && !isCallSubtitleMessage(message));
   return mergeVoomLikeMessages(displayMessages);
 });
 const visibleOnlineStartIndex = computed(() => Math.max(0, allOnlineMessages.value.length - visibleMessageLimit.value));
@@ -1076,10 +1154,13 @@ const callTranscriptMessages = computed(() => {
   const callId = activeCall.value?.callId;
   if (!callId) return [];
   return store.messagesForConversation(props.id)
-    .filter((message) => message.callId === callId && !message.call && !message.contextOnly && (message.sender === 'user' || message.sender === 'char'));
+    .filter((message) => message.callId === callId && isCallSubtitleMessage(message));
 });
 const latestCallTranscriptMessage = computed(() => callTranscriptMessages.value.at(-1) ?? null);
 const latestCharacterCallMessage = computed(() => [...callTranscriptMessages.value].reverse().find((message) => message.sender === 'char') ?? null);
+const callCharacterAiName = computed(() => character.value ? getCharacterAiName(character.value) : '角色');
+const callUserAiName = computed(() => getUserAiName(conversationUser.value ?? boundUser.value));
+const callCanonicalIdentityInstruction = computed(() => `通话称谓铁律：角色只能用真名「${callCharacterAiName.value}」指代，用户只能用真名「${callUserAiName.value}」指代；绝对禁止使用角色网名、角色备注、角色主页名、用户网名、用户主页名或任何昵称代指双方。`);
 const callPeerName = computed(() => characterDisplayName.value);
 const callModeLabel = computed(() => activeCall.value?.mode === 'video' ? '视频通话' : '语音通话');
 const callPrimaryStatus = computed(() => {
@@ -1104,6 +1185,7 @@ const activeCallDurationLabel = computed(() => {
 const callInputDisabled = computed(() => !activeCall.value || activeCall.value.status !== 'active');
 const callInputPlaceholder = computed(() => {
   if (callSpeechListening.value && callSpeechInterimText.value) return callSpeechInterimText.value;
+  if (callSpeechListening.value && callVoiceActive.value) return '正在听你说话';
   if (callSpeechListening.value) return '正在听你说话';
   if (callSpeechNotice.value) return callSpeechNotice.value;
   return '说点什么';
@@ -1131,13 +1213,31 @@ function syncActiveCallMetadata() {
   });
 }
 
-const callScreenStyle = computed(() => {
-  const image = chatSettings.value.call.backgroundImage || character.value?.avatar || '';
-  return image
-    ? { backgroundImage: `linear-gradient(180deg, rgba(0, 0, 0, 0.44), rgba(0, 0, 0, 0.28) 42%, rgba(0, 0, 0, 0.58)), url(${image})` }
-    : {};
+const callSceneSourceText = computed(() => {
+  const currentCharacter = character.value;
+  const profile = currentCharacter?.profile;
+  return [
+    currentCharacter?.description,
+    currentCharacter?.signature,
+    currentCharacter?.subtitle,
+    profile?.location,
+    profile?.bio,
+    callMessageText(latestCharacterCallMessage.value ?? latestCallTranscriptMessage.value ?? ({ content: '' } as ChatMessage))
+  ].map((value) => String(value ?? '')).join(' ');
 });
-const callCharacterSpeaking = computed(() => Boolean(activeCall.value?.status === 'active' && callStatusText.value.includes('正在说话')));
+const callSceneId = computed<CallSceneId>(() => resolveCallSceneId(callSceneSourceText.value));
+const callVideoBackgroundUrl = computed(() => activeCall.value?.mode === 'video' ? callGeneratedBackgroundUrl.value || callPublicBackgroundUrl.value : '');
+const callScreenBackgroundUrl = computed(() => callVideoBackgroundUrl.value || chatSettings.value.call.backgroundImage || character.value?.avatar || '');
+const callScreenStyle = computed(() => {
+  const image = callScreenBackgroundUrl.value.trim();
+  if (!image) return {};
+  return { '--call-screen-background': `url("${image.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}")` };
+});
+const callCharacterSpeaking = computed(() => Boolean(activeCall.value?.status === 'active' && (callStatusText.value.includes('正在说话') || callMouthLevel.value > 0.08)));
+const callVideoStageStyle = computed(() => ({
+  '--call-mouth-height': `${Math.round(5 + callMouthLevel.value * 13)}px`,
+  '--call-mouth-scale': (0.55 + callMouthLevel.value * 1.28).toFixed(2)
+}));
 const callExpressionClass = computed(() => {
   const text = callMessageText(latestCharacterCallMessage.value ?? latestCallTranscriptMessage.value ?? ({ content: '' } as ChatMessage));
   if (/惊|诶|啊|真的吗|不会吧|怎么会/.test(text)) return 'is-surprised';
@@ -1150,9 +1250,145 @@ const callExpressionClass = computed(() => {
 const callCameraStatusLabel = computed(() => {
   if (activeCall.value?.mode !== 'video') return '';
   if (localCameraError.value) return localCameraError.value;
-  if (activeCall.value.cameraEnabled && localCameraActive.value) return 'Camera';
-  return 'Avatar';
+  if (activeCall.value.cameraEnabled && localCameraActive.value) return localCameraFacingMode.value === 'user' ? '前置' : '后置';
+  return '头像';
 });
+
+function resolveCallSceneId(source: string): CallSceneId {
+  if (/学校|校园|大学|高中|教室|图书馆|实验室|社团|课程|作业/.test(source)) return 'campus';
+  if (/咖啡|奶茶|甜品|餐厅|料理|厨房|酒吧|便利店|面包/.test(source)) return 'cafe';
+  if (/舞台|音乐|录音|工作室|直播|乐队|唱歌|吉他|钢琴|画室|摄影/.test(source)) return 'studio';
+  if (/医院|诊所|病房|医生|护士|药房|值班/.test(source)) return 'clinic';
+  if (/城市|街|夜|地铁|车站|机场|酒店|旅行|出差|公司|办公室/.test(source)) return 'city';
+  return 'room';
+}
+
+function joinCallBackgroundPromptPieces(...pieces: Array<string | undefined>) {
+  return pieces.map((piece) => String(piece ?? '').trim()).filter(Boolean).join('\n');
+}
+
+function hashCallBackgroundSeed(source: string) {
+  let hash = 0;
+  for (const symbol of source) {
+    hash = (hash * 31 + symbol.charCodeAt(0)) >>> 0;
+  }
+  return String(hash % 100000 || 1);
+}
+
+function buildPublicCallBackgroundUrl(sceneId: CallSceneId, requestKey: string) {
+  const keywords = callSceneBackgroundConfigs[sceneId].fallbackKeywords
+    .split(',')
+    .map((keyword) => encodeURIComponent(keyword.trim()))
+    .filter(Boolean)
+    .join(',');
+  const lock = hashCallBackgroundSeed(requestKey);
+  return `${publicCallBackgroundApiBase}/${keywords}/all?lock=${lock}`;
+}
+
+function buildCallBackgroundPrompt(sceneId: CallSceneId) {
+  const config = callSceneBackgroundConfigs[sceneId];
+  const currentCharacter = character.value;
+  const profile = currentCharacter?.profile;
+  const characterContext = [
+    currentCharacter?.description,
+    currentCharacter?.signature,
+    currentCharacter?.subtitle,
+    profile?.location,
+    profile?.bio
+  ].map((value) => String(value ?? '').trim()).filter(Boolean).join('; ').slice(0, 600);
+  return joinCallBackgroundPromptPieces(
+    'A vertical 9:16 full-screen background for a mobile video call page.',
+    'Empty environment only, unoccupied scene, no people, no human figures, no character portrait, no text, no watermark, no logo, no user interface, no phone frame.',
+    config.prompt,
+    characterContext ? `The atmosphere should fit this character context: ${characterContext}.` : '',
+    'Leave comfortable negative space near the center for a character avatar overlay and call controls, soft depth of field, immersive but not visually busy.'
+  );
+}
+
+function buildCallBackgroundNegativePrompt(settings: AppSettings, provider: ImageProviderType) {
+  const promptPreset = getImagePromptPresetForProvider(settings, provider);
+  return joinCallBackgroundPromptPieces(
+    promptPreset.negativePrompt,
+    promptPreset.defaultNegativePrompt,
+    defaultImageNegativePrompt,
+    callBackgroundNegativePrompt
+  );
+}
+
+function buildCallBackgroundPositivePrompt(settings: AppSettings, provider: ImageProviderType, sceneId: CallSceneId) {
+  const promptPreset = getImagePromptPresetForProvider(settings, provider);
+  return joinCallBackgroundPromptPieces(promptPreset.positivePrompt, buildCallBackgroundPrompt(sceneId));
+}
+
+async function generateCallBackgroundImage(settings: AppSettings, selectedModel: SelectedImageModelOption, sceneId: CallSceneId) {
+  const provider = selectedModel.provider;
+  let imageSettings = settings;
+  let model = selectedModel.model;
+  if (provider === 'openai') {
+    const [vendorId, ...modelParts] = selectedModel.model.split('::');
+    imageSettings = {
+      ...settings,
+      imageOpenAi: {
+        ...settings.imageOpenAi,
+        activeVendorId: vendorId || settings.imageOpenAi.activeVendorId
+      }
+    };
+    model = modelParts.join('::') || settings.imageModel;
+  }
+  const result = await generateImageByProvider(provider, imageSettings, {
+    positivePrompt: buildCallBackgroundPositivePrompt(settings, provider, sceneId),
+    negativePrompt: buildCallBackgroundNegativePrompt(settings, provider),
+    size: callBackgroundImageSize.size,
+    width: callBackgroundImageSize.width,
+    height: callBackgroundImageSize.height,
+    model,
+    seed: ''
+  });
+  return result.imageUrl;
+}
+
+function resetCallBackgroundImage() {
+  callBackgroundRunId.value += 1;
+  callGeneratedBackgroundUrl.value = '';
+  callPublicBackgroundUrl.value = '';
+  callBackgroundRequestKey.value = '';
+  callBackgroundGenerating.value = false;
+}
+
+async function ensureCallBackgroundImage() {
+  const call = activeCall.value;
+  if (!call || call.mode !== 'video') {
+    resetCallBackgroundImage();
+    return;
+  }
+  const sceneId = callSceneId.value;
+  const settings = store.settings;
+  const selectedModel = settings && settings.imageGenerationEnabled !== false ? getSelectedImageModelOption(settings, 'callBackground') : null;
+  const requestKey = [props.id, character.value?.id ?? '', call.callId, sceneId, selectedModel?.key ?? 'public'].join(':');
+  if (callBackgroundRequestKey.value === requestKey && (callGeneratedBackgroundUrl.value || callPublicBackgroundUrl.value || callBackgroundGenerating.value)) return;
+
+  const runId = callBackgroundRunId.value + 1;
+  callBackgroundRunId.value = runId;
+  callBackgroundRequestKey.value = requestKey;
+  callGeneratedBackgroundUrl.value = '';
+  callPublicBackgroundUrl.value = buildPublicCallBackgroundUrl(sceneId, requestKey);
+  callBackgroundGenerating.value = false;
+
+  if (!settings || !selectedModel) return;
+
+  callBackgroundGenerating.value = true;
+  try {
+    const imageUrl = await generateCallBackgroundImage(settings, selectedModel, sceneId);
+    if (runId !== callBackgroundRunId.value || callBackgroundRequestKey.value !== requestKey) return;
+    callGeneratedBackgroundUrl.value = imageUrl;
+  } catch (error) {
+    console.warn('Call background generation failed, using public image source fallback.', error);
+  } finally {
+    if (runId === callBackgroundRunId.value && callBackgroundRequestKey.value === requestKey) {
+      callBackgroundGenerating.value = false;
+    }
+  }
+}
 const stickerRecommendationBase = computed(() => {
   if (!chatSettings.value.stickerSuggestionsEnabled) return [];
   return recommendStickers({
@@ -1399,6 +1635,17 @@ watch([
   () => callPeerName.value,
   () => character.value?.avatar
 ], syncActiveCallMetadata, { flush: 'post' });
+
+watch([
+  () => activeCall.value?.callId,
+  () => activeCall.value?.mode,
+  () => callSceneId.value,
+  () => character.value?.id,
+  () => store.settings?.imageGenerationEnabled,
+  () => getSelectedImageModelOption(store.settings, 'callBackground')?.key ?? ''
+], () => {
+  void ensureCallBackgroundImage();
+}, { flush: 'post', immediate: true });
 
 watch(() => composerStickerSuggestions.value.length, () => {
   if (composerFocused.value || isMessageListNearBottom()) queueMessagesToBottomAfterLayout();
@@ -1675,6 +1922,7 @@ function startCallTimer(connectedAt = Date.now()) {
 
 function stopCallAudio() {
   callPlaybackRunId += 1;
+  stopCallLipSync();
   if (!callAudio) return;
   callAudio.pause();
   callAudio.src = '';
@@ -1748,6 +1996,12 @@ function bindLocalCameraStream() {
   void video.play().catch(() => undefined);
 }
 
+function getAudioContextConstructor() {
+  if (typeof window === 'undefined') return null;
+  const audioWindow = window as AudioContextWindow;
+  return window.AudioContext ?? audioWindow.webkitAudioContext ?? null;
+}
+
 async function startLocalCamera() {
   if (localCameraStream) {
     bindLocalCameraStream();
@@ -1761,7 +2015,7 @@ async function startLocalCamera() {
   }
   try {
     localCameraError.value = '';
-    localCameraStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: false });
+    localCameraStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: localCameraFacingMode.value } }, audio: false });
     localCameraActive.value = true;
     bindLocalCameraStream();
     return true;
@@ -1770,6 +2024,18 @@ async function startLocalCamera() {
     localCameraError.value = error instanceof Error && error.name === 'NotAllowedError' ? '未授权摄像头' : '摄像头开启失败';
     return false;
   }
+}
+
+async function switchCallCameraFacing() {
+  const call = activeCall.value;
+  if (!call || call.mode !== 'video' || !call.cameraEnabled || !localCameraActive.value) return;
+  const previousFacingMode = localCameraFacingMode.value;
+  localCameraFacingMode.value = previousFacingMode === 'user' ? 'environment' : 'user';
+  stopLocalCamera();
+  const started = await startLocalCamera();
+  if (started) return;
+  localCameraFacingMode.value = previousFacingMode;
+  await startLocalCamera();
 }
 
 function stopLocalCamera() {
@@ -1823,6 +2089,7 @@ function clearCallSpeechFlushTimer() {
 
 function stopCallTranscription(abort = false) {
   if (abort) callRecognitionRunId += 1;
+  stopCallVoiceActivityDetection();
   callRecognitionStopping = true;
   callSpeechListening.value = false;
   callSpeechInterimText.value = '';
@@ -1833,6 +2100,73 @@ function stopCallTranscription(abort = false) {
     if (abort) recognition.abort();
     else recognition.stop();
   } catch {}
+}
+
+function stopCallVoiceActivityDetection() {
+  callVadRunId += 1;
+  if (callVadFrame !== undefined) {
+    window.cancelAnimationFrame(callVadFrame);
+    callVadFrame = undefined;
+  }
+  callVadStream?.getTracks().forEach((track) => track.stop());
+  callVadStream = null;
+  callVadAnalyser = null;
+  void callVadContext?.close().catch(() => undefined);
+  callVadContext = null;
+  callVoiceActive.value = false;
+}
+
+function getAudioLevel(analyser: AnalyserNode, data: Uint8Array) {
+  analyser.getByteTimeDomainData(data);
+  const total = data.reduce((sum, value) => {
+    const centered = (value - 128) / 128;
+    return sum + centered * centered;
+  }, 0);
+  return Math.sqrt(total / Math.max(1, data.length));
+}
+
+async function startCallVoiceActivityDetection() {
+  stopCallVoiceActivityDetection();
+  if (!navigator.mediaDevices?.getUserMedia) return;
+  const AudioContextConstructor = getAudioContextConstructor();
+  if (!AudioContextConstructor) return;
+  const runId = ++callVadRunId;
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+      video: false
+    });
+    if (runId !== callVadRunId) {
+      stream.getTracks().forEach((track) => track.stop());
+      return;
+    }
+    const context = new AudioContextConstructor();
+    const source = context.createMediaStreamSource(stream);
+    const analyser = context.createAnalyser();
+    analyser.fftSize = 512;
+    source.connect(analyser);
+    callVadStream = stream;
+    callVadContext = context;
+    callVadAnalyser = analyser;
+    callVadLastVoiceAt = 0;
+    const data = new Uint8Array(analyser.fftSize);
+    const tick = () => {
+      if (runId !== callVadRunId || !callVadAnalyser || activeCall.value?.status !== 'active' || activeCall.value.muted) return;
+      const now = Date.now();
+      const level = getAudioLevel(callVadAnalyser, data);
+      const speaking = level > 0.035;
+      if (speaking) callVadLastVoiceAt = now;
+      callVoiceActive.value = speaking || (callVadLastVoiceAt > 0 && now - callVadLastVoiceAt < 220);
+      if (!speaking && callSpeechFinalText.trim() && callVadLastVoiceAt > 0 && now - callVadLastVoiceAt > 460) {
+        clearCallSpeechFlushTimer();
+        void flushCallSpeechFinalText();
+      }
+      callVadFrame = window.requestAnimationFrame(tick);
+    };
+    callVadFrame = window.requestAnimationFrame(tick);
+  } catch {
+    stopCallVoiceActivityDetection();
+  }
 }
 
 function scheduleCallSpeechFlush() {
@@ -1853,7 +2187,7 @@ async function flushCallSpeechFinalText() {
   await store.appendUserCallMessage(props.id, content, call.callId, call.mode);
   await scrollCallTranscriptToBottom();
   const scene = call.mode === 'video' ? '视频通话' : '语音通话';
-  void requestCallReply(`当前正在${scene}中，用户刚刚直接说：“${content}”。请像真实通话一样用适合朗读的短句回应；可以连续发送多个短句，每个短句会显示成字幕并播放 TTS。不要替用户补充未说出口的动作、位置或心理。`);
+  void requestCallReply(`当前正在${scene}中，${callUserAiName.value}刚刚直接说：“${content}”。请让${callCharacterAiName.value}像真实通话一样用适合朗读的短句回应；可以连续发送多个短句，每个短句会显示成字幕并播放 TTS。不要替${callUserAiName.value}补充未说出口的动作、位置或心理。`);
 }
 
 function startCallTranscription() {
@@ -1915,12 +2249,14 @@ function startCallTranscription() {
       return;
     }
     if (callRecognition === recognition) callRecognition = null;
+    if (callRecognitionStopping) stopCallVoiceActivityDetection();
   };
   callRecognition = recognition;
 
   try {
     recognition.start();
     callSpeechListening.value = true;
+    void startCallVoiceActivityDetection();
   } catch {
     callRecognition = null;
     callSpeechNotice.value = '语音转文字启动失败';
@@ -1951,30 +2287,118 @@ function handleCallInputBlur() {
   }, 120);
 }
 
+function stopCallLipSync() {
+  if (callLipSyncFrame !== undefined) {
+    window.cancelAnimationFrame(callLipSyncFrame);
+    callLipSyncFrame = undefined;
+  }
+  callMouthLevel.value = 0;
+}
+
+function startCallLipSync(audio: HTMLAudioElement, runId: number) {
+  stopCallLipSync();
+  const tick = () => {
+    if (runId !== callPlaybackRunId || audio.ended || audio.paused) {
+      callMouthLevel.value = 0;
+      return;
+    }
+    const time = audio.currentTime || 0;
+    const pulse = Math.abs(Math.sin(time * 18.5)) * 0.55 + Math.abs(Math.sin(time * 7.25)) * 0.32;
+    callMouthLevel.value = Math.min(1, Math.max(0.18, pulse));
+    callLipSyncFrame = window.requestAnimationFrame(tick);
+  };
+  callLipSyncFrame = window.requestAnimationFrame(tick);
+}
+
 function playCallAudioUrl(audioUrl: string, runId: number) {
   return new Promise<void>((resolve) => {
     if (runId !== callPlaybackRunId) return resolve();
     const audio = new Audio(audioUrl);
     callAudio = audio;
     audio.muted = !activeCall.value?.speakerEnabled;
-    audio.onended = () => resolve();
-    audio.onerror = () => resolve();
+    audio.onplay = () => startCallLipSync(audio, runId);
+    audio.onended = () => {
+      stopCallLipSync();
+      resolve();
+    };
+    audio.onerror = () => {
+      stopCallLipSync();
+      resolve();
+    };
     void audio.play().then(() => undefined, () => resolve());
   });
+}
+
+function splitCallVoiceTranscript(content: string) {
+  const normalized = content.replace(/\s+/g, ' ').trim();
+  if (!normalized) return [];
+  const sentences = normalized.match(/[^。！？!?；;…]+[。！？!?；;…]*/g)?.map((part) => part.trim()).filter(Boolean) ?? [normalized];
+  const chunks: string[] = [];
+  let currentChunk = '';
+  for (const sentence of sentences) {
+    if (sentence.length > 96) {
+      if (currentChunk) {
+        chunks.push(currentChunk);
+        currentChunk = '';
+      }
+      for (let index = 0; index < sentence.length; index += 72) {
+        chunks.push(sentence.slice(index, index + 72).trim());
+      }
+      continue;
+    }
+    const nextChunk = currentChunk ? `${currentChunk}${sentence}` : sentence;
+    if (nextChunk.length > 96 && currentChunk) {
+      chunks.push(currentChunk);
+      currentChunk = sentence;
+    } else {
+      currentChunk = nextChunk;
+    }
+  }
+  if (currentChunk) chunks.push(currentChunk);
+  return chunks.slice(0, 8);
+}
+
+async function synthesizeCallVoiceChunk(content: string) {
+  const currentSettings = store.settings;
+  if (!currentSettings) throw new Error('设置尚未载入。');
+  return (await synthesizeSpeech(content, currentSettings)).audioUrl;
+}
+
+function prepareCallVoicePlayback(message: ChatMessage): CallVoicePlayback {
+  const cachedAudioUrl = message.voice?.audioUrl?.trim();
+  if (cachedAudioUrl) return guardCallVoicePlayback({ messageId: message.id, audioUrls: [Promise.resolve(cachedAudioUrl)] });
+  const transcript = message.voice?.transcript.trim() ?? '';
+  const chunks = splitCallVoiceTranscript(transcript);
+  if (chunks.length <= 1) return guardCallVoicePlayback({ messageId: message.id, audioUrls: [store.generateMessageVoiceAudio(message.id)] });
+  return guardCallVoicePlayback({
+    messageId: message.id,
+    audioUrls: chunks.map((chunk) => synthesizeCallVoiceChunk(chunk))
+  });
+}
+
+function guardCallVoicePlayback(playback: CallVoicePlayback) {
+  void Promise.allSettled(playback.audioUrls);
+  return playback;
 }
 
 async function playCallVoiceMessages(newMessages: ChatMessage[]) {
   const voiceMessages = newMessages.filter((message) => message.sender === 'char' && message.voice?.transcript.trim());
   if (!voiceMessages.length) return;
   const runId = ++callPlaybackRunId;
-  for (const message of voiceMessages) {
+  let preparedPlayback: CallVoicePlayback | null = prepareCallVoicePlayback(voiceMessages[0]);
+  for (let index = 0; index < voiceMessages.length; index += 1) {
+    const playback = preparedPlayback;
+    preparedPlayback = voiceMessages[index + 1] ? prepareCallVoicePlayback(voiceMessages[index + 1]) : null;
     if (!activeCall.value || activeCall.value.status !== 'active' || runId !== callPlaybackRunId) break;
     try {
       callStatusText.value = '正在生成语音';
-      const audioUrl = await store.generateMessageVoiceAudio(message.id);
-      callStatusText.value = `${callPeerName.value} 正在说话`;
       setCallAmbientDucked(true);
-      await playCallAudioUrl(audioUrl, runId);
+      for (const audioUrlPromise of playback?.audioUrls ?? []) {
+        const audioUrl = await audioUrlPromise;
+        if (!activeCall.value || activeCall.value.status !== 'active' || runId !== callPlaybackRunId) break;
+        callStatusText.value = `${callPeerName.value} 正在说话`;
+        await playCallAudioUrl(audioUrl, runId);
+      }
     } catch {
       callStatusText.value = '语音暂不可用';
     } finally {
@@ -1986,6 +2410,14 @@ async function playCallVoiceMessages(newMessages: ChatMessage[]) {
 
 function callMessageText(message: ChatMessage) {
   return message.voice?.transcript || message.content;
+}
+
+function isCallSubtitleMessage(message: ChatMessage) {
+  if (!message.callId || message.call || message.contextOnly) return false;
+  if (message.displayStyle === 'narration') return true;
+  if (message.sender !== 'user' && message.sender !== 'char') return false;
+  if (message.sticker || message.image || message.location || message.transfer || message.musicListenInvite || message.theaterLink || message.offlineInvitation) return false;
+  return Boolean(message.voice?.transcript.trim() || message.content.trim());
 }
 
 async function scrollCallTranscriptToBottom() {
@@ -2016,6 +2448,7 @@ function closeActiveCall() {
   callSpeechNotice.value = '';
   callSpeechFinalText = '';
   callSpeechInterimText.value = '';
+  localCameraFacingMode.value = 'user';
   localCameraError.value = '';
 }
 
@@ -2088,12 +2521,13 @@ function endCallFloatDrag(event: PointerEvent) {
 async function requestCallReply(replyInstruction: string, options: { captureCamera?: boolean } = {}) {
   const call = activeCall.value;
   if (!call || call.status !== 'active') return;
-  if (options.captureCamera !== false) await appendCallCameraFrameContext(call, replyInstruction);
+  const instruction = `${callCanonicalIdentityInstruction.value}\n${replyInstruction}`;
+  if (options.captureCamera !== false) await appendCallCameraFrameContext(call, instruction);
   callStatusText.value = `正在等待 ${callPeerName.value} 回复`;
   callReplyQueue.value.push({
     callId: call.callId,
     mode: call.mode,
-    instruction: replyInstruction
+    instruction
   });
   void drainCallReplyQueue();
 }
@@ -2153,8 +2587,8 @@ async function startCallOpeningReply(direction: 'incoming' | 'outgoing') {
   if (!call || call.status !== 'active') return;
   const scene = call.mode === 'video' ? '视频通话' : '语音通话';
   const instruction = direction === 'incoming'
-    ? `用户刚刚接听了你主动拨来的${scene}。当前正在通话中，请先用适合朗读的短句自然开口，可以连续发送 1-3 个短句；这些句子会作为通话字幕并播放 TTS。`
-    : `你刚刚接听了用户拨来的${scene}。当前正在通话中，请先用适合朗读的短句自然开口，可以连续发送 1-3 个短句；这些句子会作为通话字幕并播放 TTS。`;
+    ? `${callUserAiName.value}刚刚接听了${callCharacterAiName.value}主动拨来的${scene}。当前正在通话中，请让${callCharacterAiName.value}先用适合朗读的短句自然开口，可以连续发送 1-3 个短句；这些句子会作为通话字幕并播放 TTS。`
+    : `${callCharacterAiName.value}刚刚接听了${callUserAiName.value}拨来的${scene}。当前正在通话中，请让${callCharacterAiName.value}先用适合朗读的短句自然开口，可以连续发送 1-3 个短句；这些句子会作为通话字幕并播放 TTS。`;
   await requestCallReply(instruction, { captureCamera: false });
 }
 
@@ -2207,7 +2641,7 @@ async function startOutgoingCall(mode: ChatCallMode) {
   const scene = mode === 'video' ? '视频通话' : '语音通话';
   await store.requestRoleplayReply(props.id, {
     callResponseTargetMessageId: callEvent.id,
-    replyInstruction: `用户刚刚在 LINK 里向你拨打${scene}。这仍然是一轮正常线上聊天回复：你可以像平时一样发送 text、voice、sticker、image、location、transfer 等消息气泡，但必须同时在 messageActions.callResponse 写 accepted、rejected、busy 或 missed 表示你是否接听。不要输出来电理由或拒绝说明字段；只有 accepted 才表示进入通话。如果接听，不要把接通后的通话内容放进普通 messages，通话页会单独承接后续内容。`
+    replyInstruction: `${callCanonicalIdentityInstruction.value}\n${callUserAiName.value}刚刚在 LINK 里向${callCharacterAiName.value}拨打${scene}。这仍然是一轮正常线上聊天回复：请让${callCharacterAiName.value}像平时一样发送 text、voice、sticker、image、location、transfer 等消息气泡，但必须同时在 messageActions.callResponse 写 accepted、rejected、busy 或 missed 表示${callCharacterAiName.value}是否接听。不要输出来电理由或拒绝说明字段；只有 accepted 才表示进入通话。如果接听，不要把接通后的通话内容放进普通 messages，通话页会单独承接后续内容。`
   });
   if (!activeCall.value || activeCall.value.callId !== callId || activeCall.value.status !== 'outgoing-ringing') return;
   const latestCall = store.messages.find((message) => message.id === callEvent.id)?.call;
@@ -2292,6 +2726,11 @@ async function handleCallHangup() {
   }
   if (call.status === 'outgoing-ringing') {
     await finishActiveCall('cancelled');
+    store.cancelConversationReply(props.id);
+    const scene = call.mode === 'video' ? '视频通话' : '语音通话';
+    void store.requestRoleplayReply(props.id, {
+      replyInstruction: `${callCanonicalIdentityInstruction.value}\n${callUserAiName.value}刚刚向${callCharacterAiName.value}拨打${scene}，但在${callCharacterAiName.value}接听或拒绝前，${callUserAiName.value}已经主动取消了呼叫。请立刻终止“是否接听通话”的判断，把这当成线上聊天里一次未接通的小插曲，自然回应最近聊天；绝对不要说${callCharacterAiName.value}拒绝了、挂断了或接听了这次呼叫。`
+    });
     return;
   }
   await finishActiveCall('ended');
@@ -2346,8 +2785,8 @@ async function submitCallReply() {
     await scrollCallTranscriptToBottom();
   }
   const scene = call.mode === 'video' ? '视频通话' : '语音通话';
-  const userCue = content ? `用户刚在通话里说：“${content}”。` : '用户点击了“回复”，希望你回应当前通话里最近还未回应的内容。';
-  await requestCallReply(`当前正在${scene}中，${userCue}请像真实通话一样用适合朗读的短句回应；如果用户连续说了多条，请合并理解后回复。可以连续发送多个短句；每个短句会显示成字幕并播放 TTS。不要替用户补充未说出口的动作、位置或心理。`);
+  const userCue = content ? `${callUserAiName.value}刚在通话里说：“${content}”。` : `${callUserAiName.value}点击了“回复”，希望${callCharacterAiName.value}回应当前通话里最近还未回应的内容。`;
+  await requestCallReply(`当前正在${scene}中，${userCue}请让${callCharacterAiName.value}像真实通话一样用适合朗读的短句回应；如果${callUserAiName.value}连续说了多条，请合并理解后回复。可以连续发送多个短句；每个短句会显示成字幕并播放 TTS。不要替${callUserAiName.value}补充未说出口的动作、位置或心理。`);
 }
 
 function getPreferredAudioMimeType() {
@@ -3091,11 +3530,39 @@ onBeforeUnmount(() => {
   inset: 0;
   z-index: 80;
   display: flex;
+  overflow: hidden;
   background: #111111;
-  background-position: center;
-  background-size: cover;
   color: #ffffff;
   font-family: var(--app-current-font-family);
+}
+
+.call-screen::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh;
+  background-image: var(--call-screen-background, none);
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: cover;
+  transform: translateZ(0) scale(1.01);
+  transform-origin: center;
+}
+
+.call-screen::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh;
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0.44), rgba(0, 0, 0, 0.28) 42%, rgba(0, 0, 0, 0.58));
 }
 
 .call-screen--video {
@@ -3104,6 +3571,7 @@ onBeforeUnmount(() => {
 
 .call-visual-layer {
   position: relative;
+  z-index: 2;
   flex: 1;
   display: flex;
   flex-direction: column;
@@ -3281,6 +3749,107 @@ onBeforeUnmount(() => {
   transform: none;
 }
 
+.call-video-expression {
+  position: absolute;
+  z-index: 4;
+  width: 26px;
+  height: 22px;
+  opacity: 0;
+  transform: translateY(4px) scale(0.94);
+  transition: opacity 0.22s ease, transform 0.22s ease;
+}
+
+.call-video-expression--left {
+  left: -4px;
+  top: 18%;
+}
+
+.call-video-expression--right {
+  right: -4px;
+  top: 24%;
+}
+
+.call-video-expression::before,
+.call-video-expression::after {
+  content: '';
+  position: absolute;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.82);
+}
+
+.call-video-stage.is-happy .call-video-expression--right,
+.call-video-stage.is-surprised .call-video-expression--right,
+.call-video-stage.is-shy .call-video-expression,
+.call-video-stage.is-soft .call-video-expression--left,
+.call-video-stage.is-thinking .call-video-expression--left {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+}
+
+.call-video-stage.is-happy .call-video-expression--right::before,
+.call-video-stage.is-happy .call-video-expression--right::after {
+  width: 6px;
+  height: 18px;
+  left: 10px;
+  top: 2px;
+  transform-origin: center;
+}
+
+.call-video-stage.is-happy .call-video-expression--right::before {
+  transform: rotate(35deg);
+}
+
+.call-video-stage.is-happy .call-video-expression--right::after {
+  transform: rotate(-35deg);
+}
+
+.call-video-stage.is-surprised .call-video-expression--right::before {
+  inset: 2px 8px 12px;
+}
+
+.call-video-stage.is-surprised .call-video-expression--right::after {
+  inset: 14px 10px 4px;
+}
+
+.call-video-stage.is-shy .call-video-expression::before,
+.call-video-stage.is-shy .call-video-expression::after {
+  width: 14px;
+  height: 4px;
+  top: 10px;
+  background: rgba(255, 170, 188, 0.82);
+  transform: rotate(-12deg);
+}
+
+.call-video-stage.is-shy .call-video-expression::after {
+  top: 16px;
+  transform: rotate(-12deg) translateX(4px);
+}
+
+.call-video-stage.is-soft .call-video-expression--left::before {
+  width: 18px;
+  height: 7px;
+  left: 4px;
+  top: 9px;
+  background: rgba(255, 255, 255, 0.62);
+}
+
+.call-video-stage.is-thinking .call-video-expression--left::before,
+.call-video-stage.is-thinking .call-video-expression--left::after {
+  width: 5px;
+  height: 5px;
+  background: rgba(255, 255, 255, 0.7);
+}
+
+.call-video-stage.is-thinking .call-video-expression--left::before {
+  left: 7px;
+  top: 12px;
+}
+
+.call-video-stage.is-thinking .call-video-expression--left::after {
+  left: 16px;
+  top: 6px;
+}
+
 .call-video-character img {
   position: relative;
   z-index: 2;
@@ -3308,10 +3877,10 @@ onBeforeUnmount(() => {
   bottom: 33%;
   left: 50%;
   width: 22px;
-  height: 6px;
+  height: var(--call-mouth-height, 6px);
   border-radius: 999px;
   background: rgba(40, 20, 28, 0.56);
-  transform: translateX(-50%) scaleY(0.55);
+  transform: translateX(-50%) scaleY(var(--call-mouth-scale, 0.55));
   opacity: 0.55;
 }
 
@@ -3320,7 +3889,7 @@ onBeforeUnmount(() => {
 }
 
 .call-video-stage.speaking .call-video-mouth {
-  animation: call-mouth-speaking 0.42s ease-in-out infinite;
+  opacity: 0.76;
 }
 
 .call-video-stage.is-happy .call-video-character img {
@@ -3413,7 +3982,7 @@ onBeforeUnmount(() => {
   object-fit: cover;
 }
 
-.call-self-preview video {
+.call-self-preview.mirror video {
   transform: scaleX(-1);
 }
 
@@ -3457,6 +4026,10 @@ onBeforeUnmount(() => {
   justify-content: flex-end;
 }
 
+.call-subtitle.narration {
+  justify-content: center;
+}
+
 .call-subtitle span {
   max-width: min(78vw, 360px);
   padding: 8px 11px;
@@ -3471,6 +4044,14 @@ onBeforeUnmount(() => {
 .call-subtitle.user span {
   background: #ffffff;
   color: #202329;
+}
+
+.call-subtitle.narration span {
+  max-width: min(78vw, 340px);
+  background: rgba(255, 255, 255, 0.7);
+  color: #47515a;
+  font-style: italic;
+  text-align: center;
 }
 
 .call-subtitle-waiting span {
@@ -3569,17 +4150,22 @@ onBeforeUnmount(() => {
 }
 
 .call-controls {
+  --call-control-size: clamp(46px, 12vw, 56px);
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 16px;
+  gap: clamp(7px, 2.4vw, 14px);
+  width: 100%;
   min-height: 58px;
+  overflow: hidden;
 }
 
 .call-control-button {
   display: grid;
-  min-width: 56px;
-  height: 56px;
+  flex: 0 0 var(--call-control-size);
+  width: var(--call-control-size);
+  min-width: 0;
+  height: var(--call-control-size);
   place-items: center;
   border-radius: 50%;
   background: rgba(255, 255, 255, 0.16);
@@ -3588,6 +4174,11 @@ onBeforeUnmount(() => {
 
 .call-control-button[aria-pressed="true"] {
   background: rgba(255, 255, 255, 0.28);
+}
+
+.call-control-button:disabled {
+  cursor: default;
+  opacity: 0.42;
 }
 
 .call-control-button span {
@@ -3603,12 +4194,11 @@ onBeforeUnmount(() => {
 }
 
 .call-screen--incoming-ringing .call-controls {
-  gap: 52px;
+  gap: clamp(42px, 14vw, 52px);
 }
 
 .call-screen--incoming-ringing .call-control-button {
-  width: 64px;
-  height: 64px;
+  --call-control-size: clamp(58px, 18vw, 64px);
 }
 
 .call-floating-window {

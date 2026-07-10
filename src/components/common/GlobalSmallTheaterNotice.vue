@@ -102,7 +102,7 @@ watch(
 .theater-notice-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 76;
+  z-index: 231;
   display: grid;
   place-items: end center;
   padding: 18px calc(14px + var(--safe-right)) calc(18px + var(--safe-bottom)) calc(14px + var(--safe-left));

@@ -74,6 +74,27 @@
         </label>
       </template>
 
+      <template v-else-if="settings.ttsProvider === 'doubao'">
+        <label class="field model-select-field">
+          <span>豆包 Cluster</span>
+          <div class="model-select-shell">
+            <span class="model-select-vendor">Cluster</span>
+            <input :value="settings.ttsDoubao.cluster" placeholder="volcano_tts" @input="updateDoubaoCluster" />
+          </div>
+        </label>
+
+        <label class="field model-select-field">
+          <span>Voice Type / 克隆音色 ID</span>
+          <div class="model-select-shell">
+            <span class="model-select-vendor">Voice</span>
+            <input :value="settings.ttsDoubao.voiceType" list="quick-doubao-tts-voices" placeholder="BV700_streaming / speaker id" @input="updateDoubaoVoice" />
+            <datalist id="quick-doubao-tts-voices">
+              <option v-for="voice in doubaoVoiceTypes" :key="voice" :value="voice" />
+            </datalist>
+          </div>
+        </label>
+      </template>
+
       <section class="picker-empty ready">
         <strong>当前 TTS 模型</strong>
         <p>{{ activeProviderSummary }}</p>
@@ -103,13 +124,15 @@ const showPicker = ref(false);
 
 const providerOptions: Array<{ id: TtsProviderType; label: string; detail: string }> = [
   { id: 'minimax', label: 'MiniMax', detail: '精细参数' },
-  { id: 'openai', label: 'OpenAI', detail: '多供应商' }
+  { id: 'openai', label: 'OpenAI', detail: '多供应商' },
+  { id: 'doubao', label: '豆包', detail: '语音复刻' }
 ];
 
 const legacyOpenAiVoices = ['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer'];
 const modernOpenAiVoices = ['alloy', 'ash', 'ballad', 'coral', 'echo', 'fable', 'nova', 'onyx', 'sage', 'shimmer'];
 const geminiTtsVoices = ['Zephyr', 'Puck', 'Charon', 'Kore', 'Fenrir', 'Leda', 'Orus', 'Aoede'];
-const minimaxModels = ['speech-02-hd', 'speech-02-turbo', 'speech-01-hd', 'speech-01-turbo'];
+const minimaxModels = ['speech-2.8-hd', 'speech-02-hd', 'speech-02-turbo', 'speech-01-hd', 'speech-01-turbo'];
+const doubaoVoiceTypes = ['BV700_streaming', 'BV700_V2_streaming', 'BV701_streaming', 'BV001_streaming', 'BV002_streaming', 'BV421_streaming'];
 
 const settings = computed(() => normalizeAppSettings(store.settings));
 const openAiVendors = computed(() => settings.value.ttsOpenAi.vendors);
@@ -134,7 +157,10 @@ const activeProviderSummary = computed(() => {
   if (settings.value.ttsProvider === 'minimax') {
     return `${settings.value.ttsMinimax.model} · ${settings.value.ttsMinimax.voiceId || '未填写 Voice ID'}`;
   }
-  return '选择 MiniMax 或 OpenAI 语音接口。';
+  if (settings.value.ttsProvider === 'doubao') {
+    return `${settings.value.ttsDoubao.cluster || '未填写 Cluster'} · ${settings.value.ttsDoubao.voiceType || '未填写 Voice Type'}`;
+  }
+  return '选择 MiniMax、OpenAI 或豆包语音接口。';
 });
 
 function finalizeSettings(nextSettings: AppSettings) {
@@ -193,6 +219,18 @@ async function updateMinimaxModel(event: Event) {
 async function updateMinimaxVoice(event: Event) {
   const nextSettings = nextBase();
   nextSettings.ttsMinimax.voiceId = (event.target as HTMLInputElement).value;
+  await saveNext(nextSettings);
+}
+
+async function updateDoubaoCluster(event: Event) {
+  const nextSettings = nextBase();
+  nextSettings.ttsDoubao.cluster = (event.target as HTMLInputElement).value.trim();
+  await saveNext(nextSettings);
+}
+
+async function updateDoubaoVoice(event: Event) {
+  const nextSettings = nextBase();
+  nextSettings.ttsDoubao.voiceType = (event.target as HTMLInputElement).value.trim();
   await saveNext(nextSettings);
 }
 

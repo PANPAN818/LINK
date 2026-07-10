@@ -602,7 +602,7 @@ const callStatusText = computed(() => ({
   rejected: '已拒绝',
   missed: '未接听',
   busy: '忙线',
-  cancelled: '已取消',
+  cancelled: '已取消呼叫',
   ended: '已结束',
   failed: '呼叫失败'
 }[props.message.call?.status ?? 'ringing']));
@@ -623,7 +623,7 @@ const callCardDetail = computed(() => {
   const duration = callDurationText.value;
   if (call.status === 'ringing') return call.direction === 'incoming' ? '对方正在等待你接听' : '等待对方接听';
   if (call.status === 'ended') return duration ? `通话时长 ${duration}` : '通话已结束';
-  if (call.status === 'cancelled') return '呼叫已取消';
+  if (call.status === 'cancelled') return call.direction === 'outgoing' ? '你已取消呼叫' : '呼叫已取消';
   if (call.status === 'accepted') return '正在通话';
   return callStatusText.value;
 });

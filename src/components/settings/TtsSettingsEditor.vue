@@ -72,6 +72,7 @@
         <span>模型</span>
         <input v-model="draft.ttsMinimax.model" list="minimax-tts-models" placeholder="speech-02-hd" />
         <datalist id="minimax-tts-models">
+          <option value="speech-2.8-hd" />
           <option value="speech-02-hd" />
           <option value="speech-02-turbo" />
           <option value="speech-01-hd" />
@@ -131,6 +132,137 @@
         <label class="field compact-field">
           <span>比特率</span>
           <input v-model.number="draft.ttsMinimax.bitrate" min="16000" step="1000" type="number" />
+        </label>
+      </div>
+    </section>
+
+    <section v-else-if="activeProvider === 'doubao'" class="provider-fields">
+      <div class="section-head compact">
+        <div>
+          <p class="section-kicker">Connection</p>
+          <h3>豆包语音接口</h3>
+        </div>
+      </div>
+
+      <label class="field">
+        <span>API URL</span>
+        <input v-model="draft.ttsDoubao.apiUrl" placeholder="https://openspeech.bytedance.com/api/v1/tts" />
+      </label>
+
+      <div class="field-grid two-up">
+        <label class="field">
+          <span>App ID</span>
+          <input v-model="draft.ttsDoubao.appId" autocomplete="off" placeholder="appid" />
+        </label>
+
+        <label class="field secret-field">
+          <span>Token</span>
+          <input v-model="draft.ttsDoubao.token" autocomplete="off" placeholder="access token" type="password" />
+        </label>
+      </div>
+
+      <div class="field-grid two-up">
+        <label class="field">
+          <span>Cluster</span>
+          <input v-model="draft.ttsDoubao.cluster" autocomplete="off" placeholder="volcano_tts" />
+        </label>
+
+        <label class="field">
+          <span>UID</span>
+          <input v-model="draft.ttsDoubao.uid" autocomplete="off" placeholder="link-user" />
+        </label>
+      </div>
+
+      <label class="field">
+        <span>Voice Type / 克隆音色 ID</span>
+        <input v-model="draft.ttsDoubao.voiceType" list="doubao-tts-voices" placeholder="BV700_streaming / speaker id" />
+        <datalist id="doubao-tts-voices">
+          <option value="BV700_streaming" />
+          <option value="BV700_V2_streaming" />
+          <option value="BV701_streaming" />
+          <option value="BV001_streaming" />
+          <option value="BV002_streaming" />
+          <option value="BV421_streaming" />
+        </datalist>
+      </label>
+
+      <div class="section-head compact parameter-head">
+        <div>
+          <p class="section-kicker">Voice</p>
+          <h3>复刻与音频参数</h3>
+        </div>
+      </div>
+
+      <div class="field-grid three-up tight-grid">
+        <label class="field compact-field">
+          <span>语速</span>
+          <input v-model.number="draft.ttsDoubao.speedRatio" max="3" min="0.2" step="0.1" type="number" />
+        </label>
+
+        <label class="field compact-field">
+          <span>音量</span>
+          <input v-model.number="draft.ttsDoubao.volumeRatio" max="3" min="0.1" step="0.1" type="number" />
+        </label>
+
+        <label class="field compact-field">
+          <span>音高</span>
+          <input v-model.number="draft.ttsDoubao.pitchRatio" max="3" min="0.1" step="0.1" type="number" />
+        </label>
+      </div>
+
+      <div class="field-grid two-up">
+        <label class="field">
+          <span>编码</span>
+          <select v-model="draft.ttsDoubao.encoding">
+            <option value="mp3">MP3</option>
+            <option value="wav">WAV</option>
+            <option value="pcm">PCM</option>
+            <option value="ogg_opus">OGG OPUS</option>
+          </select>
+        </label>
+
+        <label class="field">
+          <span>文本类型</span>
+          <select v-model="draft.ttsDoubao.textType">
+            <option value="plain">Plain</option>
+            <option value="ssml">SSML</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="field-grid two-up">
+        <label class="field compact-field">
+          <span>采样率</span>
+          <input v-model.number="draft.ttsDoubao.sampleRate" min="8000" step="1000" type="number" />
+        </label>
+
+        <label class="field compact-field">
+          <span>静音 ms</span>
+          <input v-model.number="draft.ttsDoubao.silenceDuration" min="0" step="25" type="number" />
+        </label>
+      </div>
+
+      <div class="field-grid two-up">
+        <label class="field">
+          <span>Emotion</span>
+          <input v-model.trim="draft.ttsDoubao.emotion" placeholder="happy / sad / tear" />
+        </label>
+
+        <label class="field">
+          <span>Language</span>
+          <input v-model.trim="draft.ttsDoubao.language" placeholder="cn / en / ja" />
+        </label>
+      </div>
+
+      <div class="toggle-grid">
+        <label class="mini-toggle">
+          <input v-model="draft.ttsDoubao.splitSentence" type="checkbox" />
+          <span>复刻语速优化</span>
+        </label>
+
+        <label class="mini-toggle">
+          <input v-model="draft.ttsDoubao.pureEnglishOpt" type="checkbox" />
+          <span>英文前端优化</span>
         </label>
       </div>
     </section>
@@ -390,7 +522,8 @@ function createDraft(settings: AppSettings) {
       ...settings.ttsOpenAi,
       vendors: cloneVendors(settings.ttsOpenAi.vendors)
     },
-    ttsMinimax: { ...settings.ttsMinimax }
+    ttsMinimax: { ...settings.ttsMinimax },
+    ttsDoubao: { ...settings.ttsDoubao }
   });
 }
 
@@ -439,6 +572,16 @@ const providerTabs = computed(() => [
     shortLabel: `${openAiVendors.value.length || 0} 家`,
     connected: Boolean(activeOpenAiVendor.value?.enabled && resolvedOpenAiConfig.value.endpoint.trim() && resolvedOpenAiConfig.value.model.trim())
   },
+  {
+    id: 'doubao' as TtsProviderType,
+    label: 'DOUBAO',
+    badge: 'Clone',
+    kicker: 'Doubao TTS',
+    title: '豆包语音复刻',
+    visualLabel: 'DB',
+    shortLabel: 'Clone',
+    connected: Boolean(draft.ttsDoubao.apiUrl.trim() && draft.ttsDoubao.appId.trim() && draft.ttsDoubao.token.trim() && draft.ttsDoubao.cluster.trim() && draft.ttsDoubao.voiceType.trim())
+  }
 ]);
 
 const activeProviderMeta = computed(() => providerTabs.value.find((provider) => provider.id === activeProvider.value) ?? providerTabs.value[0]);
@@ -470,7 +613,8 @@ function buildNextSettings() {
     ttsMinimax: {
       ...draft.ttsMinimax,
       enabled: provider === 'minimax'
-    }
+    },
+    ttsDoubao: { ...draft.ttsDoubao }
   };
 
   return normalizeAppSettings({
@@ -652,7 +796,8 @@ watch(
       ...draft.ttsOpenAi,
       vendors: cloneVendors(draft.ttsOpenAi.vendors)
     },
-    ttsMinimax: { ...draft.ttsMinimax }
+    ttsMinimax: { ...draft.ttsMinimax },
+    ttsDoubao: { ...draft.ttsDoubao }
   }),
   scheduleSave,
   { deep: true }
@@ -677,7 +822,7 @@ onBeforeUnmount(() => {
 
 .tts-provider-tabs {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 6px;
   width: 100%;
   min-width: 0;
@@ -754,6 +899,12 @@ onBeforeUnmount(() => {
   background:
     radial-gradient(circle at top right, rgba(255, 221, 232, 0.9), transparent 30%),
     linear-gradient(135deg, #fff8fb, #f1f6fb 56%, #eef8f1);
+}
+
+.tts-showcase.provider-doubao .voice-stage {
+  background:
+    radial-gradient(circle at top left, rgba(226, 244, 255, 0.92), transparent 30%),
+    linear-gradient(135deg, #f8fcff, #f2f8ee 56%, #fff6f1);
 }
 
 .voice-stage {
@@ -1052,6 +1203,41 @@ onBeforeUnmount(() => {
   display: grid;
   gap: 10px;
   min-width: 0;
+}
+
+.toggle-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  min-width: 0;
+}
+
+.mini-toggle {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 42px;
+  padding: 0 12px;
+  border-radius: 11px;
+  background: #eff1f3;
+  color: #626971;
+  font-size: 12px;
+  font-weight: 900;
+  overflow: hidden;
+}
+
+.mini-toggle input {
+  width: 16px;
+  height: 16px;
+  accent-color: #111111;
+}
+
+.mini-toggle span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .two-up {

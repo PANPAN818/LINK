@@ -811,6 +811,7 @@ export function buildPrompt(context: PromptContext, options: { includeOnlineChat
   const characterName = getCharacterAiName(context.character);
   const userName = getUserAiName(context.user);
   const boundUserName = getUserAiName(context.boundUser);
+  const canonicalUserName = boundUserName || userName;
   const timeAwarenessTimestamp = context.timeAwarenessNow;
   const timeAwarenessNow = Number.isFinite(timeAwarenessTimestamp) ? new Date(timeAwarenessTimestamp as number) : undefined;
   const timeAwarenessPrompt = renderTimeAwarenessPrompt(context.timeAwareness, {
@@ -872,6 +873,9 @@ export function buildPrompt(context: PromptContext, options: { includeOnlineChat
       : '',
     `当前对话总结：\n${normalizePromptIdentityText(context.conversationSummary || '暂无总结。', context)}`,
     `一起听状态：\n${renderMusicListeningPrompt(context)}`,
+    context.mode === 'online'
+      ? `身份称谓铁律：角色只能用真名「${characterName}」指代，用户只能用真名「${canonicalUserName}」指代。所有 text、voice、narration、location、transfer、image description、messageActions 语境和通话相关判断里，绝对禁止使用角色网名、角色备注、角色主页名、用户网名、用户主页名或任何昵称来代指双方；如果历史里出现这些别名，输出时必须改写成真名。`
+      : '',
     `记忆手册：\n${normalizePromptIdentityText(context.memorySummary || '暂无记忆手册。', context)}`,
     `世界书：\n${normalizePromptIdentityText(renderWorldBooks(selectedWorldBooks, context) || '无启用条目。', context)}`,
     context.mode === 'online'
@@ -879,7 +883,7 @@ export function buildPrompt(context: PromptContext, options: { includeOnlineChat
       : '',
     context.mode === 'online' && options.includeAvailableStickers !== false ? `角色可用 Stickers：\n${renderAvailableStickers(context)}` : '',
     renderProfileThemePrompt(context),
-    context.mode === 'online' && context.replyInstruction ? `本次生成任务：\n${context.replyInstruction}` : '',
+    context.mode === 'online' && context.replyInstruction ? `本次生成任务：\n${normalizePromptIdentityText(context.replyInstruction, context)}` : '',
     `最近对话：\n${history || '暂无。'}`
   ].filter(Boolean).join('\n\n');
 }

@@ -1,4 +1,4 @@
-import type { ApiVendor, ApiVendorModel, AppKeepAliveSettings, AppRingtoneSettings, AppSettings, AppThemeSettings, ChatModelOverrides, CharacterProfileHomepageAutoCleanupSettings, CharacterRingtoneSettings, CharacterSmallTheaterAutoCleanupSettings, CharacterVoomAutoCleanupSettings, GitHubBackupSettings, ImageModelScope, ImageModelSelection, ImagePromptPreset, ImageProviderType, MinimaxTtsAudioFormat, MinimaxTtsSettings, NovelAiImageSettings, OpenAiImageSettings, OpenAiTtsAudioFormat, OpenAiTtsSettings, PollinationsImageSettings, ProfileHomepageAutoCleanupPreset, RingtoneAsset, RingtoneEventType, SmallTheaterAutoCleanupPreset, ThemeFontEntry, ThemeFontSource, ThemeGlobalSettings, ThemeStylePreset, ThemeStylePresetSource, ThemeStyleScopeSettings, TtsProviderType, VoomAutoCleanupPreset } from '@/types/domain';
+import type { ApiVendor, ApiVendorModel, AppKeepAliveSettings, AppRingtoneSettings, AppSettings, AppThemeSettings, ChatModelOverrides, CharacterProfileHomepageAutoCleanupSettings, CharacterRingtoneSettings, CharacterSmallTheaterAutoCleanupSettings, CharacterVoomAutoCleanupSettings, DoubaoTtsAudioFormat, DoubaoTtsSettings, DoubaoTtsTextType, GitHubBackupSettings, ImageModelScope, ImageModelSelection, ImagePromptPreset, ImageProviderType, MinimaxTtsAudioFormat, MinimaxTtsSettings, NovelAiImageSettings, OpenAiImageSettings, OpenAiTtsAudioFormat, OpenAiTtsSettings, PollinationsImageSettings, ProfileHomepageAutoCleanupPreset, RingtoneAsset, RingtoneEventType, SmallTheaterAutoCleanupPreset, ThemeFontEntry, ThemeFontSource, ThemeGlobalSettings, ThemeStylePreset, ThemeStylePresetSource, ThemeStyleScopeSettings, TtsProviderType, VoomAutoCleanupPreset } from '@/types/domain';
 import { createId } from './id';
 
 export const novelAiOfficialApiUrl = 'https://image.novelai.net';
@@ -51,8 +51,10 @@ export interface ConfiguredImageModelOption {
 export const disabledImageModelSelectionValue = '__disabled__';
 
 const imageProviderOrder: ImageProviderType[] = ['openai', 'novelai', 'pollinations'];
-const ttsProviderOrder: TtsProviderType[] = ['minimax', 'openai'];
+const ttsProviderOrder: TtsProviderType[] = ['minimax', 'openai', 'doubao'];
 const openAiTtsAudioFormats: OpenAiTtsAudioFormat[] = ['mp3', 'opus', 'aac', 'flac', 'wav', 'pcm'];
+const doubaoTtsAudioFormats: DoubaoTtsAudioFormat[] = ['mp3', 'wav', 'pcm', 'ogg_opus'];
+const doubaoTtsTextTypes: DoubaoTtsTextType[] = ['plain', 'ssml'];
 const openAiImageGenerationPath = '/images/generations';
 const openAiTtsSpeechPath = '/audio/speech';
 const legacyOpenAiTtsVoice = 'alloy';
@@ -241,6 +243,25 @@ export const defaultAppSettings: AppSettings = {
     audioFormat: 'mp3',
     channel: 1
   },
+  ttsDoubao: {
+    apiUrl: 'https://openspeech.bytedance.com/api/v1/tts',
+    appId: '',
+    token: '',
+    cluster: 'volcano_tts',
+    voiceType: 'BV700_streaming',
+    uid: 'link-user',
+    encoding: 'mp3',
+    sampleRate: 24000,
+    speedRatio: 1,
+    volumeRatio: 1,
+    pitchRatio: 1,
+    emotion: '',
+    language: '',
+    textType: 'plain',
+    silenceDuration: 125,
+    splitSentence: false,
+    pureEnglishOpt: false
+  },
   imageModel: 'gpt-image-1',
   imageSize: '1024x1024',
   imagePromptPrefix: '',
@@ -304,7 +325,8 @@ export const defaultAppSettings: AppSettings = {
   },
   imageModelOverrides: {
     voom: { provider: '', model: '' },
-    onlineChat: { provider: '', model: '' }
+    onlineChat: { provider: '', model: '' },
+    callBackground: { provider: '', model: '' }
   },
   voomImageProvider: '',
   voomImageModel: '',
@@ -384,7 +406,8 @@ function normalizeImageModelOverrides(settings?: Partial<AppSettings> | null) {
     const disabledSelection = { provider: '', model: disabledImageModelSelectionValue } satisfies ImageModelSelection;
     return {
       voom: disabledSelection,
-      onlineChat: disabledSelection
+      onlineChat: disabledSelection,
+      callBackground: disabledSelection
     } satisfies Record<ImageModelScope, ImageModelSelection>;
   }
   const legacySelection = {
@@ -394,7 +417,8 @@ function normalizeImageModelOverrides(settings?: Partial<AppSettings> | null) {
   const overrides = settings?.imageModelOverrides;
   return {
     voom: normalizeImageModelSelection(overrides?.voom, legacySelection),
-    onlineChat: normalizeImageModelSelection(overrides?.onlineChat, legacySelection)
+    onlineChat: normalizeImageModelSelection(overrides?.onlineChat, legacySelection),
+    callBackground: normalizeImageModelSelection(overrides?.callBackground)
   } satisfies Record<ImageModelScope, ImageModelSelection>;
 }
 
@@ -764,8 +788,40 @@ function normalizeOpenAiTtsSettings(settings: Partial<OpenAiTtsSettings> | null 
   };
 }
 
-export function getTtsVoiceForProvider(settings: Pick<AppSettings, 'ttsProvider' | 'ttsOpenAi' | 'ttsMinimax'>) {
+function normalizeDoubaoTtsSettings(settings: Partial<DoubaoTtsSettings> | null | undefined, legacyVoice = ''): DoubaoTtsSettings {
+  const encoding = String(settings?.encoding ?? defaultAppSettings.ttsDoubao.encoding).trim().toLowerCase();
+  const normalizedEncoding: DoubaoTtsAudioFormat = doubaoTtsAudioFormats.includes(encoding as DoubaoTtsAudioFormat)
+    ? encoding as DoubaoTtsAudioFormat
+    : defaultAppSettings.ttsDoubao.encoding;
+  const textType = String(settings?.textType ?? defaultAppSettings.ttsDoubao.textType).trim().toLowerCase();
+  const normalizedTextType: DoubaoTtsTextType = doubaoTtsTextTypes.includes(textType as DoubaoTtsTextType)
+    ? textType as DoubaoTtsTextType
+    : defaultAppSettings.ttsDoubao.textType;
+
+  return {
+    apiUrl: String(settings?.apiUrl ?? defaultAppSettings.ttsDoubao.apiUrl).trim() || defaultAppSettings.ttsDoubao.apiUrl,
+    appId: String(settings?.appId ?? '').trim(),
+    token: String(settings?.token ?? '').trim(),
+    cluster: String(settings?.cluster ?? defaultAppSettings.ttsDoubao.cluster).trim() || defaultAppSettings.ttsDoubao.cluster,
+    voiceType: String(settings?.voiceType ?? legacyVoice ?? defaultAppSettings.ttsDoubao.voiceType).trim() || defaultAppSettings.ttsDoubao.voiceType,
+    uid: String(settings?.uid ?? defaultAppSettings.ttsDoubao.uid).trim() || defaultAppSettings.ttsDoubao.uid,
+    encoding: normalizedEncoding,
+    sampleRate: Math.round(Number(settings?.sampleRate ?? defaultAppSettings.ttsDoubao.sampleRate) || defaultAppSettings.ttsDoubao.sampleRate),
+    speedRatio: Math.min(3, Math.max(0.2, Number(settings?.speedRatio ?? defaultAppSettings.ttsDoubao.speedRatio) || defaultAppSettings.ttsDoubao.speedRatio)),
+    volumeRatio: Math.min(3, Math.max(0.1, Number(settings?.volumeRatio ?? defaultAppSettings.ttsDoubao.volumeRatio) || defaultAppSettings.ttsDoubao.volumeRatio)),
+    pitchRatio: Math.min(3, Math.max(0.1, Number(settings?.pitchRatio ?? defaultAppSettings.ttsDoubao.pitchRatio) || defaultAppSettings.ttsDoubao.pitchRatio)),
+    emotion: String(settings?.emotion ?? '').trim(),
+    language: String(settings?.language ?? '').trim(),
+    textType: normalizedTextType,
+    silenceDuration: Math.max(0, Math.round(Number(settings?.silenceDuration ?? defaultAppSettings.ttsDoubao.silenceDuration) || defaultAppSettings.ttsDoubao.silenceDuration)),
+    splitSentence: Boolean(settings?.splitSentence),
+    pureEnglishOpt: Boolean(settings?.pureEnglishOpt)
+  };
+}
+
+export function getTtsVoiceForProvider(settings: Pick<AppSettings, 'ttsProvider' | 'ttsOpenAi' | 'ttsMinimax' | 'ttsDoubao'>) {
   if (settings.ttsProvider === 'openai') return settings.ttsOpenAi.voice;
+  if (settings.ttsProvider === 'doubao') return settings.ttsDoubao.voiceType;
   return settings.ttsMinimax.voiceId;
 }
 
@@ -1498,6 +1554,7 @@ export function normalizeAppSettings(settings?: Partial<AppSettings> | null): Ap
         ? normalizeLegacyTtsVoice(legacyTtsVoice)
         : ''
     }),
+    ttsDoubao: normalizeDoubaoTtsSettings(settings?.ttsDoubao, normalizedTtsProvider === 'doubao' ? legacyTtsVoice : ''),
     voomReadAtByUser: normalizeVoomReadAtByUser(settings?.voomReadAtByUser),
     voomAutoCleanup: normalizeVoomAutoCleanup(settings?.voomAutoCleanup),
     smallTheaterAutoCleanup: normalizeSmallTheaterAutoCleanup(settings?.smallTheaterAutoCleanup),

@@ -483,7 +483,7 @@ export interface ChatImageAttachment {
 
 export type ChatVoiceAttachmentSource = 'recorded' | 'text';
 
-export type TtsProviderType = 'openai' | 'minimax';
+export type TtsProviderType = 'openai' | 'minimax' | 'doubao';
 
 export interface ChatVoiceAttachment {
   source: ChatVoiceAttachmentSource;
@@ -803,7 +803,7 @@ export type ImageProviderType = 'openai' | 'novelai' | 'pollinations';
 
 export type ImageModuleId = ImageProviderType;
 
-export type ImageModelScope = 'voom' | 'onlineChat';
+export type ImageModelScope = 'voom' | 'onlineChat' | 'callBackground';
 
 export interface ImageModelSelection {
   provider: ImageProviderType | '';
@@ -963,6 +963,10 @@ export type MinimaxTtsAudioFormat = 'mp3' | 'wav' | 'pcm';
 
 export type OpenAiTtsAudioFormat = 'mp3' | 'opus' | 'aac' | 'flac' | 'wav' | 'pcm';
 
+export type DoubaoTtsAudioFormat = 'mp3' | 'wav' | 'pcm' | 'ogg_opus';
+
+export type DoubaoTtsTextType = 'plain' | 'ssml';
+
 export interface OpenAiTtsSettings {
   activeVendorId: string;
   vendors: ApiVendor[];
@@ -989,6 +993,26 @@ export interface MinimaxTtsSettings {
   bitrate: number;
   audioFormat: MinimaxTtsAudioFormat;
   channel: 1 | 2;
+}
+
+export interface DoubaoTtsSettings {
+  apiUrl: string;
+  appId: string;
+  token: string;
+  cluster: string;
+  voiceType: string;
+  uid: string;
+  encoding: DoubaoTtsAudioFormat;
+  sampleRate: number;
+  speedRatio: number;
+  volumeRatio: number;
+  pitchRatio: number;
+  emotion: string;
+  language: string;
+  textType: DoubaoTtsTextType;
+  silenceDuration: number;
+  splitSentence: boolean;
+  pureEnglishOpt: boolean;
 }
 
 export type RingtoneEventType = 'voom' | 'message' | 'theater';
@@ -1090,6 +1114,7 @@ export interface AppSettings {
   ttsProvider: TtsProviderType;
   ttsOpenAi: OpenAiTtsSettings;
   ttsMinimax: MinimaxTtsSettings;
+  ttsDoubao: DoubaoTtsSettings;
   imageModel: string;
   imageSize: string;
   imagePromptPrefix: string;
