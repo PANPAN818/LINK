@@ -97,7 +97,8 @@
       @send-sticker="sendStickerSuggestion"
     />
 
-    <section v-if="activeCall && !callMinimized" class="call-screen" :class="[`call-screen--${activeCall.mode}`, `call-screen--${activeCall.status}`]" :style="callScreenStyle" aria-live="polite">
+    <section v-if="activeCall && !callMinimized" class="call-screen" :class="[`call-screen--${activeCall.mode}`, `call-screen--${activeCall.status}`]" aria-live="polite">
+      <img v-if="callScreenBackgroundUrl" class="call-screen-background" :src="callScreenBackgroundUrl" alt="" aria-hidden="true" draggable="false" />
       <div class="call-visual-layer">
         <div class="call-topbar">
           <button v-if="activeCall.mode === 'video'" class="call-mind-button" type="button" :aria-label="`查看${callPeerName}心声`" @click="openCharacterProfile">查看心声</button>
@@ -1192,11 +1193,6 @@ function syncActiveCallMetadata() {
 
 const callPhotoBackgroundUrl = computed(() => activeCall.value ? callGeneratedBackgroundUrl.value || callRotatingBackgroundUrl.value : '');
 const callScreenBackgroundUrl = computed(() => callPhotoBackgroundUrl.value || character.value?.avatar || '');
-const callScreenStyle = computed(() => {
-  const image = callScreenBackgroundUrl.value.trim();
-  if (!image) return {};
-  return { '--call-screen-background': `url("${image.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}")` };
-});
 const callCharacterSpeaking = computed(() => Boolean(activeCall.value?.status === 'active' && (callStatusText.value.includes('正在说话') || callMouthLevel.value > 0.08)));
 const callVideoStageStyle = computed(() => ({
   '--call-mouth-height': `${Math.round(5 + callMouthLevel.value * 13)}px`,
@@ -1399,6 +1395,11 @@ async function ensureCallBackgroundImage() {
       callBackgroundGenerating.value = false;
     }
   }
+}
+
+function refreshCallBackground() {
+  syncCallBackgroundRotation();
+  void ensureCallBackgroundImage();
 }
 const stickerRecommendationBase = computed(() => {
   if (!chatSettings.value.stickerSuggestionsEnabled) return [];
@@ -2629,6 +2630,7 @@ async function connectActiveCall(direction: 'incoming' | 'outgoing', options: { 
     status: 'active',
     connectedAt
   };
+  refreshCallBackground();
   callStatusText.value = '已接通';
   stopCallRingtone();
   syncCallAmbientPlayback();
@@ -2661,6 +2663,7 @@ async function startOutgoingCall(mode: ChatCallMode) {
     cameraEnabled: false,
     speakerEnabled: true
   };
+  refreshCallBackground();
   callStatusText.value = '正在等待接听';
   syncCallRingtonePlayback();
   await scrollMessagesToBottom();
@@ -2695,6 +2698,7 @@ function openIncomingCall(message: ChatMessage) {
     cameraEnabled: false,
     speakerEnabled: true
   };
+  refreshCallBackground();
   callStatusText.value = '';
   syncCallRingtonePlayback();
 }
@@ -3574,12 +3578,23 @@ onBeforeUnmount(() => {
   width: 100vw;
   height: 100vh;
   height: 100dvh;
-  background-image: var(--call-screen-background, none);
-  background-position: center;
-  background-repeat: no-repeat;
-  background-size: cover;
   transform: translateZ(0) scale(1.01);
   transform-origin: center;
+}
+
+.call-screen-background {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh;
+  object-fit: cover;
+  object-position: center;
+  pointer-events: none;
+  transform: translateZ(0) scale(1.01);
+  transform-origin: center;
+  user-select: none;
 }
 
 .call-screen::after {

@@ -91,6 +91,13 @@ function voomPhotoKey(post: VoomPost) {
   return `voom:${post.id}`;
 }
 
+function isVoomPostRelatedToCharacter(post: VoomPost, character: CharacterProfile, conversationIds: Set<string>) {
+  if (post.charId === character.id) return true;
+  if (post.visibleCharacterIds?.includes(character.id)) return true;
+  if (post.conversationId && conversationIds.has(post.conversationId)) return true;
+  return Boolean(post.conversationIds?.some((conversationId) => conversationIds.has(conversationId)));
+}
+
 function sortPhotoItems(left: CharacterPhotoItem, right: CharacterPhotoItem) {
   return right.createdAt - left.createdAt || left.key.localeCompare(right.key);
 }
@@ -160,7 +167,7 @@ export function collectCharacterPhotoItems(input: {
 
   for (const post of input.voomPosts) {
     const imageUrl = post.image?.trim() ?? '';
-    if (post.charId !== input.character.id) continue;
+    if (!isVoomPostRelatedToCharacter(post, input.character, conversationIds)) continue;
     const usedPostImageUrls = new Set<string>();
     if (isUsableGeneratedImage(imageUrl, post.imageProvider)) {
       usedPostImageUrls.add(imageUrl);
