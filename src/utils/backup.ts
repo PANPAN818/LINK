@@ -60,6 +60,16 @@ function isInlineMediaUrl(value: string) {
   return /^data:(?:image|audio)\//i.test(value.trim());
 }
 
+function isStoredLocalMediaUrl(value: string) {
+  const normalizedValue = value.trim();
+  if (!normalizedValue) return false;
+  try {
+    return new URL(normalizedValue, 'https://link.local').pathname.includes('/__link-media/');
+  } catch {
+    return normalizedValue.includes('/__link-media/');
+  }
+}
+
 function stripStickerImageCache<T extends { imageUrl: string; cachedImageUrl?: string }>(sticker: T): T {
   const { cachedImageUrl: _cachedImageUrl, ...restSticker } = sticker;
   return {
@@ -70,6 +80,7 @@ function stripStickerImageCache<T extends { imageUrl: string; cachedImageUrl?: s
 
 function stripLargeInlineAsset(value: string | undefined, fallback = '') {
   const normalizedValue = String(value ?? '').trim();
+  if (isStoredLocalMediaUrl(normalizedValue)) return fallback;
   if (!isInlineMediaUrl(normalizedValue)) return normalizedValue;
   return normalizedValue.length > largeInlineAssetLength ? fallback : normalizedValue;
 }

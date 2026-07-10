@@ -2,6 +2,7 @@ import { openDB, type DBSchema, type IDBPDatabase } from 'idb';
 import { toRaw } from 'vue';
 import type { AppSettings, AppSnapshot, CharacterProfile, ChatImageAttachment, ChatMessage, Conversation, ConversationMemoryAtom, ConversationMemoryRecord, ConversationSettings, FavoriteMessageRecord, GeneratedImageRecord, MusicCommentThread, MusicTrack, ProfileHomepageRecord, ProfileTheme, SmallTheater, SmallTheaterTopic, Sticker, StickerGroup, UserProfile, VisualProfile, VoomPost, WorldBookEntry } from '@/types/domain';
 import { compressInlineImageDataUrl } from '@/utils/imageFile';
+import { collectStoredMediaLocators, externalizeLargeMediaRefs, pruneStoredMediaCache } from '@/utils/mediaStorage';
 import { normalizeUserProfile, removeVisualProfileAvatar } from '@/utils/profile';
 import { normalizeAppSettings } from '@/utils/settings';
 import { isLegacyGanadiSticker, isLegacyGanadiStickerGroup, isRecentStickerGroupId } from '@/utils/stickers';
@@ -377,9 +378,10 @@ async function compactStoredInlineImagesForStore<TStore extends StoreName>(store
     const value = await db.get(storeName, key as never);
     if (!value) continue;
     const compactedValue = await compactValueForStore(storeName, value);
-    if (compactedValue === value) continue;
+    const externalizedValue = await externalizeLargeMediaRefs(compactedValue);
+    if (externalizedValue === value) continue;
 
-    const persistableValue = toPersistableValue(compactedValue);
+    const persistableValue = toPersistableValue(externalizedValue);
     if (storeName === 'settings') await db.put('settings', persistableValue as AppSettings, key as string);
     else await db.put(storeName, persistableValue as never);
     changed += 1;
@@ -399,6 +401,7 @@ export async function compactStoredInlineImages() {
   changed += await compactStoredInlineImagesForStore('worldBooks');
   changed += await compactStoredInlineImagesForStore('favorites');
   changed += await compactStoredInlineImagesForStore('settings');
+  await pruneUnusedStoredMediaCache();
   return changed;
 }
 
@@ -666,6 +669,7 @@ export async function loadSnapshot() {
 
 export async function replaceSnapshot(snapshot: AppSnapshot) {
   snapshot = await compactSnapshotInlineImages(snapshot);
+  snapshot = await externalizeLargeMediaRefs(snapshot);
   const db = await getDb();
   const tx = db.transaction(storeNames, 'readwrite');
 
@@ -808,12 +812,19 @@ export async function putEntity<TStore extends StoreName>(storeName: TStore, val
   await waitForBackupReadLock();
   const db = await getDb();
   const compactedValue = await compactValueForStore(storeName, value);
-  const persistableValue = toPersistableValue(compactedValue);
+  const externalizedValue = await externalizeLargeMediaRefs(compactedValue);
+  const persistableValue = toPersistableValue(externalizedValue);
   if (key !== undefined) {
     await db.put(storeName, persistableValue as never, key as never);
     return;
   }
   await db.put(storeName, persistableValue as never);
+}
+
+export async function pruneUnusedStoredMediaCache() {
+  const db = await getDb();
+  const values = await Promise.all(storeNames.map((storeName) => db.getAll(storeName)));
+  await pruneStoredMediaCache(collectStoredMediaLocators(values));
 }
 
 export async function deleteEntity<TStore extends StoreName>(storeName: TStore, key: LinkDb[TStore]['key']) {

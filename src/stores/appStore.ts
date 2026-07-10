@@ -1,6 +1,6 @@
 import { computed, ref, toRaw, watch } from 'vue';
 import { defineStore } from 'pinia';
-import { deleteEntity, loadSnapshot, putEntity, replaceSnapshot, scheduleStartupStorageMaintenance } from '@/data/db';
+import { deleteEntity, loadSnapshot, pruneUnusedStoredMediaCache, putEntity, replaceSnapshot, scheduleStartupStorageMaintenance } from '@/data/db';
 import { defaultSettings } from '@/data/seed';
 import type { AppSettings, AppSnapshot, CharacterProfile, CharacterProfileHistoryEntry, CharacterProfileHistoryField, ChatCallAttachment, ChatCallMode, ChatCallStatus, ChatImageAttachment, ChatImageCandidate, ChatLocationAttachment, ChatMessage, ChatMessageQuote, ChatMode, ChatModelOverrides, ChatModelScope, ChatMusicListenInviteAttachment, ChatMusicListenInviteStatus, ChatOfflineInvitationAttachment, ChatOfflineInvitationStatus, ChatSmallTheaterLinkAttachment, ChatTransferAttachment, ChatTransferStatus, ChatVoiceAttachment, Conversation, ConversationMemoryAtom, ConversationMemoryRecord, ConversationSettings, FavoriteMessageKind, FavoriteMessageRecord, GenerateReplyInput, GeneratedImageRecord, ImageModuleId, MusicCommentThread, MusicListeningContext, MusicTrack, ProfileHomepageRecord, ProfileTheme, SmallTheater, SmallTheaterTopic, Sticker, StickerGroup, UserProfile, VisualProfile, VoomComment, VoomFrequency, VoomImageCandidate, VoomPost, VoomPostVisibility, WorldBookEntry } from '@/types/domain';
 import { createAccountId, createId } from '@/utils/id';
@@ -25,6 +25,7 @@ import { createLinkBackupFile, parseLinkBackupFileText, parseLinkBackupText, sti
 import { markRestoredGlobalNoticesSeen } from '@/utils/globalNotices';
 import { getVoomFrequencyChance, stripVoomCommentReplyPrefix } from '@/utils/voom';
 import { compressInlineImageDataUrl } from '@/utils/imageFile';
+import { hydrateStoredMediaRefs, isLocalMediaCacheUrl } from '@/utils/mediaStorage';
 
 interface CreateUserVoomPostPayload {
   userId: string;
@@ -811,7 +812,7 @@ export const useAppStore = defineStore('app', () => {
     if (ready.value) return;
     if (hydratePromise) return hydratePromise;
     hydratePromise = (async () => {
-    const snapshot = await loadSnapshot();
+    const snapshot = await hydrateStoredMediaRefs(await loadSnapshot());
     const legacyMemoryAtomIds = (snapshot.conversationMemoryAtoms ?? []).map((atom) => atom.id);
     const shouldPersistMemoryVectorCleanup = snapshot.conversationMemories.some((memory) => memoryHasVectorCache(memory));
     users.value = snapshot.users.map((entry) => normalizeUserProfile(entry));
@@ -2073,6 +2074,10 @@ export const useAppStore = defineStore('app', () => {
     return /^data:(?:image|audio)\//i.test(value.trim());
   }
 
+  function isLocalMediaUrl(value = '') {
+    return isInlineMediaUrl(value) || isLocalMediaCacheUrl(value);
+  }
+
   async function compactInlineDisplayImage(value = '') {
     const imageUrl = value.trim();
     if (!/^data:image\//i.test(imageUrl)) return value;
@@ -2085,7 +2090,7 @@ export const useAppStore = defineStore('app', () => {
 
   function stripInlineMediaUrl(value: string | undefined, fallback = '') {
     const normalizedValue = String(value ?? '').trim();
-    return isInlineMediaUrl(normalizedValue) ? fallback : normalizedValue;
+    return isLocalMediaUrl(normalizedValue) ? fallback : normalizedValue;
   }
 
   function stripMessageStickerCache(sticker: NonNullable<ChatMessage['sticker']>) {
@@ -2113,7 +2118,7 @@ export const useAppStore = defineStore('app', () => {
   }
 
   function isUserSentInlineImage(image: ChatImageAttachment | undefined) {
-    return Boolean(image && (image.kind === 'photo' || image.kind === 'local') && isInlineMediaUrl(image.url));
+    return Boolean(image && (image.kind === 'photo' || image.kind === 'local') && isLocalMediaUrl(image.url));
   }
 
   function stripUserSentImageAttachment(image: ChatImageAttachment): ChatImageAttachment {
@@ -2865,6 +2870,7 @@ export const useAppStore = defineStore('app', () => {
     messages.value = messages.value.filter((message) => !idSet.has(message.id));
     await Promise.all(messagesToRemove.map((message) => deleteEntity('messages', message.id)));
     await Promise.all(affectedConversationIds.map((conversationId) => touchConversationAfterMessageChange(conversationId)));
+    queueStoredMediaPrune();
     return messagesToRemove.length;
   }
 
@@ -3618,6 +3624,7 @@ export const useAppStore = defineStore('app', () => {
     if (index < 0) return;
     stickers.value.splice(index, 1);
     await deleteEntity('stickers', stickerId);
+    queueStoredMediaPrune();
   }
 
   async function deleteStickers(stickerIds: string[]) {
@@ -3627,6 +3634,7 @@ export const useAppStore = defineStore('app', () => {
     if (!deletableIds.length) return 0;
     stickers.value = stickers.value.filter((sticker) => !idSet.has(sticker.id));
     await Promise.all(deletableIds.map((stickerId) => deleteEntity('stickers', stickerId)));
+    queueStoredMediaPrune();
     return deletableIds.length;
   }
 
@@ -3732,6 +3740,7 @@ export const useAppStore = defineStore('app', () => {
       });
       await putEntity('settings', settings.value, 'main');
     }
+    queueStoredMediaPrune();
   }
 
   async function deleteCharacterProfile(characterId: string) {
@@ -3791,6 +3800,7 @@ export const useAppStore = defineStore('app', () => {
       ...relatedLocalWorldBooks.map((book) => deleteEntity('worldBooks', book.id)),
       ...(nextSettings ? [putEntity('settings', nextSettings, 'main')] : [])
     ]);
+    queueStoredMediaPrune();
   }
 
   async function clearCharacterHistory(characterId: string) {
@@ -3911,6 +3921,7 @@ export const useAppStore = defineStore('app', () => {
       ...postsToDelete.map((post) => deleteEntity('voomPosts', post.id)),
       ...postsToUpdate.map((post) => putEntity('voomPosts', post))
     ]);
+    queueStoredMediaPrune();
 
     return true;
   }
@@ -3945,6 +3956,7 @@ export const useAppStore = defineStore('app', () => {
     }
 
     await deleteEntity('worldBooks', worldBookId);
+    queueStoredMediaPrune();
   }
 
   async function compactChatImageForBackup(image: ChatImageAttachment): Promise<ChatImageAttachment> {
@@ -4356,6 +4368,7 @@ export const useAppStore = defineStore('app', () => {
   async function deleteGeneratedImage(imageId: string) {
     generatedImages.value = generatedImages.value.filter((entry) => entry.id !== imageId);
     await deleteEntity('generatedImages', imageId);
+    queueStoredMediaPrune();
   }
 
   async function refreshEnabledVendorModels() {
@@ -4501,6 +4514,7 @@ export const useAppStore = defineStore('app', () => {
       const staleIds = new Set(staleContextMessages.map((message) => message.id));
       messages.value = messages.value.filter((message) => !staleIds.has(message.id));
       await Promise.all(staleContextMessages.map((message) => deleteEntity('messages', message.id)));
+      queueStoredMediaPrune();
     }
 
     const nextConversation = { ...conversation, updatedAt: userMessage.createdAt, unreadCount: 0, activeMode: 'online' as const };
@@ -4701,14 +4715,23 @@ export const useAppStore = defineStore('app', () => {
       + estimateArrayJsonBytes(conversationMemoryAtoms.value);
   }
 
+  function queueStoredMediaPrune() {
+    void pruneUnusedStoredMediaCache().catch(() => undefined);
+  }
+
+  async function finishDataCleanup(changed: number) {
+    if (changed > 0) await pruneUnusedStoredMediaCache().catch(() => undefined);
+    return changed;
+  }
+
   async function cleanupData(action: DataCleanupAction) {
-    if (action === 'generated-images') return clearDataSections(['generatedImages']);
+    if (action === 'generated-images') return finishDataCleanup(await clearDataSections(['generatedImages']));
 
     if (action === 'message-media') {
       const nextMessages = messages.value.map((message) => stripMessageMediaCache(message));
       const changedMessages = nextMessages.filter((message, index) => JSON.stringify(message) !== JSON.stringify(messages.value[index]));
       if (changedMessages.length) await saveMessages(changedMessages);
-      return changedMessages.length;
+      return finishDataCleanup(changedMessages.length);
     }
 
     if (action === 'user-sent-images') {
@@ -4725,19 +4748,19 @@ export const useAppStore = defineStore('app', () => {
         favorites.value = normalizeFavorites(favorites.value.map((favorite) => favoriteMap.get(favorite.id) ?? favorite));
         await Promise.all(changedFavorites.map((favorite) => putEntity('favorites', toRaw(favorite))));
       }
-      return changedMessages.length + changedFavorites.length;
+      return finishDataCleanup(changedMessages.length + changedFavorites.length);
     }
 
     if (action === 'sticker-local-cache') {
       const now = Date.now();
-      const nextStickers = stickers.value.map((sticker) => ({ ...stripStickerLocalCache(sticker), updatedAt: sticker.cachedImageUrl || isInlineMediaUrl(sticker.imageUrl) ? now : sticker.updatedAt }));
+      const nextStickers = stickers.value.map((sticker) => ({ ...stripStickerLocalCache(sticker), updatedAt: sticker.cachedImageUrl || isLocalMediaUrl(sticker.imageUrl) ? now : sticker.updatedAt }));
       const changedStickers = nextStickers.filter((sticker, index) => JSON.stringify(sticker) !== JSON.stringify(stickers.value[index]));
       if (changedStickers.length) {
         const changedMap = new Map(changedStickers.map((sticker) => [sticker.id, sticker]));
         stickers.value = stickers.value.map((sticker) => changedMap.get(sticker.id) ?? sticker);
         await Promise.all(changedStickers.map((sticker) => putEntity('stickers', sticker)));
       }
-      return changedStickers.length;
+      return finishDataCleanup(changedStickers.length);
     }
 
     if (action === 'image-candidates') {
@@ -4751,14 +4774,14 @@ export const useAppStore = defineStore('app', () => {
         voomPosts.value = voomPosts.value.map((post) => postMap.get(post.id) ?? post);
         await Promise.all(changedPosts.map((post) => putEntity('voomPosts', createPersistableVoomPost(post))));
       }
-      return changedMessages.length + changedPosts.length;
+      return finishDataCleanup(changedMessages.length + changedPosts.length);
     }
 
     if (action === 'voice-audio') {
       const nextMessages = messages.value.map((message) => stripVoiceAudio(message));
       const changedMessages = nextMessages.filter((message, index) => message !== messages.value[index]);
       if (changedMessages.length) await saveMessages(changedMessages);
-      return changedMessages.length;
+      return finishDataCleanup(changedMessages.length);
     }
 
     const nextMemories = conversationMemories.value.map((memory) => stripMemoryVectorCache(memory));
@@ -4773,7 +4796,7 @@ export const useAppStore = defineStore('app', () => {
       conversationMemoryAtoms.value = [];
       await Promise.all(removedAtoms.map((atom) => deleteEntity('conversationMemoryAtoms', atom.id)));
     }
-    return changedMemories.length + removedAtoms.length;
+    return finishDataCleanup(changedMemories.length + removedAtoms.length);
   }
 
   async function clearDataSections(sectionIds: ClearableDataSection[]) {
@@ -7127,6 +7150,7 @@ export const useAppStore = defineStore('app', () => {
     if (!theater) return false;
     smallTheaters.value = smallTheaters.value.filter((entry) => entry.id !== theaterId);
     await deleteEntity('smallTheaters', theaterId);
+    queueStoredMediaPrune();
     return true;
   }
 
@@ -7897,6 +7921,7 @@ export const useAppStore = defineStore('app', () => {
       deleteEntity('voomPosts', normalizedPostId),
       relatedMessageIds.length ? deleteMessages(relatedMessageIds) : Promise.resolve(0)
     ]);
+    queueStoredMediaPrune();
     return true;
   }
 

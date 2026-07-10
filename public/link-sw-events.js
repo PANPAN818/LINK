@@ -20,6 +20,140 @@ self.addEventListener('notificationclick', (event) => {
   })());
 });
 
+const linkMediaRouteSegment = '/__link-media/';
+const linkMediaCacheName = 'link-large-media-v1';
+const linkMediaOpfsDirectoryName = 'link-large-media-v1';
+
+function getLinkMediaLocator(url) {
+  const markerIndex = url.pathname.indexOf(linkMediaRouteSegment);
+  if (markerIndex < 0) return null;
+  const parts = url.pathname.slice(markerIndex + linkMediaRouteSegment.length).split('/');
+  const backend = parts.shift();
+  const id = decodeURIComponent(parts.join('/')).trim();
+  if (!id || !['opfs', 'cache'].includes(backend)) return null;
+  return { backend, id };
+}
+
+function getLinkMediaMimeType(id) {
+  const extension = String(id.split('.').pop() || '').toLowerCase();
+  if (extension === 'svg') return 'image/svg+xml';
+  if (extension === 'png') return 'image/png';
+  if (extension === 'webp') return 'image/webp';
+  if (extension === 'gif') return 'image/gif';
+  if (extension === 'avif') return 'image/avif';
+  if (extension === 'jpg' || extension === 'jpeg') return 'image/jpeg';
+  if (extension === 'mp3') return 'audio/mpeg';
+  if (extension === 'wav') return 'audio/wav';
+  if (extension === 'webm') return 'audio/webm';
+  if (extension === 'ogg') return 'audio/ogg';
+  if (extension === 'aac') return 'audio/aac';
+  if (extension === 'flac') return 'audio/flac';
+  return 'application/octet-stream';
+}
+
+function createLinkMediaHeaders(id, storage, byteLength) {
+  return {
+    'Content-Type': getLinkMediaMimeType(id),
+    'Cache-Control': 'public, max-age=31536000, immutable',
+    'Accept-Ranges': 'bytes',
+    'Content-Length': String(byteLength),
+    'X-Link-Media-Storage': storage
+  };
+}
+
+function parseLinkMediaRange(rangeHeader, byteLength) {
+  const match = String(rangeHeader || '').match(/^bytes=(\d*)-(\d*)$/i);
+  if (!match) return null;
+
+  const startText = match[1];
+  const endText = match[2];
+  if (!startText && !endText) return null;
+
+  if (!startText) {
+    const suffixLength = Math.max(0, Number.parseInt(endText, 10) || 0);
+    if (!suffixLength) return null;
+    return {
+      start: Math.max(0, byteLength - suffixLength),
+      end: byteLength - 1
+    };
+  }
+
+  const start = Math.max(0, Number.parseInt(startText, 10) || 0);
+  const end = endText ? Math.min(byteLength - 1, Number.parseInt(endText, 10) || 0) : byteLength - 1;
+  return start <= end && start < byteLength ? { start, end } : null;
+}
+
+function createLinkMediaResponse(blob, id, storage, request) {
+  const byteLength = blob.size;
+  const range = parseLinkMediaRange(request.headers.get('range'), byteLength);
+  if (request.headers.has('range')) {
+    if (!range) {
+      return new Response('', {
+        status: 416,
+        headers: {
+          'Content-Range': `bytes */${byteLength}`,
+          'Accept-Ranges': 'bytes'
+        }
+      });
+    }
+
+    const chunk = blob.slice(range.start, range.end + 1, blob.type || getLinkMediaMimeType(id));
+    return new Response(chunk, {
+      status: 206,
+      headers: {
+        ...createLinkMediaHeaders(id, storage, chunk.size),
+        'Content-Range': `bytes ${range.start}-${range.end}/${byteLength}`
+      }
+    });
+  }
+
+  return new Response(blob, {
+    headers: createLinkMediaHeaders(id, storage, byteLength)
+  });
+}
+
+async function readLinkMediaFromOpfs(id, request) {
+  try {
+    if (!self.navigator?.storage?.getDirectory) return null;
+    const root = await self.navigator.storage.getDirectory();
+    const directory = await root.getDirectoryHandle(linkMediaOpfsDirectoryName);
+    const file = await (await directory.getFileHandle(id)).getFile();
+    return createLinkMediaResponse(file.type ? file : new Blob([file], { type: getLinkMediaMimeType(id) }), id, 'opfs', request);
+  } catch {
+    return null;
+  }
+}
+
+async function readLinkMediaFromCache(request, id) {
+  try {
+    const response = await (await caches.open(linkMediaCacheName)).match(request);
+    if (!response) return null;
+    if (!request.headers.has('range')) return response;
+    return createLinkMediaResponse(await response.blob(), id, 'cache', request);
+  } catch {
+    return null;
+  }
+}
+
+self.addEventListener('fetch', (event) => {
+  if (event.request.method !== 'GET') return;
+  const url = new URL(event.request.url);
+  if (url.origin !== self.location.origin) return;
+  const locator = getLinkMediaLocator(url);
+  if (!locator) return;
+
+  event.respondWith((async () => {
+    const response = locator.backend === 'opfs'
+      ? await readLinkMediaFromOpfs(locator.id, event.request) || await readLinkMediaFromCache(event.request, locator.id)
+      : await readLinkMediaFromCache(event.request, locator.id) || await readLinkMediaFromOpfs(locator.id, event.request);
+
+    return response || new Response('LINK media not found', {
+      status: 404,
+      headers: { 'Content-Type': 'text/plain; charset=utf-8' }
+    });
+  })());
+});
+
 self.addEventListener('message', (event) => {
   if (event.data?.type !== 'LINK_KEEP_ALIVE_PING') return;
   self.__LINK_LAST_KEEP_ALIVE_PING__ = event.data.at || Date.now();
