@@ -101,8 +101,7 @@
       <img v-if="callScreenBackgroundUrl" class="call-screen-background" :src="callScreenBackgroundUrl" alt="" aria-hidden="true" draggable="false" />
       <div class="call-visual-layer">
         <div class="call-topbar">
-          <button v-if="activeCall.mode === 'video'" class="call-mind-button" type="button" :aria-label="`查看${callPeerName}心声`" @click="openCharacterProfile">查看心声</button>
-          <span v-else>{{ callModeLabel }}</span>
+          <button class="call-mind-button" type="button" :aria-label="`查看${callPeerName}心声`" @click="openCharacterProfile">查看心声</button>
           <span class="call-topbar-actions">
             <button v-if="activeCall.status !== 'ended'" type="button" aria-label="最小化通话" @click="minimizeActiveCall">
               <Minimize :size="18" />
@@ -122,10 +121,6 @@
         </section>
 
         <section v-else class="call-profile" :class="{ active: activeCall.status === 'active' }">
-          <button class="call-avatar-wrap" type="button" :aria-label="`查看${callPeerName}主页`" @click="openCharacterProfile">
-            <img :src="character.avatar" :alt="callPeerName" />
-            <span class="call-ring" aria-hidden="true"></span>
-          </button>
           <h2>{{ callPeerName }}</h2>
           <p>{{ callPrimaryStatus }}</p>
           <span>{{ activeCallDurationLabel }}</span>
@@ -3712,42 +3707,6 @@ onBeforeUnmount(() => {
   padding-top: 56px;
 }
 
-.call-avatar-wrap {
-  position: relative;
-  display: grid;
-  width: 116px;
-  height: 116px;
-  place-items: center;
-  border: 0;
-  background: transparent;
-  color: inherit;
-  cursor: pointer;
-  padding: 0;
-}
-
-.call-avatar-wrap::before {
-  display: none;
-}
-
-.call-avatar-wrap img {
-  position: relative;
-  z-index: 1;
-  width: 96px;
-  height: 96px;
-  border: 2px solid rgba(255, 255, 255, 0.7);
-  border-radius: 50%;
-  object-fit: cover;
-  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.28);
-}
-
-.call-ring {
-  position: absolute;
-  inset: 0;
-  border: 1px solid rgba(255, 255, 255, 0.42);
-  border-radius: 50%;
-  animation: call-ring-pulse 1.8s ease-out infinite;
-}
-
 .call-profile h2 {
   max-width: min(78vw, 360px);
   margin: 12px 0 5px;
@@ -4168,17 +4127,6 @@ onBeforeUnmount(() => {
   font-size: 9.5px;
   font-weight: 720;
   line-height: 1.2;
-}
-
-@keyframes call-ring-pulse {
-  0% {
-    opacity: 0.8;
-    transform: scale(0.82);
-  }
-  100% {
-    opacity: 0;
-    transform: scale(1.28);
-  }
 }
 
 .listen-status-strip {
