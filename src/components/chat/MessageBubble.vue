@@ -287,6 +287,7 @@ const props = withDefaults(defineProps<{
   user?: UserProfile;
   appearance?: ChatAppearanceSettings;
   hideAvatar?: boolean;
+  hideMessageTime?: boolean;
   profileAlert?: boolean;
   canRegenerateImage?: boolean;
   regeneratingImage?: boolean;
@@ -301,6 +302,7 @@ const props = withDefaults(defineProps<{
   canRegenerateImage: false,
   canQuote: false,
   hideAvatar: false,
+  hideMessageTime: false,
   profileAlert: false,
   regeneratingImage: false,
   selectionMode: false,
@@ -680,7 +682,7 @@ const voicePlaybackLabel = computed(() => {
 });
 
 const isSystemNarration = computed(() => props.message.sender === 'system' && props.message.displayStyle === 'narration');
-const showMessageTime = computed(() => props.appearance.showMessageTime && !isSystemNarration.value && !props.message.voomEventType && !props.message.voomPostId);
+const showMessageTime = computed(() => props.appearance.showMessageTime && !props.hideMessageTime && !isSystemNarration.value && !props.message.voomEventType && !props.message.voomPostId);
 const showReadState = computed(() => props.appearance.showReadStatus && messageVisualSender.value !== 'system' && !props.message.voomEventType && !props.message.voomPostId);
 const showMessageMeta = computed(() => showMessageTime.value || showReadState.value);
 

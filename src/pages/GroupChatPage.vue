@@ -20,7 +20,7 @@
         {{ loadingEarlierMessages ? '正在加载' : '上滑加载更早消息' }}
       </button>
       <template v-for="entry in messageEntries" :key="entry.message.id">
-        <div v-if="entry.timeLabel" class="message-time-divider"><time>{{ entry.timeLabel }}</time></div>
+        <div v-if="entry.timeLabel && entry.message.sender !== 'system'" class="message-time-divider"><time>{{ entry.timeLabel }}</time></div>
         <MessageBubble
           :message="entry.message"
           :character="characterForMessage(entry.message)"
@@ -30,6 +30,7 @@
           :author-name="entry.message.authorName || '群成员'"
           :show-author-name="entry.message.sender === 'char'"
           :hide-avatar="shouldHideAvatar(entry.messageIndex)"
+          :hide-message-time="entry.message.sender === 'system'"
           :selection-mode="selectionMode"
           :selected="isMessageSelected(entry.message)"
           :can-quote="canQuoteMessage(entry.message)"

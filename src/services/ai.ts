@@ -3215,21 +3215,28 @@ export interface GroupChatReplyResult {
   membershipDecision: 'approve' | 'reject' | null;
 }
 
-function replaceGroupWorldBookTokens(value: string, character: CharacterProfile, user: UserProfile) {
-  const characterName = getCharacterAiName(character);
-  const userName = getUserAiName(user);
-  return value
-    .replace(/\{\{\s*char\s*\}\}/gi, characterName)
-    .replace(/<\s*char\s*>/gi, characterName)
-    .replace(/\bChar\b/g, characterName)
-    .replace(/\bchar\b/g, characterName)
-    .replace(/\{\{\s*user\s*\}\}/gi, userName)
-    .replace(/<\s*user\s*>/gi, userName)
-    .replace(/\bUser\b/g, userName)
-    .replace(/\buser\b/g, userName);
+function replaceGroupPromptTokens(value: string, characterName: string, userName: string) {
+  let result = value;
+  if (characterName) {
+    result = result
+      .replace(/\{\{\s*char\s*\}\}/gi, characterName)
+      .replace(/<\s*char\s*>/gi, characterName)
+      .replace(/\bChar\b/g, characterName)
+      .replace(/\bchar\b/g, characterName);
+  }
+  if (userName) {
+    result = result
+      .replace(/\{\{\s*user\s*\}\}/gi, userName)
+      .replace(/<\s*user\s*>/gi, userName)
+      .replace(/\bUser\b/g, userName)
+      .replace(/\buser\b/g, userName);
+  }
+  return result;
 }
 
 function renderGroupWorldBooks(books: WorldBookEntry[], character: CharacterProfile, user: UserProfile, activationText: string) {
+  const characterName = getCharacterAiName(character);
+  const userName = getUserAiName(user);
   const normalizedActivationText = activationText.toLocaleLowerCase();
   return books
     .filter((book) => book.enabled)
@@ -3249,8 +3256,8 @@ function renderGroupWorldBooks(books: WorldBookEntry[], character: CharacterProf
         return first.order - second.order;
       })
       .map((entry) => [
-        `【${replaceGroupWorldBookTokens(book.title || '未命名世界书', character, user)} / ${replaceGroupWorldBookTokens(entry.title || '未命名条目', character, user)}】`,
-        replaceGroupWorldBookTokens(entry.content, character, user)
+        `【${replaceGroupPromptTokens(book.title || '未命名世界书', characterName, userName)} / ${replaceGroupPromptTokens(entry.title || '未命名条目', characterName, userName)}】`,
+        replaceGroupPromptTokens(entry.content, characterName, userName)
       ].join('\n')))
     .join('\n\n');
 }
@@ -3293,15 +3300,17 @@ export async function discoverGeneratedGroups(input: {
   const canonicalUserName = getUserAiName(input.user);
   const characterContext = input.characters.map((entry) => {
     const characterName = getCharacterAiName(entry.character);
-    const lore = entry.localWorldBooks.flatMap((book) => book.entries.filter((item) => item.enabled).map((item) => `${book.title}/${item.title}: ${item.content}`)).join('\n');
+    const replaceTokens = (value: string) => replaceGroupPromptTokens(value, characterName, canonicalUserName);
+    const lore = entry.localWorldBooks.flatMap((book) => book.entries.filter((item) => item.enabled).map((item) => `${replaceTokens(book.title)}/${replaceTokens(item.title)}: ${replaceTokens(item.content)}`)).join('\n');
     return [
       `角色ID：${entry.character.id}`,
       `角色真名：${characterName}`,
-      `角色当前网名（仅社交资料，禁止代替真名）：${entry.character.nickname}`,
-      `角色设定：${entry.character.description}`,
-      `会话总结：${entry.conversationSummary || '暂无'}`,
-      `记忆手册：${entry.memorySummary || '暂无'}`,
-      `近期线上/线下共同楼层：${entry.recentConversation || '暂无'}`,
+      `角色当前网名（仅社交资料，禁止代替真名）：${replaceTokens(entry.character.nickname)}`,
+      `角色设定：${replaceTokens(entry.character.description)}`,
+      `当前用户设定：${replaceTokens(input.user.description) || '暂无'}`,
+      `会话总结：${replaceTokens(entry.conversationSummary) || '暂无'}`,
+      `记忆手册：${replaceTokens(entry.memorySummary) || '暂无'}`,
+      `近期线上/线下共同楼层：${replaceTokens(entry.recentConversation) || '暂无'}`,
       `角色局部世界书：${lore || '暂无'}`
     ].join('\n');
   }).join('\n\n---\n\n');
@@ -3378,7 +3387,9 @@ export async function generateGroupChatReply(input: {
   const currentCharacterById = new Map(input.characterContexts.map((entry) => [entry.character.id, entry.character]));
   const memberTable = input.members.map((member) => {
     const currentCharacter = member.identityType === 'character' && member.identityId ? currentCharacterById.get(member.identityId) : undefined;
-    const currentDescription = currentCharacter?.description || (member.identityType === 'user' ? input.user.description : member.description);
+    const currentDescription = member.identityType === 'user'
+      ? '见各角色专属上下文中的当前用户设定'
+      : replaceGroupPromptTokens(currentCharacter?.description || member.description || '', currentCharacter ? getCharacterAiName(currentCharacter) : member.trueName, canonicalUserName);
     return `${member.id} | ${member.identityType} | 真名:${member.trueName} | 当前群昵称:${member.nickname} | 身份:${member.role} | 设定:${currentDescription || '无'}`;
   }).join('\n');
   const globalWorldBooks = input.worldBooks.filter((book) => book.scope === (mode === 'online' ? 'global-online' : 'global-offline'));
@@ -3386,6 +3397,7 @@ export async function generateGroupChatReply(input: {
   const characterContext = input.characterContexts.map((entry) => {
     const character = entry.character;
     const characterName = getCharacterAiName(character);
+    const replaceTokens = (value: string) => replaceGroupPromptTokens(value, characterName, canonicalUserName);
     const worldBookContext = renderGroupWorldBooks(
       [...globalWorldBooks, ...entry.localWorldBooks],
       character,
@@ -3394,11 +3406,13 @@ export async function generateGroupChatReply(input: {
     );
     return [
       `【${characterName}（${character.id}）的专属扮演上下文】`,
-      `角色设定：${character.description || '暂无'}`,
-      `角色 LINK 资料：网名「${character.nickname || characterName}」；签名「${character.signature || '暂无'}」`,
-      `与${canonicalUserName}的一对一会话总结：${entry.conversationSummary || '暂无'}`,
-      `与${canonicalUserName}的一对一记忆手册：${entry.memorySummary || '暂无'}`,
-      `与${canonicalUserName}的近期一对一线上/线下对话：\n${entry.recentConversation || '暂无'}`,
+      `角色设定：${replaceTokens(character.description) || '暂无'}`,
+      `角色 LINK 资料：网名「${replaceTokens(character.nickname) || characterName}」；签名「${replaceTokens(character.signature) || '暂无'}」`,
+      `当前用户设定：${replaceTokens(input.user.description) || '暂无'}`,
+      `当前用户 LINK 资料：网名「${replaceTokens(input.user.nickname) || canonicalUserName}」；签名「${replaceTokens(input.user.signature) || '暂无'}」`,
+      `与${canonicalUserName}的一对一会话总结：${replaceTokens(entry.conversationSummary) || '暂无'}`,
+      `与${canonicalUserName}的一对一记忆手册：${replaceTokens(entry.memorySummary) || '暂无'}`,
+      `与${canonicalUserName}的近期一对一线上/线下对话：\n${replaceTokens(entry.recentConversation) || '暂无'}`,
       `该角色可用世界书：\n${worldBookContext || '无启用或命中的条目'}`,
       `知识边界：这一段只允许用于扮演${characterName}。其他群成员不能因为模型看到了这段内容就知道其中的私聊、记忆或局部世界书；除非相关事实已经在群聊中公开或被当事人转述。`
     ].join('\n');
@@ -3409,8 +3423,6 @@ export async function generateGroupChatReply(input: {
 群名：${input.groupName}
 群公告：${input.announcement || '无'}
 当前用户真名：${canonicalUserName}
-当前用户设定：${input.user.description || '暂无'}
-当前用户 LINK 资料：网名「${input.user.nickname || canonicalUserName}」；签名「${input.user.signature || '暂无'}」
 当前用户群成员状态：${input.membershipStatus || 'active'}
 成员表：
 ${memberTable}
@@ -3419,7 +3431,7 @@ ${memberTable}
 ${characterContext || '暂无'}
 
 当前群聊记忆：
-${input.memorySummary || '暂无'}
+${replaceGroupPromptTokens(input.memorySummary, '', canonicalUserName) || '暂无'}
 
 最近群聊（每行均使用真实名）：
 ${input.history || '暂无'}

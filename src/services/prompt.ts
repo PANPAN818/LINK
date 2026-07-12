@@ -660,9 +660,9 @@ function entryActivationLabel(entry: WorldBookLoreEntry) {
   }[entry.activation];
 }
 
-function replaceWorldBookTokens(value: string, context: PromptContext) {
+function replacePromptIdentityTokens(value: string, context: PromptContext) {
   const characterName = getCharacterAiName(context.character);
-  const userName = getUserAiName(context.user);
+  const userName = getUserAiName(context.boundUser) || getUserAiName(context.user);
   return value
     .replace(/\{\{\s*char\s*\}\}/gi, characterName)
     .replace(/<\s*char\s*>/gi, characterName)
@@ -725,11 +725,11 @@ function normalizePromptIdentityText(value: string, context: PromptContext) {
 
 function renderLoreEntry(book: WorldBookEntry, entry: WorldBookLoreEntry, context: PromptContext) {
   return [
-    `【${replaceWorldBookTokens(book.title || '未命名世界书', context)} / ${replaceWorldBookTokens(entry.title || '未命名条目', context)}】`,
+    `【${replacePromptIdentityTokens(book.title || '未命名世界书', context)} / ${replacePromptIdentityTokens(entry.title || '未命名条目', context)}】`,
     `状态：${entryActivationLabel(entry)}；顺序 ${entry.order}；深度 ${entry.depth}；位置 ${entry.position === 'before-chat' ? '对话前' : '对话后'}`,
-    entry.keys.length ? `主关键词：${entry.keys.map((key) => replaceWorldBookTokens(key, context)).join('、')}` : '',
-    entry.secondaryKeys.length ? `辅助关键词：${entry.secondaryKeys.map((key) => replaceWorldBookTokens(key, context)).join('、')}` : '',
-    replaceWorldBookTokens(entry.content, context)
+    entry.keys.length ? `主关键词：${entry.keys.map((key) => replacePromptIdentityTokens(key, context)).join('、')}` : '',
+    entry.secondaryKeys.length ? `辅助关键词：${entry.secondaryKeys.map((key) => replacePromptIdentityTokens(key, context)).join('、')}` : '',
+    replacePromptIdentityTokens(entry.content, context)
   ].filter(Boolean).join('\n');
 }
 
@@ -845,13 +845,13 @@ export function buildPrompt(context: PromptContext, options: { includeOnlineChat
   return [
     replaceTokens(`${baseRoleplayPrompt}\n\n${strictRoleplayRules}\n\n${outputPrompt}`, {
       '{{char}}': characterName,
-      '{{char_nickname}}': context.character.nickname,
-      '{{char_signature}}': context.character.signature,
-      '{{char_description}}': context.character.description,
+      '{{char_nickname}}': replacePromptIdentityTokens(context.character.nickname, context),
+      '{{char_signature}}': replacePromptIdentityTokens(context.character.signature, context),
+      '{{char_description}}': replacePromptIdentityTokens(context.character.description, context),
       '{{user}}': userName,
-      '{{user_description}}': context.user.description,
-      '{{bound_user_nickname}}': context.boundUser.nickname,
-      '{{bound_user_signature}}': context.boundUser.signature
+      '{{user_description}}': replacePromptIdentityTokens(context.user.description, context),
+      '{{bound_user_nickname}}': replacePromptIdentityTokens(context.boundUser.nickname, context),
+      '{{bound_user_signature}}': replacePromptIdentityTokens(context.boundUser.signature, context)
     }),
     modeInstructions[context.mode],
     context.mode === 'offline' ? renderOfflineSettingsPrompt(context.offlineSettings, context) : '',
