@@ -52,7 +52,7 @@ jobs:
           mkdir -p build/Payload
           cp -R "$app" build/Payload/BabyLink.app
           (cd build && ditto -c -k --sequesterRsrc --keepParent Payload BabyLink-unsigned-1.0.0.ipa)
-          shasum -a 256 build/BabyLink-unsigned-1.0.0.ipa | tee build/BabyLink-unsigned-1.0.0.ipa.sha256
+          (cd build && shasum -a 256 BabyLink-unsigned-1.0.0.ipa | tee BabyLink-unsigned-1.0.0.ipa.sha256)
 
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4

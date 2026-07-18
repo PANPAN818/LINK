@@ -392,7 +392,7 @@ export default defineConfig({
     vue(),
     VitePWA({
       registerType: 'prompt',
-      includeAssets: ['link-icon.png', 'default-ringtone.mp3', 'link-sw-events.js'],
+      includeAssets: ['link-icon.png', 'link-icon-maskable.png', 'default-ringtone.mp3', 'link-sw-events.js'],
       manifest: {
         id: base,
         name: 'Link',
@@ -409,7 +409,13 @@ export default defineConfig({
             src: 'link-icon.png',
             sizes: '512x512',
             type: 'image/png',
-            purpose: 'any maskable'
+            purpose: 'any'
+          },
+          {
+            src: 'link-icon-maskable.png',
+            sizes: '512x512',
+            type: 'image/png',
+            purpose: 'maskable'
           }
         ]
       },
