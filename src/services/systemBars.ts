@@ -1,4 +1,5 @@
 import { Capacitor, SystemBarType, SystemBars, SystemBarsStyle } from '@capacitor/core';
+import { setNativeDisplayFullscreen } from './nativeDisplay';
 
 const fullscreenStorageKey = 'link:fullscreen-enabled';
 let listenersInstalled = false;
@@ -38,6 +39,7 @@ async function waitForFullscreenOperation(operation: Promise<void> | void) {
 
 async function syncNativeStatusBar() {
   try {
+    if (await setNativeDisplayFullscreen(fullscreenEnabled)) return true;
     await SystemBars.setStyle({ style: SystemBarsStyle.Light });
     if (fullscreenEnabled) await SystemBars.hide({ bar: SystemBarType.StatusBar });
     else await SystemBars.show({ bar: SystemBarType.StatusBar });

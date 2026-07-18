@@ -13,7 +13,9 @@ public class MainActivity extends BridgeActivity {
 	public void onCreate(Bundle savedInstanceState) {
 		registerPlugin(LinkUpdaterPlugin.class);
 		registerPlugin(LinkKeepAlivePlugin.class);
+		registerPlugin(LinkDisplayPlugin.class);
 		super.onCreate(savedInstanceState);
+		LinkDisplayPlugin.applyStoredFullscreen(this);
 		getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
 			@Override
 			public void handleOnBackPressed() {
@@ -26,6 +28,18 @@ public class MainActivity extends BridgeActivity {
 				else webView.loadUrl(APP_HOME_URL);
 			}
 		});
+	}
+
+	@Override
+	protected void onResume() {
+		super.onResume();
+		LinkDisplayPlugin.applyStoredFullscreen(this);
+	}
+
+	@Override
+	public void onWindowFocusChanged(boolean hasFocus) {
+		super.onWindowFocusChanged(hasFocus);
+		if (hasFocus) LinkDisplayPlugin.applyStoredFullscreen(this);
 	}
 
 	static boolean isRootPath(String path) {
