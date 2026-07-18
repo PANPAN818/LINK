@@ -42,6 +42,15 @@ jobs:
           npm run build
           npx cap sync android
 
+      - name: Read Android version
+        id: version
+        run: |
+          version_code="$(sed -nE 's/^[[:space:]]*versionCode[[:space:]]+([0-9]+).*$/\1/p' android/app/build.gradle | head -n 1)"
+          version_name="$(sed -nE 's/^[[:space:]]*versionName[[:space:]]+"([^"]+)".*$/\1/p' android/app/build.gradle | head -n 1)"
+          test -n "$version_code"
+          test -n "$version_name"
+          printf 'version_code=%s\nversion_name=%s\n' "$version_code" "$version_name" >> "$GITHUB_OUTPUT"
+
       - name: Configure release signing
         env:
           KEYSTORE_BASE64: ${{ secrets.BABYLINK_ANDROID_KEYSTORE_BASE64 }}
@@ -63,29 +72,38 @@ jobs:
 
       - name: Build signed release
         working-directory: android
-        run: ./gradlew --no-daemon assembleRelease
+        run: ./gradlew --no-daemon testReleaseUnitTest assembleRelease
 
       - name: Verify and package APK
+        env:
+          VERSION_CODE: ${{ steps.version.outputs.version_code }}
+          VERSION_NAME: ${{ steps.version.outputs.version_name }}
         run: |
           apk=android/app/build/outputs/apk/release/app-release.apk
           test -s "$apk"
           apksigner="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
+          aapt="$(find "$ANDROID_HOME/build-tools" -type f -name aapt | sort -V | tail -n 1)"
           test -x "$apksigner"
+          test -x "$aapt"
           "$apksigner" verify --verbose --print-certs "$apk" | tee build-apksigner.txt
           grep -F 'Verified using v2 scheme (APK Signature Scheme v2): true' build-apksigner.txt
           expected="$(tr -d ':\r\n' < android/release-certificate.sha256 | tr 'A-F' 'a-f')"
           actual="$(sed -n 's/^V2 Signer: certificate SHA-256 digest: //p' build-apksigner.txt | head -n 1)"
           test "$actual" = "$expected"
+          "$aapt" dump badging "$apk" | head -n 1 | tee build-android-version.txt
+          grep -F "versionCode='$VERSION_CODE'" build-android-version.txt
+          grep -F "versionName='$VERSION_NAME'" build-android-version.txt
           mkdir -p build/android-release
-          cp "$apk" build/android-release/BabyLink-1.0.0-android.apk
-          (cd build/android-release && sha256sum BabyLink-1.0.0-android.apk | tee BabyLink-1.0.0-android.apk.sha256)
+          output="BabyLink-$VERSION_NAME-android.apk"
+          cp "$apk" "build/android-release/$output"
+          (cd build/android-release && sha256sum "$output" | tee "$output.sha256")
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: BabyLink-android-1.0.0
+          name: BabyLink-android-${{ steps.version.outputs.version_name }}
           path: |
-            build/android-release/BabyLink-1.0.0-android.apk
-            build/android-release/BabyLink-1.0.0-android.apk.sha256
+            build/android-release/BabyLink-${{ steps.version.outputs.version_name }}-android.apk
+            build/android-release/BabyLink-${{ steps.version.outputs.version_name }}-android.apk.sha256
           if-no-files-found: error
           retention-days: 14
