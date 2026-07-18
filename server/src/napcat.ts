@@ -3,6 +3,7 @@ import type { WebSocket } from 'ws';
 import { config } from './config.js';
 import { query, transaction } from './db.js';
 import { recordAudit, revokeSessionsWithoutMembership, updateMembership, verifyChallengeFromGroup } from './auth.js';
+import { getNapCatRuntimeStatus, setNapCatRuntimeStatus } from './napcatState.js';
 
 interface OneBotEvent {
   post_type?: string;
@@ -28,6 +29,11 @@ interface OneBotGroupMember {
   nickname?: string;
   card?: string;
   role?: string;
+}
+
+interface OneBotStatus {
+  online?: boolean;
+  good?: boolean;
 }
 
 let activeSocket: WebSocket | null = null;
@@ -154,8 +160,29 @@ async function applyGroupSnapshot(groupId: string, members: OneBotGroupMember[])
   for (const user of registeredUsers.rows) await revokeSessionsWithoutMembership(user.qq);
 }
 
+async function checkNapCatOnline() {
+  if (!activeSocket || activeSocket.readyState !== 1) {
+    setNapCatRuntimeStatus({ connected: false, online: false, checkedAt: Date.now() });
+    return false;
+  }
+  try {
+    const data = await sendAction('get_status', {}) as OneBotStatus | null;
+    const online = Boolean(data?.online && data?.good !== false);
+    const previous = getNapCatRuntimeStatus();
+    setNapCatRuntimeStatus({ connected: true, online, checkedAt: Date.now() });
+    if (previous.online !== online) await recordAudit(online ? 'napcat.online' : 'napcat.offline');
+    return online;
+  } catch (error) {
+    setNapCatRuntimeStatus({ connected: true, online: false, checkedAt: Date.now() });
+    await recordAudit('napcat.status.failed', '', { message: error instanceof Error ? error.message : String(error) });
+    return false;
+  }
+}
+
 export async function syncAllowedGroups() {
-  if (!activeSocket || activeSocket.readyState !== 1) return { connected: false, synced: 0 };
+  if (!activeSocket || activeSocket.readyState !== 1) return { connected: false, online: false, synced: 0 };
+  const online = await checkNapCatOnline();
+  if (!online) return { connected: true, online: false, synced: 0 };
   const groups = await query<{ group_id: string }>('SELECT group_id FROM allowed_groups WHERE enabled = TRUE ORDER BY group_id');
   let synced = 0;
   for (const group of groups.rows) {
@@ -169,7 +196,7 @@ export async function syncAllowedGroups() {
     }
   }
   if (synced) await recordAudit('napcat.group_sync.completed', '', { synced });
-  return { connected: true, synced };
+  return { connected: true, online: true, synced };
 }
 
 export async function registerNapCat(app: FastifyInstance) {
@@ -180,6 +207,7 @@ export async function registerNapCat(app: FastifyInstance) {
     }
     activeSocket?.close(1012, 'Replaced by newer NapCat connection');
     activeSocket = socket;
+    setNapCatRuntimeStatus({ connected: true, online: false, checkedAt: 0 });
     void recordAudit('napcat.connected');
 
     socket.on('message', (rawData) => {
@@ -194,6 +222,7 @@ export async function registerNapCat(app: FastifyInstance) {
     });
     socket.on('close', () => {
       if (activeSocket === socket) activeSocket = null;
+      setNapCatRuntimeStatus({ connected: false, online: false, checkedAt: Date.now() });
       for (const [echo, pending] of pendingActions) {
         clearTimeout(pending.timer);
         pending.reject(new Error('NapCat connection closed.'));
@@ -213,6 +242,11 @@ export async function registerNapCat(app: FastifyInstance) {
   });
 
   const timer = setInterval(() => void syncAllowedGroups(), config.groupSyncMinutes * 60 * 1000);
+  const statusTimer = setInterval(() => void checkNapCatOnline(), 30_000);
   timer.unref();
-  app.addHook('onClose', async () => clearInterval(timer));
+  statusTimer.unref();
+  app.addHook('onClose', async () => {
+    clearInterval(timer);
+    clearInterval(statusTimer);
+  });
 }

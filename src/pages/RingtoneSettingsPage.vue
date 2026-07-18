@@ -64,13 +64,13 @@
           </article>
 
           <div class="keepalive-states" aria-label="保活状态">
-            <span :class="['keepalive-state', { active: keepAliveStatus.silentAudioActive || keepAliveStatus.webAudioActive }]">
+            <span :class="['keepalive-state', { active: keepAliveStatus.native ? keepAliveStatus.nativeServiceActive : keepAliveStatus.silentAudioActive || keepAliveStatus.webAudioActive }]">
               <VolumeX :size="15" />
               <span>
-                <b>音频保活</b>
-                <small>静音通道</small>
+                <b>{{ keepAliveStatus.native ? '原生前台服务' : '音频保活' }}</b>
+                <small>{{ keepAliveStatus.native ? 'Foreground' : '静音通道' }}</small>
               </span>
-              <em>{{ audioStateLabel }}</em>
+              <em>{{ keepAliveStatus.native ? nativeServiceStateLabel : audioStateLabel }}</em>
             </span>
             <span :class="['keepalive-state', { active: keepAliveStatus.notificationPermission === 'granted', warn: keepAliveStatus.notificationPermission === 'denied' }]">
               <BellRing :size="15" />
@@ -80,11 +80,11 @@
               </span>
               <em>{{ notificationStateLabel }}</em>
             </span>
-            <span :class="['keepalive-state', { active: keepAliveStatus.wakeLockActive, muted: !keepAliveStatus.wakeLockSupported }]">
+            <span :class="['keepalive-state', { active: keepAliveStatus.native ? keepAliveStatus.nativeWakeLockActive : keepAliveStatus.wakeLockActive, muted: !keepAliveStatus.wakeLockSupported }]">
               <ShieldCheck :size="15" />
               <span>
-                <b>亮屏守护</b>
-                <small>屏幕唤醒</small>
+                <b>{{ keepAliveStatus.native ? '后台唤醒' : '亮屏守护' }}</b>
+                <small>{{ keepAliveStatus.native ? 'CPU Wake Lock' : '屏幕唤醒' }}</small>
               </span>
               <em>{{ wakeStateLabel }}</em>
             </span>
@@ -95,8 +95,13 @@
             <span>授权通知</span>
           </button>
 
+          <button v-if="keepAliveStatus.native && !keepAliveStatus.batteryOptimizationsIgnored" class="keepalive-auth" type="button" @click="authorizeNativeBackground">
+            <ShieldCheck :size="14" />
+            <span>允许忽略电池优化</span>
+          </button>
+
           <div class="keepalive-options">
-            <label :class="['keepalive-option', { active: keepAliveSettings.silentAudio }]">
+            <label v-if="!keepAliveStatus.native" :class="['keepalive-option', { active: keepAliveSettings.silentAudio }]">
               <VolumeX :size="16" />
               <span>
                 <b>静音音频</b>
@@ -117,8 +122,8 @@
             <label :class="['keepalive-option', { active: keepAliveSettings.wakeLock }]">
               <ShieldCheck :size="16" />
               <span>
-                <b>亮屏守护</b>
-                <small>Wake</small>
+                <b>{{ keepAliveStatus.native ? '后台唤醒' : '亮屏守护' }}</b>
+                <small>{{ keepAliveStatus.native ? 'CPU' : 'Wake' }}</small>
               </span>
               <input type="checkbox" :checked="keepAliveSettings.wakeLock" @change="updateKeepAliveOption('wakeLock', $event)" />
               <i aria-hidden="true"></i>
@@ -333,7 +338,7 @@ import { useRouter } from 'vue-router';
 import { AlertCircle, BatteryCharging, BellRing, CheckCircle2, Clapperboard, Cloud, Download, LoaderCircle, MessageCircle, Music2, Phone, Power, RadioTower, RefreshCw, RotateCcw, ShieldCheck, Smartphone, Undo2, Upload, Volume2, VolumeX } from 'lucide-vue-next';
 import { checkForAppUpdate, getAppUpdateStatus, installDownloadedAppUpdate, refreshAppUpdateStatus, subscribeAppUpdateStatus, type AppUpdateStatus } from '@/services/appUpdate';
 import { checkNativeRelease, createInitialNativeReleaseStatus, openNativeReleaseDownload, type NativeReleaseStatus } from '@/services/nativeRelease';
-import { getKeepAliveStatus, requestKeepAliveNotificationPermission, startKeepAlive, stopKeepAlive, subscribeKeepAliveStatus, type KeepAliveRuntimeStatus } from '@/services/keepAlive';
+import { getKeepAliveStatus, requestKeepAliveNotificationPermission, requestNativeKeepAliveBatteryAccess, startKeepAlive, stopKeepAlive, subscribeKeepAliveStatus, type KeepAliveRuntimeStatus } from '@/services/keepAlive';
 import { useAppStore } from '@/stores/appStore';
 import type { AppKeepAliveSettings, AppRingtoneSettings, RingtoneAsset, RingtoneEventType } from '@/types/domain';
 import { getCharacterDisplayName } from '@/utils/character';
@@ -406,22 +411,30 @@ let unsubscribeAppUpdateStatus: (() => void) | null = null;
 const activeTabMeta = computed(() => tabs.find((tab) => tab.id === activeTab.value) ?? tabs[0]);
 const keepAliveSettings = computed(() => normalizeKeepAliveSettings(store.settings?.keepAlive));
 const ringtoneSettings = computed(() => normalizeRingtoneSettings(store.settings?.ringtoneSettings));
-const keepAliveModeLabel = computed(() => keepAliveStatus.value.enabled ? 'Active' : 'Ready');
+const keepAliveModeLabel = computed(() => {
+  if (!keepAliveStatus.value.enabled) return 'Ready';
+  if (keepAliveStatus.value.native) return keepAliveStatus.value.nativeServiceActive ? 'Native' : 'Starting';
+  return 'Active';
+});
 const keepAliveSummary = computed(() => {
-  if (!keepAliveStatus.value.enabled) return '静音音频、系统通知与心跳恢复';
+  if (!keepAliveStatus.value.enabled) return keepAliveStatus.value.native ? '原生前台服务、通知与后台唤醒' : '静音音频、系统通知与心跳恢复';
+  if (keepAliveStatus.value.nativeServiceActive) return 'Android 前台服务正在守护后台任务';
   if (keepAliveStatus.value.silentAudioActive || keepAliveStatus.value.webAudioActive) return '音频通道已保持，通知会自动合并';
   return '等待一次触摸恢复音频通道';
 });
 const keepAliveSignal = computed(() => {
   if (!keepAliveStatus.value.enabled) return '未开启';
+  if (keepAliveStatus.value.native) return keepAliveStatus.value.nativeServiceActive ? '原生运行' : '启动中';
   if (keepAliveStatus.value.silentAudioActive || keepAliveStatus.value.webAudioActive) return '运行中';
   return '待恢复';
 });
 const keepAlivePlatformLabel = computed(() => {
   const platformLabel = keepAliveStatus.value.platform === 'ios' ? 'iOS' : keepAliveStatus.value.platform === 'android' ? 'Android' : 'Desktop';
+  if (keepAliveStatus.value.native) return `${platformLabel} App`;
   return keepAliveStatus.value.standalone ? `${platformLabel} PWA` : platformLabel;
 });
 const audioStateLabel = computed(() => keepAliveStatus.value.silentAudioActive || keepAliveStatus.value.webAudioActive ? '运行' : keepAliveSettings.value.silentAudio ? '待机' : '关闭');
+const nativeServiceStateLabel = computed(() => keepAliveStatus.value.nativeServiceActive ? '运行' : keepAliveStatus.value.enabled ? '启动中' : '关闭');
 const notificationStateLabel = computed(() => {
   if (!keepAliveStatus.value.notificationSupported) return '不支持';
   if (keepAliveStatus.value.notificationPermission === 'granted') return '允许';
@@ -430,7 +443,7 @@ const notificationStateLabel = computed(() => {
 });
 const wakeStateLabel = computed(() => {
   if (!keepAliveStatus.value.wakeLockSupported) return '受限';
-  if (keepAliveStatus.value.wakeLockActive) return '运行';
+  if (keepAliveStatus.value.native ? keepAliveStatus.value.nativeWakeLockActive : keepAliveStatus.value.wakeLockActive) return '运行';
   return keepAliveSettings.value.wakeLock ? '待机' : '关闭';
 });
 const canRequestNotificationPermission = computed(() => keepAliveSettings.value.notifications
@@ -439,6 +452,8 @@ const canRequestNotificationPermission = computed(() => keepAliveSettings.value.
 const keepAliveAlert = computed(() => {
   if (notificationAuthMessage.value) return notificationAuthMessage.value;
   if (keepAliveStatus.value.lastError) return keepAliveStatus.value.lastError;
+  if (keepAliveStatus.value.native && !keepAliveStatus.value.batteryOptimizationsIgnored) return '请允许忽略电池优化，减少系统在锁屏后停止后台服务。';
+  if (keepAliveStatus.value.native && keepAliveStatus.value.enabled) return '原生前台服务已启用；Android 会显示一条不可滑除的保活通知。';
   if (keepAliveStatus.value.platform === 'ios' && !keepAliveStatus.value.standalone) return 'iOS 浏览器模式下，后台通知与音频会更容易被系统收紧。';
   if (keepAliveStatus.value.platform === 'android' && !keepAliveStatus.value.wakeLockSupported) return '当前 Android WebView 未开放亮屏守护，保活会使用音频与通知。';
   if (keepAliveStatus.value.notificationPermission === 'denied') return '系统通知权限已拒绝，角色事件仍会播放铃声。';
@@ -703,10 +718,16 @@ async function authorizeNotifications() {
   notificationAuthMessage.value = '正在请求通知权限...';
   const permission = await requestKeepAliveNotificationPermission();
   if (permission === 'granted') notificationAuthMessage.value = '通知已授权，角色消息和 VOOM 会通过系统通知提醒。';
-  else if (permission === 'denied') notificationAuthMessage.value = '通知权限已被拒绝，请在浏览器或系统设置里手动允许。';
+  else if (permission === 'denied') notificationAuthMessage.value = `通知权限已被拒绝，请在${keepAliveStatus.value.native ? '应用' : '浏览器或系统'}设置里手动允许。`;
   else if (permission === 'unsupported') notificationAuthMessage.value = '当前浏览器不支持网页通知。';
   else notificationAuthMessage.value = '浏览器没有弹出授权窗口，请检查地址栏权限、系统通知设置，或安装为 PWA 后再试。';
   if (keepAliveSettings.value.enabled) await startKeepAlive(keepAliveSettings.value);
+}
+
+async function authorizeNativeBackground() {
+  notificationAuthMessage.value = '正在打开 Android 电池优化授权…';
+  const opened = await requestNativeKeepAliveBatteryAccess();
+  notificationAuthMessage.value = opened ? '请在系统弹窗中允许 BabyLink 忽略电池优化。' : '当前版本不支持原生电池优化授权。';
 }
 
 async function importRingtone(scope: RingtoneScope, eventType: RingtoneEventType, event: Event, characterId = '') {

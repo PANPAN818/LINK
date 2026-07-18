@@ -26,6 +26,8 @@ cp .env.example .env
 - `NAPCAT_ACCESS_TOKEN`：NapCat 反向 WebSocket 独立凭据，不得与管理员 Token 相同。
 - `NAPCAT_ACCOUNT`：专用机器人 QQ 号；首次扫码后用于容器重启时快速登录。
 - `NAPCAT_MAC_ADDRESS`：固定的本地管理 MAC；首次登录后不要修改，避免 QQ 将容器识别为新设备。
+- `NAPCAT_QUICK_PASSWORD`：可选的机器人 QQ 密码，仅保存在服务器 `.env`；用于失效后自动重登。不要提交、截图或写入日志。
+- `NAPCAT_QUICK_PASSWORD_MD5`：仅在不能使用明文变量时作为备用，两项只填写一项；MD5 仍等同登录凭据。
 - `ALLOWED_QQ_GROUPS`：逗号分隔的全部授权 QQ 群号。
 
 生成随机值时可使用 `openssl rand -base64 48 | tr -d '\n'`。不要把 `deploy/.env`、数据库密码、NapCat Token 或 Android keystore 提交到 Git。
@@ -86,6 +88,7 @@ ssh -L 6099:127.0.0.1:6099 root@149.104.26.54
 4. 服务器核对事件中的 `user_id`、`group_id` 和一次性口令后创建设备会话。
 
 机器人连接后会自动同步所有群成员，之后每 `GROUP_SYNC_MINUTES` 分钟全量校准。退群事件会立即更新成员状态；当用户不再属于任何授权群时，其全部会话被撤销。
+服务端每 30 秒调用 OneBot `get_status` 检查真实 QQ 在线状态。仅 WebSocket 存活但 QQ 已下线时，访问页会暂停生成验证码，避免用户发送无法处理的绑定命令。
 
 手动触发同步：
 
@@ -158,6 +161,8 @@ ADMIN_TOKEN='<admin-token>' node scripts/publish-release.mjs android android/app
 ```
 
 Android 原生壳会读取真实 `versionCode`，从登录接口取得 5 分钟下载票据，再跳转系统浏览器下载。APK 即使被转发，没有授权 QQ 仍不能进入应用。
+
+Android 原生保活使用前台服务、低优先级常驻通知和可选的 CPU Wake Lock。首次开启时需要允许通知，并建议在系统弹窗中允许 BabyLink 忽略电池优化；关闭页面中的保活总开关会停止前台服务并释放 Wake Lock。浏览器和旧 APK 会自动回退到静音音频、Service Worker 与 Web Wake Lock。
 
 ## 8. iOS 用户自签
 

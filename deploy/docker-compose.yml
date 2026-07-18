@@ -50,6 +50,8 @@ services:
       NAPCAT_UID: "0"
       NAPCAT_GID: "0"
       ACCOUNT: ${NAPCAT_ACCOUNT:?NAPCAT_ACCOUNT is required}
+      NAPCAT_QUICK_PASSWORD: ${NAPCAT_QUICK_PASSWORD:-}
+      NAPCAT_QUICK_PASSWORD_MD5: ${NAPCAT_QUICK_PASSWORD_MD5:-}
     ports:
       - "127.0.0.1:6099:6099"
     volumes:

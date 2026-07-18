@@ -3,6 +3,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { PoolClient } from 'pg';
 import { config } from './config.js';
 import { query, transaction } from './db.js';
+import { getNapCatRuntimeStatus } from './napcatState.js';
 import { createOpaqueToken, hashForAudit, hashSecret } from './security.js';
 
 const qqPattern = /^[1-9]\d{4,11}$/;
@@ -248,11 +249,14 @@ export async function registerAuthRoutes(app: FastifyInstance) {
     const groups = await query<{ group_id: string; name: string }>(
       'SELECT group_id, name FROM allowed_groups WHERE enabled = TRUE ORDER BY group_id'
     );
+    const bot = getNapCatRuntimeStatus();
     return {
       enabled: Boolean(groups.rowCount),
       groups: groups.rows.map((group) => ({ id: group.group_id, name: group.name })),
       challengeMinutes: config.challengeMinutes,
-      maxDevices: config.maxDevicesPerUser
+      maxDevices: config.maxDevicesPerUser,
+      botOnline: bot.online,
+      botCheckedAt: bot.checkedAt
     };
   });
 
@@ -268,6 +272,9 @@ export async function registerAuthRoutes(app: FastifyInstance) {
 
     const groupCount = await query<{ count: string }>('SELECT COUNT(*)::text AS count FROM allowed_groups WHERE enabled = TRUE');
     if (!Number(groupCount.rows[0]?.count ?? 0)) return await reply.code(503).send({ error: 'groups_unavailable', message: '管理员尚未配置授权群。' });
+    if (!getNapCatRuntimeStatus().online) {
+      return await reply.code(503).send({ error: 'bot_offline', message: '验证机器人当前离线，请联系管理员恢复后再获取口令。' });
+    }
 
     const id = randomUUID();
     const code = createChallengeCode();

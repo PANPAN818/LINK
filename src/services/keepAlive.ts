@@ -1,5 +1,6 @@
 import type { AppKeepAliveSettings } from '@/types/domain';
 import { normalizeKeepAliveSettings } from '@/utils/settings';
+import { getNativeKeepAliveStatus, isNativeKeepAliveAvailable, openNativeBatterySettings, requestNativeNotificationPermission, showNativeLinkNotification, startNativeKeepAlive, stopNativeKeepAlive, type NativeKeepAliveStatus } from '@/services/nativeKeepAlive';
 
 type NotificationPermissionState = NotificationPermission | 'unsupported';
 export type KeepAlivePlatform = 'ios' | 'android' | 'desktop';
@@ -27,6 +28,10 @@ export interface KeepAliveRuntimeStatus {
   wakeLockSupported: boolean;
   standalone: boolean;
   platform: KeepAlivePlatform;
+  native: boolean;
+  nativeServiceActive: boolean;
+  nativeWakeLockActive: boolean;
+  batteryOptimizationsIgnored: boolean;
   lastBeatAt: number;
   lastError: string;
 }
@@ -56,6 +61,10 @@ const status: KeepAliveRuntimeStatus = {
   wakeLockSupported: hasWakeLockSupport(),
   standalone: isStandaloneDisplayMode(),
   platform: detectPlatform(),
+  native: isNativeKeepAliveAvailable(),
+  nativeServiceActive: false,
+  nativeWakeLockActive: false,
+  batteryOptimizationsIgnored: false,
   lastBeatAt: 0,
   lastError: ''
 };
@@ -72,10 +81,11 @@ let listenersInstalled = false;
 const statusListeners = new Set<(nextStatus: KeepAliveRuntimeStatus) => void>();
 
 function emitStatus() {
-  status.notificationPermission = getNotificationPermission();
-  status.notificationSupported = typeof Notification !== 'undefined';
-  status.wakeLockSupported = hasWakeLockSupport();
-  status.standalone = isStandaloneDisplayMode();
+  status.native = isNativeKeepAliveAvailable();
+  if (!status.native) status.notificationPermission = getNotificationPermission();
+  status.notificationSupported = status.native || typeof Notification !== 'undefined';
+  status.wakeLockSupported = status.native || hasWakeLockSupport();
+  status.standalone = status.native || isStandaloneDisplayMode();
   status.platform = detectPlatform();
   const snapshot = getKeepAliveStatus();
   statusListeners.forEach((listener) => listener(snapshot));
@@ -106,6 +116,23 @@ function detectPlatform(): KeepAlivePlatform {
   if (/iPhone|iPad|iPod/i.test(userAgent) || isTouchMac) return 'ios';
   if (/Android/i.test(userAgent)) return 'android';
   return 'desktop';
+}
+
+function applyNativeStatus(nextStatus: NativeKeepAliveStatus | null) {
+  if (!nextStatus) return;
+  status.native = true;
+  status.nativeServiceActive = nextStatus.serviceActive;
+  status.nativeWakeLockActive = nextStatus.wakeLockActive;
+  status.batteryOptimizationsIgnored = nextStatus.batteryOptimizationsIgnored;
+  status.notificationPermission = nextStatus.notificationPermission === 'prompt' ? 'default' : nextStatus.notificationPermission;
+}
+
+async function refreshNativeStatus() {
+  if (!isNativeKeepAliveAvailable()) return null;
+  const nextStatus = await getNativeKeepAliveStatus();
+  applyNativeStatus(nextStatus);
+  emitStatus();
+  return nextStatus;
 }
 
 function isStandaloneDisplayMode() {
@@ -246,11 +273,21 @@ function releaseWakeLock() {
 async function resumeKeepAlive() {
   if (!status.enabled) return;
   status.lastBeatAt = Date.now();
-  if (currentSettings.silentAudio) {
+  if (isNativeKeepAliveAvailable()) {
+    try {
+      const nativeStatus = await getNativeKeepAliveStatus();
+      applyNativeStatus(nativeStatus?.serviceActive && nativeStatus.wakeLockActive === currentSettings.wakeLock
+        ? nativeStatus
+        : await startNativeKeepAlive(currentSettings.wakeLock));
+      status.lastError = '';
+    } catch (error) {
+      setLastError(error, 'Android 原生保活启动失败，请重新打开应用后重试。');
+    }
+  } else if (currentSettings.silentAudio) {
     await startSilentAudio();
     await startWebAudio();
   }
-  await requestWakeLock();
+  if (!isNativeKeepAliveAvailable()) await requestWakeLock();
   navigator.serviceWorker?.controller?.postMessage({ type: 'LINK_KEEP_ALIVE_PING', at: status.lastBeatAt });
   emitStatus();
 }
@@ -309,10 +346,10 @@ function stopWebAudio() {
 export function getKeepAliveStatus(): KeepAliveRuntimeStatus {
   return {
     ...status,
-    notificationPermission: getNotificationPermission(),
-    notificationSupported: typeof Notification !== 'undefined',
-    wakeLockSupported: hasWakeLockSupport(),
-    standalone: isStandaloneDisplayMode(),
+    notificationPermission: status.native ? status.notificationPermission : getNotificationPermission(),
+    notificationSupported: status.native || typeof Notification !== 'undefined',
+    wakeLockSupported: status.native || hasWakeLockSupport(),
+    standalone: status.native || isStandaloneDisplayMode(),
     platform: detectPlatform()
   };
 }
@@ -326,6 +363,16 @@ export function subscribeKeepAliveStatus(listener: (nextStatus: KeepAliveRuntime
 }
 
 export async function requestKeepAliveNotificationPermission() {
+  if (isNativeKeepAliveAvailable()) {
+    try {
+      applyNativeStatus(await requestNativeNotificationPermission());
+      status.lastError = status.notificationPermission === 'granted' ? '' : '系统通知权限未允许，请在应用设置中重新开启。';
+    } catch (error) {
+      setLastError(error, 'Android 通知授权失败，请在系统应用设置中允许通知。');
+    }
+    emitStatus();
+    return status.notificationPermission;
+  }
   if (typeof window !== 'undefined' && !window.isSecureContext) {
     status.notificationPermission = getNotificationPermission();
     status.lastError = '通知授权需要 HTTPS 或 localhost 环境。';
@@ -370,6 +417,7 @@ export async function startKeepAlive(settings: Partial<AppKeepAliveSettings> | n
   startHeartbeat();
   if (options.requestNotifications && currentSettings.notifications) await requestKeepAliveNotificationPermission();
   await resumeKeepAlive();
+  if (isNativeKeepAliveAvailable()) await refreshNativeStatus().catch(() => undefined);
   return getKeepAliveStatus();
 }
 
@@ -380,7 +428,22 @@ export function stopKeepAlive() {
   stopSilentAudio();
   stopWebAudio();
   releaseWakeLock();
+  if (isNativeKeepAliveAvailable()) {
+    void stopNativeKeepAlive()
+      .then((nextStatus) => {
+        applyNativeStatus(nextStatus);
+        emitStatus();
+      })
+      .catch((error) => setLastError(error, 'Android 原生保活停止失败，请重启应用。'));
+  }
   emitStatus();
+}
+
+export async function requestNativeKeepAliveBatteryAccess() {
+  if (!isNativeKeepAliveAvailable()) return false;
+  const opened = await openNativeBatterySettings();
+  window.setTimeout(() => void refreshNativeStatus().catch(() => undefined), 1_000);
+  return opened;
 }
 
 export function syncKeepAlive(settings: Partial<AppKeepAliveSettings> | null | undefined) {
@@ -405,7 +468,13 @@ async function getServiceWorkerRegistration() {
 
 export async function showLinkNotification(settings: Partial<AppKeepAliveSettings> | null | undefined, payload: LinkNotificationPayload) {
   const keepAliveSettings = normalizeKeepAliveSettings(settings);
-  if (!keepAliveSettings.enabled || !keepAliveSettings.notifications || getNotificationPermission() !== 'granted') return false;
+  if (!keepAliveSettings.enabled || !keepAliveSettings.notifications) return false;
+  if (isNativeKeepAliveAvailable()) {
+    if (status.notificationPermission !== 'granted') await refreshNativeStatus().catch(() => undefined);
+    if (status.notificationPermission !== 'granted') return false;
+    return await showNativeLinkNotification({ title: payload.title, body: payload.body, tag: payload.tag });
+  }
+  if (getNotificationPermission() !== 'granted') return false;
 
   const notificationUrl = getNotificationUrl(payload.url || '');
   const options: NotificationOptions = {

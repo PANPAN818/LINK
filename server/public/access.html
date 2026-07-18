@@ -140,6 +140,7 @@
           return item;
         }));
         if (!config.enabled) throw new Error('管理员尚未配置授权 QQ 群。');
+        if (!config.botOnline) throw new Error('验证机器人当前离线，请联系管理员恢复后再获取口令。');
       }
 
       async function checkExistingSession() {

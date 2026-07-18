@@ -4,4 +4,10 @@
     <string name="title_activity_main">BabyLink</string>
     <string name="package_name">top.babylink.app</string>
     <string name="custom_url_scheme">top.babylink.app</string>
+    <string name="keep_alive_channel_name">后台保活</string>
+    <string name="keep_alive_channel_description">保持 BabyLink 后台连接和本地任务</string>
+    <string name="keep_alive_notification_title">BabyLink 正在后台运行</string>
+    <string name="keep_alive_notification_text">保活、角色通知与本地任务已启用</string>
+    <string name="message_channel_name">角色通知</string>
+    <string name="message_channel_description">角色消息、Voom 与通话提醒</string>
 </resources>
