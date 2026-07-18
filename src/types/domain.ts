@@ -1154,6 +1154,7 @@ export type FriendsDisplayScope = 'active-user' | 'all-users';
 export interface AppSettings {
   activeUserId: string;
   friendsDisplayScope: FriendsDisplayScope;
+  homeCardImages: string[];
   apiEndpoint: string;
   apiKey: string;
   model: string;
