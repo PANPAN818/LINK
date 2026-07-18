@@ -90,6 +90,16 @@ ssh -L 6099:127.0.0.1:6099 root@149.104.26.54
 机器人连接后会自动同步所有群成员，之后每 `GROUP_SYNC_MINUTES` 分钟全量校准。退群事件会立即更新成员状态；当用户不再属于任何授权群时，其全部会话被撤销。
 服务端每 30 秒调用 OneBot `get_status` 检查真实 QQ 在线状态。仅 WebSocket 存活但 QQ 已下线时，访问页会暂停生成验证码，避免用户发送无法处理的绑定命令。
 
+需要免重复扫码时，在服务器终端运行 `sh configure-napcat-quick-login.sh`，仅在隐藏输入提示中键入机器人 QQ 密码。脚本只把密码 MD5 写入权限为 0600 的 `.env`，随后重建 NapCat；MD5 仍是可复用登录凭据，必须按密码同等级保护。安装 watchdog：
+
+```bash
+cp systemd/babylink-napcat-watchdog.* /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable --now babylink-napcat-watchdog.timer
+```
+
+watchdog 每分钟读取公开 Bot 在线状态；连续离线时最多每 10 分钟重启一次 NapCat，让快速登录凭据接管。若腾讯要求验证码、设备解锁或冻结账号，自动重登会停止生效，不能通过增加重试频率绕过风控。云服务器仍频繁触发风控时，应把 NapCat 迁移到固定住宅网络设备，并继续使用现有 `wss://babylink.top/api/napcat/onebot` 反向连接。
+
 手动触发同步：
 
 ```bash
