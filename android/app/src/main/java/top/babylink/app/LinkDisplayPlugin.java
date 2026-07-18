@@ -46,18 +46,29 @@ public class LinkDisplayPlugin extends Plugin {
         WindowInsetsControllerCompat controller = WindowCompat.getInsetsController(window, decorView);
         controller.setSystemBarsBehavior(WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
         if (enabled) {
+            WindowCompat.setDecorFitsSystemWindows(window, false);
             window.clearFlags(WindowManager.LayoutParams.FLAG_FORCE_NOT_FULLSCREEN);
             window.addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
-            controller.hide(WindowInsetsCompat.Type.statusBars());
+            decorView.setSystemUiVisibility(
+                View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                    | View.SYSTEM_UI_FLAG_FULLSCREEN
+                    | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                    | View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                    | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                    | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+            );
+            controller.hide(WindowInsetsCompat.Type.systemBars());
         } else {
+            WindowCompat.setDecorFitsSystemWindows(window, true);
             window.clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
-            controller.show(WindowInsetsCompat.Type.statusBars());
+            decorView.setSystemUiVisibility(View.SYSTEM_UI_FLAG_LAYOUT_STABLE);
+            controller.show(WindowInsetsCompat.Type.systemBars());
         }
         decorView.post(() -> {
             WindowInsetsControllerCompat postedController = WindowCompat.getInsetsController(window, decorView);
             postedController.setSystemBarsBehavior(WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
-            if (enabled) postedController.hide(WindowInsetsCompat.Type.statusBars());
-            else postedController.show(WindowInsetsCompat.Type.statusBars());
+            if (enabled) postedController.hide(WindowInsetsCompat.Type.systemBars());
+            else postedController.show(WindowInsetsCompat.Type.systemBars());
         });
     }
 }

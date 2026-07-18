@@ -150,7 +150,7 @@
             <div class="global-fullscreen-copy">
               <p class="section-kicker">Immersive View</p>
               <h2>全屏显示</h2>
-              <small>开启后隐藏手机顶部的时间、信号和电量栏；关闭后自动恢复并保留安全区。</small>
+              <small>开启后隐藏手机顶部状态栏与底部导航/手势栏；关闭后自动恢复并保留安全区。</small>
             </div>
             <button
               class="fullscreen-switch"
