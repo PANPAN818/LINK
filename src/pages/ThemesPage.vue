@@ -145,7 +145,29 @@
             </footer>
           </article>
 
-          <p v-if="feedbackMessage" class="sync-feedback success">{{ feedbackMessage }}</p>
+          <article class="global-fullscreen-card">
+            <span class="font-mark"><Maximize2 :size="18" /></span>
+            <div class="global-fullscreen-copy">
+              <p class="section-kicker">Immersive View</p>
+              <h2>全屏显示</h2>
+              <small>开启后隐藏手机顶部的时间、信号和电量栏；关闭后自动恢复并保留安全区。</small>
+            </div>
+            <button
+              class="fullscreen-switch"
+              :class="{ active: fullscreenEnabled }"
+              type="button"
+              role="switch"
+              :aria-checked="fullscreenEnabled"
+              :aria-label="fullscreenEnabled ? '关闭全屏显示' : '开启全屏显示'"
+              :disabled="fullscreenBusy"
+              @click="toggleFullscreen"
+            >
+              <span></span>
+            </button>
+          </article>
+
+          <p v-if="fullscreenFeedback" class="sync-feedback" :class="fullscreenFeedbackError ? 'error' : 'success'">{{ fullscreenFeedback }}</p>
+          <p v-else-if="feedbackMessage" class="sync-feedback success">{{ feedbackMessage }}</p>
         </section>
       </section>
     </main>
@@ -358,9 +380,10 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { FileCode2, Globe2, LoaderCircle, Minus, Moon, Plus, Share2, Type, Upload, Wifi } from 'lucide-vue-next';
+import { FileCode2, Globe2, LoaderCircle, Maximize2, Minus, Moon, Plus, Share2, Type, Upload, Wifi } from 'lucide-vue-next';
 import AppModal from '@/components/common/AppModal.vue';
 import { useAppStore } from '@/stores/appStore';
+import { setFullscreenEnabled } from '@/services/systemBars';
 import type { AppSettings, AppThemeSettings, ThemeFontEntry, ThemeFontSource, ThemeStylePreset, ThemeStyleScopeSettings } from '@/types/domain';
 import { createId } from '@/utils/id';
 import { normalizeAppSettings } from '@/utils/settings';
@@ -427,6 +450,9 @@ const importError = ref('');
 const styleImportError = ref('');
 const styleExportError = ref('');
 const feedbackMessage = ref('');
+const fullscreenFeedback = ref('');
+const fullscreenFeedbackError = ref(false);
+const fullscreenBusy = ref(false);
 const isImportingFont = ref(false);
 const isImportingStyle = ref(false);
 const isExportingStyle = ref(false);
@@ -452,6 +478,7 @@ const themeSettings = computed(() => currentSettings.value.themeSettings);
 const fontSettings = computed(() => themeSettings.value.fonts);
 const fontEntries = computed(() => fontSettings.value.entries);
 const globalScalePercent = computed(() => Math.round((themeSettings.value.global?.scale ?? 1) * 100));
+const fullscreenEnabled = computed(() => Boolean(themeSettings.value.global?.fullscreen));
 const activeTab = computed<ThemeTab>(() => {
   const tab = String(route.query.tab ?? 'font');
   return tabs.some((item) => item.id === tab) ? tab as ThemeTab : 'font';
@@ -530,7 +557,7 @@ function cloneThemeSettings(settings: AppThemeSettings): AppThemeSettings {
       activeFontId: settings.fonts.activeFontId,
       entries: settings.fonts.entries.map(cloneFontEntry)
     },
-    global: { scale: settings.global.scale },
+    global: { scale: settings.global.scale, fullscreen: settings.global.fullscreen },
     online: cloneStyleScope(settings.online),
     offline: cloneStyleScope(settings.offline)
   };
@@ -548,6 +575,37 @@ async function setGlobalScale(percent: number) {
   nextThemeSettings.global.scale = nextPercent / 100;
   await saveThemeSettings(nextThemeSettings);
   feedbackMessage.value = nextPercent === 100 ? '已恢复默认显示大小。' : `已调整为 ${nextPercent}% 显示大小。`;
+}
+
+async function toggleFullscreen() {
+  if (fullscreenBusy.value) return;
+  fullscreenBusy.value = true;
+  fullscreenFeedback.value = '';
+  fullscreenFeedbackError.value = false;
+  const previous = fullscreenEnabled.value;
+  const next = !previous;
+  try {
+    if (next) {
+      const applied = await setFullscreenEnabled(true, { requestBrowserFullscreen: true });
+      if (!applied) {
+        await setFullscreenEnabled(false);
+        fullscreenFeedback.value = '当前浏览器不允许网页隐藏系统栏，请使用 BabyLink App 或支持全屏的浏览器。';
+        fullscreenFeedbackError.value = true;
+        return;
+      }
+    }
+    const nextThemeSettings = cloneThemeSettings(themeSettings.value);
+    nextThemeSettings.global.fullscreen = next;
+    await saveThemeSettings(nextThemeSettings);
+    if (!next) await setFullscreenEnabled(false);
+    fullscreenFeedback.value = next ? '已开启全屏显示。' : '已关闭全屏显示。';
+  } catch (error) {
+    await setFullscreenEnabled(previous, { requestBrowserFullscreen: previous });
+    fullscreenFeedback.value = error instanceof Error && error.message ? error.message : '全屏设置保存失败，请重试。';
+    fullscreenFeedbackError.value = true;
+  } finally {
+    fullscreenBusy.value = false;
+  }
 }
 
 function updateGlobalScaleFromInput(event: Event) {
@@ -1298,6 +1356,73 @@ function formatFontMeta(entry: ThemeFontEntry) {
     radial-gradient(circle at top right, rgba(6, 199, 85, 0.11), transparent 36%),
     linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(246, 250, 248, 0.95));
   box-shadow: 0 12px 30px rgba(16, 24, 20, 0.06);
+}
+
+.global-fullscreen-card {
+  display: grid;
+  grid-template-columns: 46px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid rgba(17, 17, 17, 0.06);
+  border-radius: 20px;
+  background: linear-gradient(145deg, rgba(248, 252, 250, 0.98), rgba(239, 248, 243, 0.96));
+  box-shadow: 0 12px 30px rgba(16, 24, 20, 0.05);
+}
+
+.global-fullscreen-copy {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.global-fullscreen-copy h2 {
+  margin: 0;
+  color: #111111;
+  font-size: 16px;
+  line-height: 1.2;
+  font-weight: 900;
+}
+
+.global-fullscreen-copy small {
+  color: #737b76;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.fullscreen-switch {
+  position: relative;
+  width: 48px;
+  height: 28px;
+  padding: 0;
+  border-radius: 999px;
+  background: #d9dedb;
+  transition: background 0.2s ease;
+}
+
+.fullscreen-switch span {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow: 0 2px 8px rgba(18, 35, 26, 0.2);
+  transition: transform 0.2s ease;
+}
+
+.fullscreen-switch.active {
+  background: var(--link-green);
+}
+
+.fullscreen-switch.active span {
+  transform: translateX(20px);
+}
+
+.fullscreen-switch:disabled {
+  opacity: 0.55;
 }
 
 .global-card-head {

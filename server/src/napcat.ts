@@ -2,7 +2,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { WebSocket } from 'ws';
 import { config } from './config.js';
 import { query, transaction } from './db.js';
-import { recordAudit, revokeSessionsWithoutMembership, updateMembership, verifyChallengeFromGroup } from './auth.js';
+import { recordAudit, revokeAllDevicesForQq, revokeSessionsWithoutMembership, updateMembership, verifyChallengeFromGroup } from './auth.js';
 import { getNapCatRuntimeStatus, setNapCatRuntimeStatus } from './napcatState.js';
 
 interface OneBotEvent {
@@ -82,8 +82,22 @@ async function handleGroupMessage(event: OneBotEvent) {
   const groupId = stringId(event.group_id);
   const qq = stringId(event.user_id);
   const rawMessage = String(event.raw_message ?? '').trim();
+  if (!groupId || !qq) return;
+
+  if (/^\/?link\s+(?:清空设备|清除设备|退出全部设备|clear\s+devices?)\s*$/i.test(rawMessage)) {
+    const allowed = await query<{ group_id: string }>('SELECT group_id FROM allowed_groups WHERE group_id = $1 AND enabled = TRUE', [groupId]);
+    if (!allowed.rows[0]) return;
+    const revoked = await revokeAllDevicesForQq(qq);
+    await recordAudit('napcat.devices.revoked', qq, { groupId, ...revoked });
+    const summary = revoked.devices
+      ? `已清空 ${revoked.devices} 台登录设备并撤销全部会话，需要使用时请重新验证。`
+      : '当前没有需要清空的登录设备。';
+    await sendGroupReply(groupId, `[CQ:at,qq=${qq}] ${summary}`);
+    return;
+  }
+
   const match = rawMessage.match(/^\/?link\s+(?:绑定|bind)\s+([A-Z0-9]{6,16})\s*$/i);
-  if (!match?.[1] || !groupId || !qq) return;
+  if (!match?.[1]) return;
 
   const result = await verifyChallengeFromGroup({
     code: match[1],

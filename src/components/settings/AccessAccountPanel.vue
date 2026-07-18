@@ -12,12 +12,12 @@
     <p v-else-if="feedback" class="feedback" :class="{ error: feedbackError }">{{ feedback }}</p>
 
     <div v-if="session" class="device-list">
-      <article v-for="device in devices" :key="device.id" :class="{ revoked: device.revoked }">
+      <article v-for="device in devices" :key="device.id">
         <div>
           <strong>{{ device.label || '未命名设备' }} <em v-if="device.current">当前</em></strong>
           <span>最近使用 {{ formatTime(device.lastSeenAt) }}</span>
         </div>
-        <button v-if="!device.revoked" type="button" :disabled="busyId === device.id" @click="removeDevice(device)">
+        <button type="button" :disabled="busyId === device.id" @click="removeDevice(device)">
           {{ device.current ? '退出' : '移除' }}
         </button>
       </article>
@@ -95,7 +95,6 @@ article strong { overflow: hidden; font-size: 13px; text-overflow: ellipsis; whi
 article span { color: #738078; font-size: 11px; }
 article em { padding: 2px 5px; border-radius: 999px; background: #dff5e7; color: #128044; font-size: 9px; font-style: normal; }
 article button, .logout { min-height: 34px; padding: 0 11px; border-radius: 11px; background: #e8f2ec; color: #246240; font-size: 12px; font-weight: 800; }
-article.revoked { opacity: .5; }
 .logout { min-height: 42px; background: #fff; color: #9c3b3b; }
 .muted, .feedback { margin: 0; color: #748178; font-size: 12px; }
 .feedback.error { color: #b63e3e; }

@@ -239,6 +239,32 @@ export async function revokeSessionsWithoutMembership(qq: string) {
   `, [qq]);
 }
 
+export async function revokeAllDevicesForQq(qq: string) {
+  return await transaction(async (client) => {
+    const devices = await client.query(`
+      UPDATE devices
+      SET revoked_at = NOW()
+      WHERE qq = $1 AND revoked_at IS NULL
+      RETURNING id
+    `, [qq]);
+    const sessions = await client.query(`
+      UPDATE sessions
+      SET revoked_at = NOW()
+      WHERE qq = $1 AND revoked_at IS NULL
+      RETURNING id
+    `, [qq]);
+    await client.query(`
+      UPDATE login_challenges
+      SET error = '该账号已通过 QQ 清空登录设备。'
+      WHERE qq = $1
+        AND consumed_at IS NULL
+        AND expires_at > NOW()
+        AND error = ''
+    `, [qq]);
+    return { devices: devices.rowCount ?? 0, sessions: sessions.rowCount ?? 0 };
+  });
+}
+
 function isAdminRequest(request: FastifyRequest) {
   if (!config.adminToken) return false;
   return request.headers.authorization === `Bearer ${config.adminToken}`;
@@ -358,19 +384,18 @@ export async function registerAuthRoutes(app: FastifyInstance) {
   app.get('/api/auth/devices', async (request, reply) => {
     const session = await requireSession(request, reply);
     if (!session) return;
-    const devices = await query<{ id: string; label: string; created_at: Date; last_seen_at: Date; revoked_at: Date | null }>(`
-      SELECT id, label, created_at, last_seen_at, revoked_at
+    const devices = await query<{ id: string; label: string; created_at: Date; last_seen_at: Date }>(`
+      SELECT id, label, created_at, last_seen_at
       FROM devices
-      WHERE qq = $1
-      ORDER BY revoked_at NULLS FIRST, last_seen_at DESC
+      WHERE qq = $1 AND revoked_at IS NULL
+      ORDER BY last_seen_at DESC
     `, [session.qq]);
     return devices.rows.map((device) => ({
       id: device.id,
       label: device.label,
       current: device.id === session.deviceId,
       createdAt: device.created_at.getTime(),
-      lastSeenAt: device.last_seen_at.getTime(),
-      revoked: Boolean(device.revoked_at)
+      lastSeenAt: device.last_seen_at.getTime()
     }));
   });
 

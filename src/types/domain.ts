@@ -1140,6 +1140,7 @@ export interface ThemeStyleScopeSettings {
 
 export interface ThemeGlobalSettings {
   scale: number;
+  fullscreen: boolean;
 }
 
 export interface AppThemeSettings {

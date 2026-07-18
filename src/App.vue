@@ -46,6 +46,7 @@ import GlobalVoomNotice from '@/components/common/GlobalVoomNotice.vue';
 import { startAccessHeartbeat } from '@/services/access';
 import { uploadEncryptedWebDavBackup } from '@/services/webDavBackup';
 import { syncKeepAlive } from '@/services/keepAlive';
+import { setFullscreenEnabled } from '@/services/systemBars';
 import { useAppStore } from '@/stores/appStore';
 import { useMusicPlayerStore } from '@/stores/musicPlayerStore';
 import type { ThemeFontEntry, ThemeStylePreset, ThemeStyleScopeSettings } from '@/types/domain';
@@ -80,7 +81,7 @@ const webDavBackupScheduleKey = computed(() => {
   return [backup.url, backup.username, backup.path, backup.intervalMinutes].join('|');
 });
 const themeFontSettings = computed(() => store.settings?.themeSettings.fonts ?? { activeFontId: '', entries: [] as ThemeFontEntry[] });
-const globalThemeSettings = computed(() => store.settings?.themeSettings.global ?? { scale: 1 });
+const globalThemeSettings = computed(() => store.settings?.themeSettings.global ?? { scale: 1, fullscreen: false });
 const onlineThemeSettings = computed(() => store.settings?.themeSettings.online ?? { activePresetId: '', presets: [] });
 const offlineThemeSettings = computed(() => store.settings?.themeSettings.offline ?? { activePresetId: '', presets: [] });
 const routeConversationId = computed(() => {
@@ -414,6 +415,7 @@ watch(
 
 watch(themeFontSettings, applyThemeFonts, { immediate: true, deep: true });
 watch(globalThemeSettings, applyGlobalThemeScale, { immediate: true, deep: true });
+watch(() => globalThemeSettings.value.fullscreen, (enabled) => void setFullscreenEnabled(Boolean(enabled)), { immediate: true });
 watch(onlineThemeSettings, applyOnlineThemeStyles, { immediate: true, deep: true });
 watch(offlineThemeSettings, applyOfflineThemeStyles, { immediate: true, deep: true });
 watch(routeCharacter, () => {

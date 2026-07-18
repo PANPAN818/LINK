@@ -12,7 +12,6 @@ export interface AccessDevice {
   current: boolean;
   createdAt: number;
   lastSeenAt: number;
-  revoked: boolean;
 }
 
 interface CachedAccessLease {
