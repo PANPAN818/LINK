@@ -74,7 +74,7 @@ jobs:
           "$apksigner" verify --verbose --print-certs "$apk" | tee build-apksigner.txt
           grep -F 'Verified using v2 scheme (APK Signature Scheme v2): true' build-apksigner.txt
           expected="$(tr -d ':\r\n' < android/release-certificate.sha256 | tr 'A-F' 'a-f')"
-          actual="$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' build-apksigner.txt | head -n 1)"
+          actual="$(sed -n 's/^V2 Signer: certificate SHA-256 digest: //p' build-apksigner.txt | head -n 1)"
           test "$actual" = "$expected"
           mkdir -p build/android-release
           cp "$apk" build/android-release/BabyLink-1.0.0-android.apk
