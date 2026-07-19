@@ -9,6 +9,8 @@ import android.content.Context;
 import android.content.Intent;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.media.AudioAttributes;
+import android.media.RingtoneManager;
 import android.net.Uri;
 import android.os.Build;
 import android.os.IBinder;
@@ -26,7 +28,8 @@ public class LinkKeepAliveService extends Service {
     public static final String EXTRA_WAKE_LOCK = "wakeLock";
 
     private static final String KEEP_ALIVE_CHANNEL_ID = "babylink_keep_alive";
-    private static final String MESSAGE_CHANNEL_ID = "babylink_messages";
+    private static final String LEGACY_MESSAGE_CHANNEL_ID = "babylink_messages";
+    private static final String MESSAGE_CHANNEL_ID = "babylink_messages_v2";
     private static final int KEEP_ALIVE_NOTIFICATION_ID = 2101;
     private static volatile boolean running;
     private static volatile boolean wakeLockActive;
@@ -85,12 +88,25 @@ public class LinkKeepAliveService extends Service {
         keepAliveChannel.setDescription(context.getString(R.string.keep_alive_channel_description));
         keepAliveChannel.setShowBadge(false);
         manager.createNotificationChannel(keepAliveChannel);
+        if (manager.getNotificationChannel(LEGACY_MESSAGE_CHANNEL_ID) != null) {
+            manager.deleteNotificationChannel(LEGACY_MESSAGE_CHANNEL_ID);
+        }
         NotificationChannel messageChannel = new NotificationChannel(
             MESSAGE_CHANNEL_ID,
             context.getString(R.string.message_channel_name),
             NotificationManager.IMPORTANCE_HIGH
         );
         messageChannel.setDescription(context.getString(R.string.message_channel_description));
+        messageChannel.enableVibration(true);
+        messageChannel.setVibrationPattern(new long[] { 0, 220, 120, 220 });
+        messageChannel.setLockscreenVisibility(Notification.VISIBILITY_PRIVATE);
+        messageChannel.setSound(
+            RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION),
+            new AudioAttributes.Builder()
+                .setUsage(AudioAttributes.USAGE_NOTIFICATION_COMMUNICATION_INSTANT)
+                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                .build()
+        );
         manager.createNotificationChannel(messageChannel);
     }
 
@@ -114,7 +130,10 @@ public class LinkKeepAliveService extends Service {
             .setContentText(body)
             .setContentIntent(pendingIntent)
             .setAutoCancel(true)
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setPriority(NotificationCompat.PRIORITY_MAX)
+            .setDefaults(Notification.DEFAULT_ALL)
+            .setVibrate(new long[] { 0, 220, 120, 220 })
+            .setSound(RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION))
             .setCategory(NotificationCompat.CATEGORY_MESSAGE)
             .setVisibility(NotificationCompat.VISIBILITY_PRIVATE);
         if (avatar != null) {

@@ -455,30 +455,6 @@ export const useAppStore = defineStore('app', () => {
     return groupedStickers;
   });
 
-  function dedupeStickerGroups(groups: StickerGroup[], entries: Sticker[]) {
-    const seenByName = new Map<string, StickerGroup>();
-    const removedIdToKeptId = new Map<string, string>();
-    const dedupedGroups: StickerGroup[] = [];
-
-    for (const group of groups) {
-      const key = group.name.trim().toLocaleLowerCase();
-      const existingGroup = seenByName.get(key);
-      if (existingGroup) {
-        removedIdToKeptId.set(group.id, existingGroup.id);
-        continue;
-      }
-      seenByName.set(key, group);
-      dedupedGroups.push(group);
-    }
-
-    const dedupedStickers = entries.map((sticker) => {
-      const groupIds = sticker.groupIds.map((id) => removedIdToKeptId.get(id) ?? id);
-      return { ...sticker, groupIds: [...new Set(groupIds)] };
-    });
-
-    return { dedupedGroups, dedupedStickers, removedGroupIds: [...removedIdToKeptId.keys()] };
-  }
-
   function normalizeStickerLibrary(rawGroups: StickerGroup[], rawStickers: Sticker[]) {
     const removedGroupIds = new Set<string>();
     const removedStickerIds = new Set<string>();
@@ -503,11 +479,9 @@ export const useAppStore = defineStore('app', () => {
         }
         return true;
       });
-    const { dedupedGroups, dedupedStickers, removedGroupIds: duplicateGroupIds } = dedupeStickerGroups(normalizedGroups, normalizedStickers);
-    duplicateGroupIds.forEach((id) => removedGroupIds.add(id));
     return {
-      groups: dedupedGroups,
-      stickers: dedupedStickers,
+      groups: normalizedGroups,
+      stickers: normalizedStickers,
       removedGroupIds: [...removedGroupIds],
       removedStickerIds: [...removedStickerIds]
     };
@@ -3574,6 +3548,8 @@ export const useAppStore = defineStore('app', () => {
       const index = stickers.value.findIndex((item) => item.id === nextSticker.id);
       if (index >= 0) stickers.value[index] = nextSticker;
       await putEntity('stickers', nextSticker);
+    } catch {
+      return;
     } finally {
       options.cleanupImageUrl?.();
     }
@@ -3606,7 +3582,21 @@ export const useAppStore = defineStore('app', () => {
     const existingKeys = new Set(stickers.value.map((sticker) => `${sticker.description.toLocaleLowerCase()}::${sticker.imageUrl}`));
     const createdEntries: Array<{ draft: StickerImportDraft; sticker: Sticker }> = [];
     for (const draft of drafts) {
-      const sticker = createStickerFromDraft(draft, targetGroupIds);
+      let sticker = createStickerFromDraft(draft, targetGroupIds);
+      if (draft.cacheImageUrl) {
+        try {
+          const cachedImageUrl = await draft.cacheImageUrl();
+          if (!cachedImageUrl) throw new Error('本地贴纸图片无法写入缓存。');
+          sticker = {
+            ...sticker,
+            imageUrl: stickerBackupPlaceholder,
+            cachedImageUrl,
+            cachedImageUpdatedAt: Date.now()
+          };
+        } finally {
+          draft.cleanupImageUrl?.();
+        }
+      }
       const key = `${sticker.description.toLocaleLowerCase()}::${sticker.imageUrl}`;
       if (existingKeys.has(key)) {
         draft.cleanupImageUrl?.();
@@ -3619,7 +3609,9 @@ export const useAppStore = defineStore('app', () => {
     if (!createdStickers.length) return [];
     stickers.value.unshift(...createdStickers);
     await Promise.all(createdStickers.map((sticker) => putEntity('stickers', sticker)));
-    createdEntries.forEach((entry) => queueImportedStickerCache(entry.sticker, entry.draft));
+    createdEntries
+      .filter((entry) => !entry.sticker.cachedImageUrl)
+      .forEach((entry) => queueImportedStickerCache(entry.sticker, entry.draft));
     return createdStickers;
   }
 

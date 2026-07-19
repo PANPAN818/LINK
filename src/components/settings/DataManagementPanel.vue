@@ -291,7 +291,6 @@ const installPromptChangeListener = () => {
 
 onMounted(() => {
   window.addEventListener(pwaInstallPromptChangeEvent, installPromptChangeListener);
-  void refreshDataSnapshot();
 });
 
 onBeforeUnmount(() => {

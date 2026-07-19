@@ -235,7 +235,7 @@
         </section>
 
         <section v-else class="ringtone-content" :class="{ 'is-muted': !ringtoneSettings.enabled }" aria-label="铃声内容">
-          <section class="global-section" aria-label="全局铃声">
+          <section v-if="ringtoneScopeTab === 'global'" class="global-section" aria-label="全局铃声">
             <div class="section-heading-row">
               <span>Global</span>
               <b>{{ ringtoneEventTypes.length }}</b>
@@ -262,7 +262,7 @@
             </div>
           </section>
 
-          <section class="character-section" aria-label="角色铃声">
+          <section v-else class="character-section" aria-label="角色铃声">
             <div class="section-heading-row">
               <span>Characters</span>
               <b>{{ store.characters.length }}</b>
@@ -316,13 +316,27 @@
       </section>
     </main>
 
+    <nav v-if="activeTab === 'ringtones'" class="ringtone-tabs" aria-label="铃声范围">
+      <button
+        v-for="tab in ringtoneScopeTabs"
+        :key="tab.id"
+        class="ringtone-tab"
+        :class="{ active: ringtoneScopeTab === tab.id }"
+        type="button"
+        @click="ringtoneScopeTab = tab.id"
+      >
+        <component :is="tab.icon" :size="20" stroke-width="2.1" />
+        <span>{{ tab.label }}</span>
+      </button>
+    </nav>
+
   </section>
 </template>
 
 <script setup lang="ts">
 import { computed, defineComponent, h, onBeforeUnmount, onMounted, ref, type PropType } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { AlertCircle, BatteryCharging, BellRing, CheckCircle2, Clapperboard, Cloud, Download, LoaderCircle, MessageCircle, Music2, Phone, Power, RadioTower, RefreshCw, RotateCcw, ShieldCheck, Smartphone, Undo2, Upload, Volume2, VolumeX } from 'lucide-vue-next';
+import { AlertCircle, BatteryCharging, BellRing, CheckCircle2, Clapperboard, Cloud, Download, Globe2, LoaderCircle, MessageCircle, Music2, Phone, Power, RadioTower, RefreshCw, RotateCcw, ShieldCheck, Smartphone, Undo2, Upload, UsersRound, Volume2, VolumeX } from 'lucide-vue-next';
 import { checkForAppUpdate, getAppUpdateStatus, installDownloadedAppUpdate, refreshAppUpdateStatus, subscribeAppUpdateStatus, type AppUpdateStatus } from '@/services/appUpdate';
 import { checkNativeRelease, createInitialNativeReleaseStatus, openNativeReleaseDownload, type NativeReleaseStatus } from '@/services/nativeRelease';
 import { getKeepAliveStatus, requestKeepAliveNotificationPermission, requestNativeKeepAliveBatteryAccess, startKeepAlive, stopKeepAlive, subscribeKeepAliveStatus, type KeepAliveRuntimeStatus } from '@/services/keepAlive';
@@ -334,6 +348,7 @@ import { createDefaultRingtoneSettings, normalizeAppSettings, normalizeKeepAlive
 
 type RingtoneScope = 'global' | 'character';
 type RingtoneTab = 'keepalive' | 'ringtones' | 'updates';
+type RingtoneScopeTab = 'global' | 'characters';
 
 const audioAccept = 'audio/*,.mp3,.mpeg,.mpga,.m4a,.aac,.wav,.wave,.ogg,.oga,.opus,.webm,.flac,.caf,.aif,.aiff';
 const supportedAudioExtensions = ['mp3', 'mpeg', 'mpga', 'm4a', 'aac', 'wav', 'wave', 'ogg', 'oga', 'opus', 'webm', 'flac', 'caf', 'aif', 'aiff'];
@@ -397,8 +412,14 @@ const appUpdateStatus = ref<AppUpdateStatus>(getAppUpdateStatus());
 const appUpdateBusy = ref(false);
 const nativeReleaseStatus = ref<NativeReleaseStatus>(createInitialNativeReleaseStatus());
 const nativeReleaseBusy = ref(false);
+const ringtoneScopeTab = ref<RingtoneScopeTab>('global');
 let unsubscribeKeepAliveStatus: (() => void) | null = null;
 let unsubscribeAppUpdateStatus: (() => void) | null = null;
+
+const ringtoneScopeTabs = [
+  { id: 'global' as RingtoneScopeTab, label: 'Global', icon: Globe2 },
+  { id: 'characters' as RingtoneScopeTab, label: 'Characters', icon: UsersRound }
+];
 
 const activeTabMeta = computed(() => pageMeta[activeTab.value]);
 const keepAliveSettings = computed(() => normalizeKeepAliveSettings(store.settings?.keepAlive));
@@ -889,34 +910,26 @@ async function resetCharacter(characterId: string, eventType: RingtoneEventType)
 }
 
 .ringtone-tabs {
-  position: relative;
-  z-index: 20;
   display: grid;
-  flex: 0 0 auto;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 4px;
-  padding: 8px calc(12px + var(--safe-right)) calc(10px + var(--safe-bottom)) calc(12px + var(--safe-left));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 3px;
+  padding: 7px calc(8px + var(--safe-right)) calc(9px + var(--safe-bottom)) calc(8px + var(--safe-left));
   border-top: 1px solid rgba(17, 17, 17, 0.05);
   background: rgba(255, 255, 255, 0.96);
-  -webkit-backdrop-filter: blur(18px);
   backdrop-filter: blur(18px);
 }
 
 .ringtone-tab {
   display: grid;
   justify-items: center;
-  gap: 4px;
+  gap: 3px;
   min-width: 0;
-  min-height: 48px;
-  padding: 6px 4px;
-  border-radius: 14px;
+  min-height: 46px;
+  padding: 6px 2px;
+  border-radius: 13px;
   color: var(--muted);
   font-size: 10px;
   font-weight: 800;
-  line-height: 1.1;
-  overflow: hidden;
-  white-space: nowrap;
-  touch-action: manipulation;
 }
 
 .ringtone-tab.active {
@@ -925,9 +938,8 @@ async function resetCharacter(characterId: string, eventType: RingtoneEventType)
 }
 
 .ringtone-tab svg {
-  flex: 0 0 auto;
-  width: 20px;
-  height: 20px;
+  width: 19px;
+  height: 19px;
 }
 
 .ringtone-tab span {

@@ -116,10 +116,14 @@ export async function openNativeReleaseDownload(release: NativeRelease) {
     try {
       await LinkUpdater.openDownload({ url: absoluteUrl });
       return;
-    } catch {
-      window.location.assign(absoluteUrl);
-      return;
-    }
+    } catch {}
   }
-  window.location.assign(absoluteUrl);
+  const downloadLink = document.createElement('a');
+  downloadLink.href = absoluteUrl;
+  downloadLink.download = `BabyLink-${release.versionName}.${release.platform === 'android' ? 'apk' : 'ipa'}`;
+  downloadLink.rel = 'noopener';
+  downloadLink.style.display = 'none';
+  document.body.append(downloadLink);
+  downloadLink.click();
+  downloadLink.remove();
 }

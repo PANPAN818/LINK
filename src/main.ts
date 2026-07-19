@@ -30,16 +30,13 @@ if (import.meta.env.DEV && 'serviceWorker' in navigator) {
 		.catch(() => undefined);
 }
 
-function waitForWindowLoad() {
-	if (document.readyState === 'complete') return Promise.resolve();
-	return new Promise<void>((resolve) => {
-		window.addEventListener('load', () => resolve(), { once: true });
-	});
-}
-
-function getStartupErrorMessage(error: unknown) {
-	if (error instanceof Error && error.message.trim()) return error.message.trim();
-	return '启动加载失败，请刷新后重试。';
+function preloadPagesInBackground() {
+	const preload = () => void preloadRoutePages().catch((error) => console.warn('Link route preload failed.', error));
+	if (typeof window.requestIdleCallback === 'function') {
+		window.requestIdleCallback(preload, { timeout: 6000 });
+		return;
+	}
+	globalThis.setTimeout(preload, 1500);
 }
 
 async function bootstrap() {
@@ -50,24 +47,17 @@ async function bootstrap() {
 	app.use(pinia).use(router);
 
 	const store = useAppStore(pinia);
-
 	try {
-		await Promise.all([
-			store.hydrate(),
-			preloadRoutePages(),
-			router.isReady(),
-			waitForWindowLoad()
-		]);
-
 		app.mount('#app');
-		window.dispatchEvent(new Event('link:app-mounted'));
-		void requestPersistentStorage();
 	} catch (error) {
-		console.error('Link startup failed.', error);
-		window.dispatchEvent(new CustomEvent('link:app-load-failed', {
-			detail: { message: getStartupErrorMessage(error) }
-		}));
+		console.error('Link mount failed.', error);
+		return;
 	}
+
+	preloadPagesInBackground();
+	void store.hydrate()
+		.then(() => requestPersistentStorage())
+		.catch((error) => console.error('Link background hydration failed.', error));
 }
 
 void bootstrap();

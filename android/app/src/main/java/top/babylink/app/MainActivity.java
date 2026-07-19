@@ -15,6 +15,7 @@ public class MainActivity extends BridgeActivity {
 		registerPlugin(LinkUpdaterPlugin.class);
 		registerPlugin(LinkKeepAlivePlugin.class);
 		registerPlugin(LinkMediaPlugin.class);
+		registerPlugin(LinkBackupPlugin.class);
 		registerPlugin(LinkDisplayPlugin.class);
 		super.onCreate(savedInstanceState);
 		LinkDisplayPlugin.applyStoredFullscreen(this);

@@ -45,7 +45,15 @@ let resizeObserver: ResizeObserver | null = null;
 
 function handleOutsidePointer(event: PointerEvent) {
   const target = event.target;
-  if (target instanceof Node && !panelRef.value?.contains(target)) close();
+  if (!(target instanceof Node) || panelRef.value?.contains(target)) return;
+  const focusTarget = target instanceof HTMLInputElement
+    || target instanceof HTMLTextAreaElement
+    || target instanceof HTMLSelectElement
+    || target instanceof HTMLElement && target.isContentEditable
+    ? target as HTMLElement
+    : null;
+  close();
+  if (focusTarget) void nextTick(() => focusTarget.focus({ preventScroll: true }));
 }
 
 function emitPanelHeight() {

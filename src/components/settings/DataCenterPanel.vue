@@ -1,6 +1,6 @@
 <template>
   <section class="data-center">
-    <section class="backup-card">
+    <section v-if="activeSection === 'local'" class="backup-card">
       <header class="card-head">
         <div>
           <span class="card-kicker">Local</span>
@@ -23,9 +23,9 @@
       <p v-if="localFeedback" class="feedback" :class="localFeedbackKind">{{ localFeedback }}</p>
     </section>
 
-    <WebDavBackupPanel :settings="settings" />
+    <WebDavBackupPanel v-else-if="activeSection === 'webdav'" :settings="settings" />
 
-    <section class="backup-card github-card">
+    <section v-else class="backup-card github-card">
       <header class="card-head">
         <div>
           <span class="card-kicker">GitHub</span>
@@ -158,6 +158,7 @@ import { createBackupArchiveFilename, downloadLinkBackupArchive, parseLinkBackup
 const props = defineProps<{
   userId: string;
   settings: AppSettings;
+  activeSection: 'local' | 'webdav' | 'github';
 }>();
 
 const store = useAppStore();
@@ -336,7 +337,7 @@ async function exportBackup() {
     const backup = await store.createBackupFile((label, percent) => {
       setLocalFeedback(`${label} ${Math.round(percent)}%`);
     });
-    downloadLinkBackupArchive(backup, createBackupArchiveFilename(props.userId));
+    await downloadLinkBackupArchive(backup, createBackupArchiveFilename(props.userId));
     setLocalFeedback('压缩备份已导出。');
   } catch (error) {
     setLocalFeedback(error instanceof Error ? error.message : '导出失败。', 'error');

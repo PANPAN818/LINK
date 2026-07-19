@@ -191,7 +191,11 @@ export async function cacheStickerImageUrl(imageUrl: string, readImageUrl?: () =
   const sourceDataUrl = readImageUrl ? await readImageUrl() : await localizeStickerImageUrl(imageUrl);
   const trimmed = sourceDataUrl.trim();
   if (!trimmed || !isDataImageUrl(trimmed)) return trimmed;
-  return compressInlineImageDataUrl(trimmed, stickerCacheCompressionOptions);
+  try {
+    return await compressInlineImageDataUrl(trimmed, stickerCacheCompressionOptions);
+  } catch {
+    return trimmed;
+  }
 }
 
 export async function localizeStickerImportDraft(draft: StickerImportDraft): Promise<StickerImportDraft> {

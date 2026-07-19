@@ -1,4 +1,5 @@
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
+import { isNativeBackupSaveAvailable, saveNativeBackupArchive } from '@/services/nativeBackup';
 import type { AppSettings, AppSnapshot, CharacterProfile, ChatImageAttachment, ChatImageCandidate, ChatMessage, ChatMessageQuote, ChatVoiceAttachment, ConversationMemoryRecord, FavoriteMessageRecord, GeneratedImageRecord, Sticker, VoomImageCandidate, VoomPost, WorldBookEntry } from '@/types/domain';
 
 export interface LinkBackupFile {
@@ -388,6 +389,11 @@ export function downloadLinkBackupFile(backup: LinkBackupFile, filename: string)
   downloadBlob(blob, filename);
 }
 
-export function downloadLinkBackupArchive(backup: LinkBackupFile, filename: string) {
-  downloadBlob(createLinkBackupArchiveBlob(backup), filename);
+export async function downloadLinkBackupArchive(backup: LinkBackupFile, filename: string) {
+  const archive = createLinkBackupArchiveBlob(backup);
+  if (isNativeBackupSaveAvailable()) {
+    await saveNativeBackupArchive(archive, filename);
+    return;
+  }
+  downloadBlob(archive, filename);
 }

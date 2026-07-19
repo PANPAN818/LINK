@@ -66,6 +66,16 @@ export async function fetchAccessSession() {
 
 export async function ensureAccessOnStartup() {
   if (!isAccessControlEnabled()) return true;
+  const cachedLease = readCachedAccessLease();
+  if (cachedLease && cachedLease.leaseUntil > Date.now()) {
+    void fetchAccessSession().catch((error) => {
+      if (error instanceof Error && error.name === 'AccessRevokedError') {
+        clearAccessLease();
+        window.location.replace('/access');
+      }
+    });
+    return true;
+  }
   try {
     await fetchAccessSession();
     return true;
@@ -75,8 +85,6 @@ export async function ensureAccessOnStartup() {
       window.location.replace('/access');
       return false;
     }
-    const lease = readCachedAccessLease();
-    if (lease && lease.leaseUntil > Date.now()) return true;
     window.location.replace('/access');
     return false;
   }

@@ -24,18 +24,33 @@
           v-if="mode === 'backup'"
           :user-id="store.user?.id || '--'"
           :settings="currentSettings"
+          :active-section="activeBackupTab"
         />
         <DataManagementPanel v-else-if="mode === 'data'" />
         <AccessAccountPanel v-else />
       </section>
     </main>
+
+    <nav v-if="mode === 'backup'" class="service-utility-tabs" aria-label="备份方式">
+      <button
+        v-for="tab in backupTabs"
+        :key="tab.id"
+        class="service-utility-tab"
+        :class="{ active: activeBackupTab === tab.id }"
+        type="button"
+        @click="activeBackupTab = tab.id"
+      >
+        <component :is="tab.icon" :size="20" stroke-width="2.1" />
+        <span>{{ tab.label }}</span>
+      </button>
+    </nav>
   </section>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
-import { CloudUpload, Database, KeyRound } from 'lucide-vue-next';
+import { Archive, Cloud, CloudUpload, Database, Github, KeyRound } from 'lucide-vue-next';
 import AccessAccountPanel from '@/components/settings/AccessAccountPanel.vue';
 import DataCenterPanel from '@/components/settings/DataCenterPanel.vue';
 import DataManagementPanel from '@/components/settings/DataManagementPanel.vue';
@@ -44,10 +59,18 @@ import type { AppSettings } from '@/types/domain';
 import { normalizeAppSettings } from '@/utils/settings';
 
 type UtilityMode = 'backup' | 'data' | 'access';
+type BackupTab = 'local' | 'webdav' | 'github';
 
 const props = defineProps<{ mode: UtilityMode }>();
 const router = useRouter();
 const store = useAppStore();
+const activeBackupTab = ref<BackupTab>('local');
+
+const backupTabs = [
+  { id: 'local' as BackupTab, label: 'Local', icon: Archive },
+  { id: 'webdav' as BackupTab, label: 'WebDAV', icon: Cloud },
+  { id: 'github' as BackupTab, label: 'GitHub', icon: Github }
+];
 
 const pageMeta = {
   backup: {
@@ -218,6 +241,46 @@ function goBack() {
 
 .service-utility-panel.panel-data {
   padding: 12px;
+}
+
+.service-utility-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 3px;
+  padding: 7px calc(8px + var(--safe-right)) calc(9px + var(--safe-bottom)) calc(8px + var(--safe-left));
+  border-top: 1px solid rgba(17, 17, 17, 0.05);
+  background: rgba(255, 255, 255, 0.96);
+  backdrop-filter: blur(18px);
+}
+
+.service-utility-tab {
+  display: grid;
+  justify-items: center;
+  gap: 3px;
+  min-width: 0;
+  min-height: 46px;
+  padding: 6px 2px;
+  border-radius: 13px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.service-utility-tab span {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.service-utility-tab.active {
+  background: #eef8f1;
+  color: #111111;
+}
+
+.service-utility-tab svg {
+  width: 19px;
+  height: 19px;
 }
 
 @media (max-width: 360px) {
