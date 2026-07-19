@@ -156,6 +156,96 @@ export interface CharacterPhotoRecord {
   updatedAt: number;
 }
 
+export type CoupleDeviceScreenStatus = 'using' | 'locked' | 'idle';
+
+export interface CoupleRouteStop {
+  name: string;
+  time: string;
+  kind: 'start' | 'pass' | 'stay' | 'arrival';
+  detail: string;
+}
+
+export interface CoupleNetworkRecord {
+  name: string;
+  time: string;
+  kind: 'wifi' | 'cellular' | 'offline';
+}
+
+export interface CoupleMomentRecord {
+  time: string;
+  title: string;
+  detail: string;
+  emoji: string;
+}
+
+export interface CoupleSpaceSnapshot {
+  id: string;
+  generatedAt: number;
+  location: {
+    place: string;
+    address: string;
+    status: string;
+    distance: string;
+    transport: string;
+    eta: string;
+    stayMinutes: number;
+    route: CoupleRouteStop[];
+  };
+  device: {
+    battery: number;
+    charging: boolean;
+    screenStatus: CoupleDeviceScreenStatus;
+    lastUnlockedAt: string;
+    lastLockedAt: string;
+    usageMinutes: number;
+    activeApp: string;
+    network: string;
+    networkHistory: CoupleNetworkRecord[];
+  };
+  bond: {
+    mood: string;
+    moodEmoji: string;
+    missLevel: number;
+    syncScore: number;
+    nextPlan: string;
+    whisper: string;
+  };
+  moments: CoupleMomentRecord[];
+}
+
+export interface CoupleWishNote {
+  id: string;
+  content: string;
+  createdAt: number;
+}
+
+export interface CoupleSpaceState {
+  consentGrantedAt: number;
+  relationshipLabel: string;
+  startedAt: string;
+  arrivalReminderEnabled: boolean;
+  snapshot?: CoupleSpaceSnapshot;
+  history: CoupleSpaceSnapshot[];
+  wishes: CoupleWishNote[];
+}
+
+export type FriendRelationshipStatus =
+  | 'friend'
+  | 'blocked-by-user'
+  | 'blocked-by-character'
+  | 'pending-user-request'
+  | 'pending-character-request'
+  | 'deleted-by-user'
+  | 'deleted-by-character';
+
+export interface FriendRelationship {
+  status: FriendRelationshipStatus;
+  updatedAt: number;
+  reason?: string;
+  requestMessage?: string;
+  requestedAt?: number;
+}
+
 export interface CharacterProfile {
   id: string;
   nickname: string;
@@ -177,6 +267,8 @@ export interface CharacterProfile {
   modelOverrides?: ChatModelOverrides;
   themeStyleBindings?: CharacterThemeStyleBindings;
   imageProfile?: CharacterImageProfile;
+  coupleSpace?: CoupleSpaceState;
+  relationship?: FriendRelationship;
 }
 
 export type VoomFrequency = 'very-low' | 'low' | 'medium' | 'high' | 'very-high' | 'always';
@@ -642,6 +734,7 @@ export interface ChatMessage {
   replyVariantState?: 'active' | 'inactive';
   plotChoices?: string[];
   status?: 'sending' | 'sent' | 'failed';
+  readAt?: number | null;
   editedAt?: number;
 }
 
@@ -1141,6 +1234,7 @@ export interface ThemeStyleScopeSettings {
 export interface ThemeGlobalSettings {
   scale: number;
   fullscreen: boolean;
+  style: ThemeStyleScopeSettings;
 }
 
 export interface AppThemeSettings {

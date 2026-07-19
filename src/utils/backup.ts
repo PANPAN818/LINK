@@ -85,28 +85,14 @@ function stripLargeInlineAsset(value: string | undefined, fallback = '') {
   return normalizedValue.length > largeInlineAssetLength ? fallback : normalizedValue;
 }
 
-function sanitizeImageCandidateForBackup<T extends ChatImageCandidate | VoomImageCandidate>(candidate: T): T {
-  return {
-    ...candidate,
-    image: stripLargeInlineAsset(candidate.image)
-  };
-}
-
-function sanitizeActiveImageCandidatesForBackup<T extends ChatImageCandidate | VoomImageCandidate>(candidates: T[] | undefined, activeImage: string | undefined) {
-  const normalizedActiveImage = String(activeImage ?? '').trim();
-  if (!normalizedActiveImage) return undefined;
-  return candidates
-    ?.filter((candidate) => candidate.image.trim() === normalizedActiveImage)
-    .map((candidate) => sanitizeImageCandidateForBackup(candidate))
-    .filter((candidate) => candidate.image);
+function sanitizeImageCandidatesForBackup<T extends ChatImageCandidate | VoomImageCandidate>(candidates: T[] | undefined) {
+  return candidates?.filter((candidate) => candidate.image.trim());
 }
 
 function sanitizeChatImageForBackup(image: ChatImageAttachment): ChatImageAttachment {
-  const url = stripLargeInlineAsset(image.url);
   return {
     ...image,
-    url,
-    candidates: sanitizeActiveImageCandidatesForBackup(image.candidates, url)
+    candidates: sanitizeImageCandidatesForBackup(image.candidates)
   };
 }
 
@@ -137,17 +123,21 @@ function sanitizeMessageForBackup(message: ChatMessage): ChatMessage {
 }
 
 function sanitizeStickerForBackup(sticker: Sticker): Sticker {
+  if (sticker.sourceType === 'local-image' && sticker.cachedImageUrl) {
+    return {
+      ...sticker,
+      imageUrl: stickerBackupPlaceholder
+    };
+  }
   const { cachedImageUpdatedAt: _cachedImageUpdatedAt, ...safeSticker } = stripStickerImageCache(sticker);
   return safeSticker;
 }
 
 function sanitizeVoomPostForBackup(post: VoomPost): VoomPost {
-  const image = stripLargeInlineAsset(post.image);
   return {
     ...post,
     authorAvatar: stripLargeInlineAsset(post.authorAvatar),
-    image,
-    imageCandidates: sanitizeActiveImageCandidatesForBackup(post.imageCandidates, image)
+    imageCandidates: sanitizeImageCandidatesForBackup(post.imageCandidates)
   };
 }
 
@@ -158,10 +148,7 @@ function sanitizeCharacterForBackup(character: CharacterProfile): CharacterProfi
       ? {
           ...character.imageProfile,
           referenceImage: stripLargeInlineAsset(character.imageProfile.referenceImage),
-          photos: character.imageProfile.photos.map((photo) => ({
-            ...photo,
-            imageUrl: stripLargeInlineAsset(photo.imageUrl)
-          }))
+          photos: character.imageProfile.photos
         }
       : character.imageProfile
   };
@@ -175,10 +162,7 @@ function sanitizeWorldBookForBackup(entry: WorldBookEntry): WorldBookEntry {
 }
 
 function sanitizeGeneratedImageForBackup(record: GeneratedImageRecord): GeneratedImageRecord {
-  return {
-    ...record,
-    imageUrl: stripLargeInlineAsset(record.imageUrl)
-  };
+  return record;
 }
 
 function sanitizeMemoryForBackup(record: ConversationMemoryRecord): ConversationMemoryRecord {
@@ -245,12 +229,11 @@ function sanitizeSnapshotForBackup(snapshot: AppSnapshot): AppSnapshot {
   safeSnapshot.characters = safeSnapshot.characters.map((character) => sanitizeCharacterForBackup(character));
   safeSnapshot.messages = safeSnapshot.messages.map((message) => sanitizeMessageForBackup(message));
   safeSnapshot.voomPosts = safeSnapshot.voomPosts.map((post) => sanitizeVoomPostForBackup(post));
-  const activeVoomImages = new Set(safeSnapshot.voomPosts.map((post) => post.image?.trim()).filter(Boolean));
   safeSnapshot.worldBooks = safeSnapshot.worldBooks.map((entry) => sanitizeWorldBookForBackup(entry));
   safeSnapshot.stickers = safeSnapshot.stickers.map((sticker) => sanitizeStickerForBackup(sticker));
   safeSnapshot.generatedImages = safeSnapshot.generatedImages
     .map((record) => sanitizeGeneratedImageForBackup(record))
-    .filter((record) => record.imageUrl && (record.source !== 'voom' || activeVoomImages.has(record.imageUrl.trim())));
+    .filter((record) => record.imageUrl);
   safeSnapshot.conversationMemories = safeSnapshot.conversationMemories.map((record) => sanitizeMemoryForBackup(record));
   safeSnapshot.favorites = (safeSnapshot.favorites ?? []).map((record) => sanitizeFavoriteForBackup(record));
   safeSnapshot.settings = sanitizeSettingsForBackup(safeSnapshot.settings);

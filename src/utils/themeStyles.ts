@@ -1,5 +1,6 @@
 import type { ThemeStylePreset } from '@/types/domain';
 
+export const defaultGlobalThemePresetId = 'global-default';
 export const defaultOnlineThemePresetId = 'online-default';
 export const defaultOfflineThemePresetId = 'offline-default';
 export const onlineThemeExportMime = 'application/link-online-theme+json';
@@ -10,7 +11,193 @@ const pngPayloadWidth = 256;
 const exportPosterWidth = 1080;
 const exportPosterHeight = 1350;
 
-export type ThemeStyleExportScope = 'online' | 'offline';
+export type ThemeStyleExportScope = 'global' | 'online' | 'offline';
+
+export const defaultGlobalThemeCss = `/* LINK 全站默认完整样式。
+  这份样式作用于整个网站：所有子页面、顶部栏、底部导航、卡片、表单、按钮、弹窗、抽屉、浮层和提示。
+  它会一直生效；线上与线下主题会在它之后加载，可继续覆盖聊天页和线下阅读页的专用细节。
+
+  小白改法：
+  1. 想改全站配色，先改 :root 里的 --global-* 变量。
+  2. 想改所有普通子页面底色，搜 .screen:not(.chat-room):not(.offline-room)。
+  3. 想改顶部栏，搜 .top-bar；底部导航搜 .bottom-tabs 和 [class$="-tabs"]。
+  4. 想改所有卡片/面板，搜 [class$="-card"]、[class$="-panel"] 和 [class$="-block"]。
+  5. 想改输入框，搜 input/textarea/select；想改按钮，搜 button 和 .primary-action。
+  6. 想改全部 AppModal 弹窗，搜 .modal-backdrop、.modal-panel、.modal-header、.modal-body。
+  7. 想改其他抽屉/浮层，搜 [class$="-sheet"]、[class$="-popover"]、[class$="-menu"]、[class$="-layer"]。
+  8. 线上聊天、Chat Settings、Stickers 键盘请到“线上”主题继续细调；线下阅读页请到“线下”主题细调。
+  9. scoped 页面样式权重较高时，可在选择器前加 #app，最后再按需给单个属性加 !important。
+  10. 常用属性：background 背景，color 文字，border-radius 圆角，border 边框，box-shadow 阴影。 */
+:root {
+  --global-ink: #111111;
+  --global-muted: #727a82;
+  --global-subtle: #8a8f94;
+  --global-line: rgba(17, 17, 17, 0.06);
+  --global-page: #f4f7f5;
+  --global-surface: rgba(255, 255, 255, 0.92);
+  --global-surface-strong: #ffffff;
+  --global-soft: #f0f3f1;
+  --global-accent-soft: #eef8f1;
+  --global-accent: #06c755;
+  --global-danger: #d73850;
+  --global-radius: 20px;
+  --global-shadow: 0 14px 34px rgba(21, 30, 26, 0.07);
+  --link-green: var(--global-accent);
+}
+
+html,
+body,
+#app {
+  background: var(--global-page);
+  color: var(--global-ink);
+}
+
+#app .mobile-shell {
+  background: var(--global-page);
+  color: var(--global-ink);
+}
+
+#app .mobile-shell > .screen:not(.chat-room):not(.offline-room) {
+  background:
+    radial-gradient(circle at 8% 0%, rgba(255, 218, 227, 0.44), transparent 30%),
+    radial-gradient(circle at 96% 8%, rgba(6, 199, 85, 0.14), transparent 28%),
+    linear-gradient(180deg, #fbfcfb 0%, #f5f7f6 54%, #edf3f1 100%);
+  color: var(--global-ink);
+}
+
+#app .screen:not(.chat-room):not(.offline-room) .top-bar {
+  background: rgba(251, 252, 251, 0.9);
+  color: var(--global-ink);
+  border-color: var(--global-line);
+  -webkit-backdrop-filter: blur(18px);
+  backdrop-filter: blur(18px);
+}
+
+#app .screen:not(.chat-room):not(.offline-room) .top-title,
+#app .screen:not(.chat-room):not(.offline-room) :where(h1, h2, h3, h4, strong) {
+  color: var(--global-ink);
+}
+
+#app .screen:not(.chat-room):not(.offline-room) :where(p, small, time, .subtitle, .description, .empty-state) {
+  color: var(--global-muted);
+}
+
+#app .screen:not(.chat-room):not(.offline-room) :is(.bottom-tabs, [class$="-bottom-tabs"], [class$="-tabs"]),
+#app .mobile-shell > :is(.bottom-tabs, [class$="-bottom-tabs"]) {
+  border-color: var(--global-line);
+  background: rgba(255, 255, 255, 0.94);
+  -webkit-backdrop-filter: blur(18px);
+  backdrop-filter: blur(18px);
+}
+
+#app .screen:not(.chat-room):not(.offline-room) :is(.bottom-tabs, [class$="-bottom-tabs"], [class$="-tabs"]) button {
+  color: var(--global-subtle);
+}
+
+#app .screen:not(.chat-room):not(.offline-room) :is(.bottom-tabs, [class$="-bottom-tabs"], [class$="-tabs"]) button.active {
+  color: var(--global-accent);
+}
+
+#app .screen:not(.chat-room):not(.offline-room) :is([class$="-card"], [class$="-panel"], [class$="-block"]) {
+  border-color: var(--global-line);
+  background-color: var(--global-surface);
+  color: var(--global-ink);
+  box-shadow: var(--global-shadow);
+}
+
+#app .screen:not(.chat-room):not(.offline-room) :is(.section-card, .settings-card, .list-card, .empty-shell, .placeholder-panel) {
+  border-color: var(--global-line);
+  border-radius: var(--global-radius);
+  background: var(--global-surface);
+  color: var(--global-ink);
+  box-shadow: var(--global-shadow);
+}
+
+#app .screen:not(.chat-room):not(.offline-room) :is(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]), textarea, select) {
+  border-color: var(--global-line);
+  background: rgba(250, 252, 250, 0.96);
+  color: var(--global-ink);
+  caret-color: var(--global-accent);
+}
+
+#app .screen:not(.chat-room):not(.offline-room) :is(input, textarea)::placeholder {
+  color: var(--global-subtle);
+}
+
+#app .screen:not(.chat-room):not(.offline-room) :is(input, textarea, select):focus {
+  border-color: rgba(6, 199, 85, 0.34);
+  box-shadow: 0 0 0 3px rgba(6, 199, 85, 0.1);
+}
+
+#app .screen:not(.chat-room):not(.offline-room) :is(button, [role="button"]) {
+  border-color: transparent;
+}
+
+#app .screen:not(.chat-room):not(.offline-room) :is(.primary-action, .footer-save, .save-button, .send-button) {
+  background: var(--global-accent);
+  color: #ffffff;
+}
+
+#app .screen:not(.chat-room):not(.offline-room) :is(.secondary-action, .ghost-button, .card-action, .section-action) {
+  background: var(--global-soft);
+  color: #2d333a;
+}
+
+#app .screen:not(.chat-room):not(.offline-room) :is(.danger-action, .danger, .delete-button) {
+  color: var(--global-danger);
+}
+
+#app .screen:not(.chat-room):not(.offline-room) :is(.switch-track, [role="switch"]) {
+  background-color: #dfe8e4;
+}
+
+#app .screen:not(.chat-room):not(.offline-room) :is(.switch-card input:checked + .switch-track, [role="switch"][aria-checked="true"]) {
+  background-color: var(--global-accent);
+}
+
+body .modal-backdrop {
+  background: rgba(17, 24, 20, 0.34);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+}
+
+body .modal-panel {
+  border-color: rgba(255, 255, 255, 0.82);
+  background: var(--global-surface-strong);
+  color: var(--global-ink);
+  box-shadow: 0 24px 64px rgba(17, 24, 20, 0.2);
+}
+
+body .modal-header {
+  border-color: var(--global-line);
+  background: rgba(255, 255, 255, 0.92);
+  color: var(--global-ink);
+}
+
+body .modal-body {
+  background: transparent;
+  color: var(--global-ink);
+}
+
+body .modal-panel :is(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]), textarea, select) {
+  border-color: var(--global-line);
+  background: var(--global-soft);
+  color: var(--global-ink);
+}
+
+body :is([class$="-sheet"], [class$="-popover"], [class$="-menu"], [class$="-layer"]) {
+  --global-popup-surface: var(--global-surface-strong);
+  --global-popup-line: var(--global-line);
+  color: var(--global-ink);
+}
+
+body :is(.action-menu, .context-menu, .tool-popover, .picker-popover, .notice-panel, .toast-card) {
+  border-color: var(--global-line);
+  background: var(--global-popup-surface, var(--global-surface-strong));
+  color: var(--global-ink);
+  box-shadow: var(--global-shadow);
+}
+`;
 
 export const defaultOnlineThemeCss = `/* LINK 线上页默认完整样式。
   复制后可自由修改；聊天页建议保留 .chat-room 前缀，聊天设置保留 .chat-settings-page 前缀，Stickers 弹窗保留 .sticker-keyboard-layer 前缀，避免影响其他页面。
@@ -22,9 +209,10 @@ export const defaultOnlineThemeCss = `/* LINK 线上页默认完整样式。
   4. 想改消息里的安全 HTML（如 details/summary/p），搜 .message-html-content。
   5. 想改 5 分钟时间分割，搜 .message-time-divider。
   6. 想改底部输入栏，搜 .composer；输入框搜 .composer-input；发送按钮搜 .send-button。
-  7. 想改 Stickers 弹窗，搜 .sticker-keyboard-layer；贴纸卡片搜 .sticker-tile。
-  8. 想改 Chat Settings，搜 .chat-settings-page；设置卡片搜 .settings-block，开关搜 .switch-card。
-  9. 常用属性：background 改背景，color 改文字，border-radius 改圆角，padding 改内边距，box-shadow 改阴影。 */
+  7. 想改输入框里的表情包笑脸按钮，搜 .sticker-button；只改笑脸图标搜 .sticker-button svg。
+  8. 想改 Stickers 弹窗，搜 .sticker-keyboard-layer；贴纸卡片搜 .sticker-tile。
+  9. 想改 Chat Settings，搜 .chat-settings-page；设置卡片搜 .settings-block，开关搜 .switch-card。
+  10. 常用属性：background 改背景，color 改文字，width/height 改大小，stroke-width 改图标粗细，border-radius 改圆角，box-shadow 改阴影。 */
 .chat-room {
   --online-ink: #111111;
   --online-muted: #727a82;
@@ -421,6 +609,33 @@ export const defaultOnlineThemeCss = `/* LINK 线上页默认完整样式。
   min-height: 22px;
   line-height: 1.35;
   color: #111111;
+}
+
+/* 输入栏表情包按钮：按钮本体改 .sticker-button，笑脸线条改 .sticker-button svg。 */
+.chat-room .composer .sticker-button {
+  display: grid;
+  place-items: center;
+  flex: 0 0 24px;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: #777b80;
+}
+
+.chat-room .composer .sticker-button svg {
+  width: 20px;
+  height: 20px;
+  stroke-width: 2;
+}
+
+.chat-room .composer .sticker-button:active {
+  background: rgba(0, 0, 0, 0.06);
+}
+
+.chat-room .composer .sticker-button:disabled {
+  opacity: 0.45;
 }
 
 .chat-room .composer-quote,
@@ -2001,6 +2216,10 @@ function drawPosterBackground(
     background.addColorStop(0, '#f7f0f6');
     background.addColorStop(0.45, '#edf5ff');
     background.addColorStop(1, '#f6fbf9');
+  } else if (scope === 'global') {
+    background.addColorStop(0, '#f8eff2');
+    background.addColorStop(0.45, '#eff8f3');
+    background.addColorStop(1, '#edf5ff');
   } else {
     background.addColorStop(0, '#eef8f0');
     background.addColorStop(0.38, '#f4fbf5');
@@ -2009,12 +2228,12 @@ function drawPosterBackground(
   context.fillStyle = background;
   context.fillRect(0, 0, width, height);
 
-  context.fillStyle = scope === 'offline' ? 'rgba(215, 161, 186, 0.18)' : 'rgba(108, 219, 146, 0.2)';
+  context.fillStyle = scope === 'offline' ? 'rgba(215, 161, 186, 0.18)' : scope === 'global' ? 'rgba(221, 168, 190, 0.17)' : 'rgba(108, 219, 146, 0.2)';
   context.beginPath();
   context.arc(width * 0.18, height * 0.14, width * 0.22, 0, Math.PI * 2);
   context.fill();
 
-  context.fillStyle = scope === 'offline' ? 'rgba(178, 208, 255, 0.16)' : 'rgba(191, 242, 214, 0.22)';
+  context.fillStyle = scope === 'offline' ? 'rgba(178, 208, 255, 0.16)' : scope === 'global' ? 'rgba(164, 222, 195, 0.2)' : 'rgba(191, 242, 214, 0.22)';
   context.beginPath();
   context.arc(width * 0.84, height * 0.1, width * 0.18, 0, Math.PI * 2);
   context.fill();
@@ -2040,7 +2259,7 @@ function drawPosterText(
   context.lineWidth = 2;
   context.stroke();
 
-  const accent = scope === 'offline' ? '#9b5d78' : '#0a8a44';
+  const accent = scope === 'offline' ? '#9b5d78' : scope === 'global' ? '#7c5b75' : '#0a8a44';
   const secondary = hasCoverImage ? 'rgba(255, 255, 255, 0.82)' : '#5f6771';
   const primary = hasCoverImage ? '#ffffff' : '#111111';
   const body = hasCoverImage ? 'rgba(255, 255, 255, 0.92)' : '#2a3139';
@@ -2052,7 +2271,7 @@ function drawPosterText(
 
   context.fillStyle = primary;
   context.font = '900 74px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
-  context.fillText(scope === 'offline' ? '线下样式' : '线上样式', cardX + 56, cardY + 182);
+  context.fillText(scope === 'offline' ? '线下样式' : scope === 'global' ? '全站样式' : '线上样式', cardX + 56, cardY + 182);
 
   context.fillStyle = secondary;
   context.font = '600 34px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
@@ -2089,7 +2308,7 @@ function createPosterCanvas(
   coverImage: HTMLImageElement | null
 ) {
   const { canvas, context } = getCanvasContext(exportPosterWidth, exportPosterHeight);
-  const scope = options.scope === 'offline' ? 'offline' : 'online';
+  const scope = options.scope === 'offline' || options.scope === 'global' ? options.scope : 'online';
   drawPosterBackground(context, scope, coverImage);
   drawPosterText(context, presets, scope, Boolean(coverImage));
   return { canvas, context };
@@ -2177,7 +2396,7 @@ export const encodeThemeStylePresetsToPng = encodeOnlineThemePresetsToPng;
 
 function parseThemeExportPayload(payloadBytes: Uint8Array): DecodedThemeStylePngPayload {
   const payload = JSON.parse(new TextDecoder().decode(payloadBytes)) as Partial<ThemeExportPayload>;
-  const scope = payload.scope === 'offline' || payload.scope === 'online' ? payload.scope : null;
+  const scope = payload.scope === 'global' || payload.scope === 'offline' || payload.scope === 'online' ? payload.scope : null;
   const validMagic = payload.magic === exportMagic || payload.magic === legacyExportMagic;
   const validVersion = payload.version === 1 || payload.version === 2;
   if (!validMagic || !validVersion || !Array.isArray(payload.presets)) {

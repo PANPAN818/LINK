@@ -20,7 +20,9 @@ import androidx.annotation.Nullable;
 import androidx.core.app.NotificationCompat;
 import androidx.core.app.Person;
 import androidx.core.graphics.drawable.IconCompat;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public class LinkKeepAliveService extends Service {
     public static final String ACTION_START = "top.babylink.app.action.START_KEEP_ALIVE";
@@ -31,6 +33,7 @@ public class LinkKeepAliveService extends Service {
     private static final String LEGACY_MESSAGE_CHANNEL_ID = "babylink_messages";
     private static final String MESSAGE_CHANNEL_ID = "babylink_messages_v2";
     private static final int KEEP_ALIVE_NOTIFICATION_ID = 2101;
+    private static final AtomicInteger MESSAGE_NOTIFICATION_SEQUENCE = new AtomicInteger(2200);
     private static volatile boolean running;
     private static volatile boolean wakeLockActive;
 
@@ -112,51 +115,71 @@ public class LinkKeepAliveService extends Service {
 
     public static void showMessageNotification(Context context, String title, String body, List<String> messages, String tag, String icon, String url) {
         createNotificationChannels(context);
-        Intent launchIntent = context.getPackageManager().getLaunchIntentForPackage(context.getPackageName());
-        if (launchIntent == null) launchIntent = new Intent(context, MainActivity.class);
-        launchIntent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
-        if (url != null && !url.trim().isEmpty()) launchIntent.setData(Uri.parse(url));
-        int requestCode = tag == null ? 0 : tag.hashCode();
-        PendingIntent pendingIntent = PendingIntent.getActivity(
-            context,
-            requestCode,
-            launchIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
-        );
-        Bitmap avatar = decodeNotificationAvatar(icon);
-        NotificationCompat.Builder builder = new NotificationCompat.Builder(context, MESSAGE_CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_keep_alive_notification)
-            .setContentTitle(title)
-            .setContentText(body)
-            .setContentIntent(pendingIntent)
-            .setAutoCancel(true)
-            .setPriority(NotificationCompat.PRIORITY_MAX)
-            .setDefaults(Notification.DEFAULT_ALL)
-            .setVibrate(new long[] { 0, 220, 120, 220 })
-            .setSound(RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION))
-            .setCategory(NotificationCompat.CATEGORY_MESSAGE)
-            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE);
-        if (avatar != null) {
-            Person sender = new Person.Builder()
-                .setName(title)
-                .setIcon(IconCompat.createWithBitmap(avatar))
-                .build();
-            Person localUser = new Person.Builder()
-                .setName(context.getString(R.string.app_name))
-                .build();
-            NotificationCompat.MessagingStyle style = new NotificationCompat.MessagingStyle(localUser)
-                .setGroupConversation(false);
-            long now = System.currentTimeMillis();
-            for (int index = 0; index < messages.size(); index += 1) {
-                style.addMessage(messages.get(index), now - (messages.size() - index - 1L) * 1_000L, sender);
+        List<String> notificationMessages = new ArrayList<>();
+        if (messages != null) {
+            for (String message : messages) {
+                if (message != null && !message.trim().isEmpty()) notificationMessages.add(message.trim());
             }
-            builder.setStyle(style);
-        } else {
-            builder.setStyle(new NotificationCompat.BigTextStyle().bigText(body));
         }
-        Notification notification = builder.build();
+        if (notificationMessages.isEmpty() && body != null && !body.trim().isEmpty()) notificationMessages.add(body.trim());
+        if (notificationMessages.isEmpty()) return;
+
+        String notificationTitle = title == null || title.trim().isEmpty()
+            ? context.getString(R.string.app_name)
+            : title.trim();
+        String baseTag = tag == null || tag.trim().isEmpty() ? "babylink-message" : tag.trim();
+        Bitmap avatar = decodeNotificationAvatar(icon);
         NotificationManager manager = context.getSystemService(NotificationManager.class);
-        if (manager != null) manager.notify(tag, requestCode, notification);
+        if (manager == null) return;
+
+        Person.Builder senderBuilder = new Person.Builder().setName(notificationTitle);
+        if (avatar != null) senderBuilder.setIcon(IconCompat.createWithBitmap(avatar));
+        Person sender = senderBuilder.build();
+        Person localUser = new Person.Builder()
+            .setName(context.getString(R.string.app_name))
+            .build();
+        long batchTimestamp = System.currentTimeMillis();
+
+        for (int index = 0; index < notificationMessages.size(); index += 1) {
+            String message = notificationMessages.get(index);
+            int notificationId = MESSAGE_NOTIFICATION_SEQUENCE.getAndIncrement();
+            String notificationTag = baseTag + "-" + batchTimestamp + "-" + notificationId;
+            long notificationTimestamp = batchTimestamp + index;
+
+            Intent launchIntent = context.getPackageManager().getLaunchIntentForPackage(context.getPackageName());
+            if (launchIntent == null) launchIntent = new Intent(context, MainActivity.class);
+            launchIntent.setAction(context.getPackageName() + ".OPEN_MESSAGE." + notificationTag);
+            launchIntent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+            if (url != null && !url.trim().isEmpty()) launchIntent.setData(Uri.parse(url));
+            PendingIntent pendingIntent = PendingIntent.getActivity(
+                context,
+                notificationId,
+                launchIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
+            );
+
+            NotificationCompat.MessagingStyle style = new NotificationCompat.MessagingStyle(localUser)
+                .setGroupConversation(false)
+                .addMessage(message, notificationTimestamp, sender);
+            NotificationCompat.Builder builder = new NotificationCompat.Builder(context, MESSAGE_CHANNEL_ID)
+                .setSmallIcon(R.drawable.ic_keep_alive_notification)
+                .setContentTitle(notificationTitle)
+                .setContentText(message)
+                .setContentIntent(pendingIntent)
+                .setAutoCancel(true)
+                .setWhen(notificationTimestamp)
+                .setShowWhen(true)
+                .setPriority(NotificationCompat.PRIORITY_MAX)
+                .setDefaults(Notification.DEFAULT_ALL)
+                .setVibrate(new long[] { 0, 220, 120, 220 })
+                .setSound(RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION))
+                .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+                .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+                .setStyle(style)
+                .addPerson(sender);
+            if (avatar != null) builder.setLargeIcon(avatar);
+            manager.notify(notificationTag, notificationId, builder.build());
+        }
     }
 
     private static Bitmap decodeNotificationAvatar(String source) {

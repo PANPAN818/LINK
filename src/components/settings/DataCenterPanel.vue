@@ -351,9 +351,8 @@ async function importBackup(event: Event) {
   const file = input.files?.[0];
   if (!file) return;
 
-  const isLargeBackup = file.size >= 48 * 1024 * 1024;
-  const confirmMessage = isLargeBackup
-    ? `这个备份文件有 ${formatBytes(file.size)}，导入时会自动清理图片/语音缓存和生成图历史，避免手机白屏。导入会替换当前本地数据，继续吗？`
+  const confirmMessage = file.size >= 48 * 1024 * 1024
+    ? `这个完整备份文件有 ${formatBytes(file.size)}，包含本地媒体，导入需要足够的设备存储空间。导入会替换当前本地数据，继续吗？`
     : '导入备份会替换当前本地数据，继续吗？';
   if (!window.confirm(confirmMessage)) {
     input.value = '';
@@ -372,9 +371,7 @@ async function importBackup(event: Event) {
       onProgress: (label, percent) => setLocalFeedback(`${label} ${Math.round(percent)}%`)
     });
     const persistenceHint = result.persistentStorageGranted ? '' : ' 当前浏览器未授予持久存储；如果退出后仍丢数据，建议安装为 PWA 后再导入。';
-    setLocalFeedback(`${result.slimmedForMobile
-      ? '备份已导入。文件较大，已自动清理图片/语音缓存和生成图历史。'
-      : '备份已导入。'}${persistenceHint}`);
+    setLocalFeedback(`完整备份已导入。${persistenceHint}`);
   } catch (error) {
     setLocalFeedback(error instanceof Error ? error.message : '导入失败。', 'error');
   } finally {

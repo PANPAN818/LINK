@@ -199,7 +199,7 @@ export function createDefaultThemeSettings(): AppThemeSettings {
       activeFontId: '',
       entries: []
     },
-    global: { scale: 1, fullscreen: false },
+    global: { scale: 1, fullscreen: false, style: { ...emptyStyleScope } },
     online: { ...emptyStyleScope },
     offline: { ...emptyStyleScope }
   };
@@ -716,7 +716,8 @@ function normalizeThemeGlobalSettings(settings: Partial<ThemeGlobalSettings> | n
   const scale = Number(settings?.scale ?? 1);
   return {
     scale: Math.min(maxGlobalThemeScale, Math.max(minGlobalThemeScale, Number.isFinite(scale) ? scale : 1)),
-    fullscreen: Boolean(settings?.fullscreen)
+    fullscreen: Boolean(settings?.fullscreen),
+    style: normalizeThemeStyleScope(settings?.style)
   };
 }
 

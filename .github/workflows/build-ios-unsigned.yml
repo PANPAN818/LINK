@@ -32,6 +32,15 @@ jobs:
           npm run build
           npx cap sync ios
 
+      - name: Read iOS version
+        id: version
+        run: |
+          version_code="$(sed -nE 's/^[[:space:]]*CURRENT_PROJECT_VERSION = ([^;]+);.*$/\1/p' ios/App/App.xcodeproj/project.pbxproj | head -n 1)"
+          version_name="$(sed -nE 's/^[[:space:]]*MARKETING_VERSION = ([^;]+);.*$/\1/p' ios/App/App.xcodeproj/project.pbxproj | head -n 1)"
+          test -n "$version_code"
+          test -n "$version_name"
+          printf 'version_code=%s\nversion_name=%s\n' "$version_code" "$version_name" >> "$GITHUB_OUTPUT"
+
       - name: Build unsigned app
         run: |
           xcodebuild \
@@ -46,20 +55,23 @@ jobs:
             clean build
 
       - name: Package IPA
+        env:
+          VERSION_NAME: ${{ steps.version.outputs.version_name }}
         run: |
           app="$RUNNER_TEMP/BabyLinkDerivedData/Build/Products/Release-iphoneos/App.app"
           test -d "$app"
           mkdir -p build/Payload
           cp -R "$app" build/Payload/BabyLink.app
-          (cd build && ditto -c -k --sequesterRsrc --keepParent Payload BabyLink-unsigned-1.0.0.ipa)
-          (cd build && shasum -a 256 BabyLink-unsigned-1.0.0.ipa | tee BabyLink-unsigned-1.0.0.ipa.sha256)
+          output="BabyLink-unsigned-$VERSION_NAME.ipa"
+          (cd build && ditto -c -k --sequesterRsrc --keepParent Payload "$output")
+          (cd build && shasum -a 256 "$output" | tee "$output.sha256")
 
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
         with:
-          name: BabyLink-unsigned-1.0.0
+          name: BabyLink-unsigned-${{ steps.version.outputs.version_name }}
           path: |
-            build/BabyLink-unsigned-1.0.0.ipa
-            build/BabyLink-unsigned-1.0.0.ipa.sha256
+            build/BabyLink-unsigned-${{ steps.version.outputs.version_name }}.ipa
+            build/BabyLink-unsigned-${{ steps.version.outputs.version_name }}.ipa.sha256
           if-no-files-found: error
           retention-days: 14

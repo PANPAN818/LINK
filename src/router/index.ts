@@ -4,6 +4,7 @@ const HomePage = () => import('@/pages/HomePage.vue');
 const ChatSettingsPage = () => import('@/pages/ChatSettingsPage.vue');
 const ChatSearchPage = () => import('@/pages/ChatSearchPage.vue');
 const ChatRoomPage = () => import('@/pages/ChatRoomPage.vue');
+const CoupleSpacePage = () => import('@/pages/CoupleSpacePage.vue');
 const GroupChatPage = () => import('@/pages/GroupChatPage.vue');
 const ProfileThemePage = () => import('@/pages/ProfileThemePage.vue');
 const SmallTheaterPage = () => import('@/pages/SmallTheaterPage.vue');
@@ -32,6 +33,7 @@ const routePageLoaders = [
   ChatSettingsPage,
   ChatSearchPage,
   ChatRoomPage,
+  CoupleSpacePage,
   GroupChatPage,
   ProfileThemePage,
   SmallTheaterPage,
@@ -89,6 +91,7 @@ export const router = createRouter({
     { path: '/chats/:id/search', name: 'chat-search', component: ChatSearchPage, props: true },
     { path: '/chats/:id/settings', name: 'chat-settings', component: ChatSettingsPage, props: true },
     { path: '/chats/:id/profile-themes', name: 'profile-themes', component: ProfileThemePage, props: true },
+    { path: '/chats/:id/couple-space', name: 'couple-space', component: CoupleSpacePage, props: true },
     { path: '/chats/:id/theaters', name: 'small-theater', component: SmallTheaterPage, props: true },
     { path: '/theaters/:theaterId', name: 'small-theater-detail', component: SmallTheaterDetailPage, props: true },
     { path: '/chats/:id', name: 'chat-room', component: ChatRoomPage, props: true },

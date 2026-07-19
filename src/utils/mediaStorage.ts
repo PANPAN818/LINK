@@ -270,6 +270,27 @@ async function hydrateMediaString(value: string) {
   return objectUrl;
 }
 
+function blobToDataUrl(blob: Blob) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.addEventListener('load', () => resolve(String(reader.result ?? '')));
+    reader.addEventListener('error', () => reject(reader.error ?? new Error('本地媒体读取失败。')));
+    reader.readAsDataURL(blob);
+  });
+}
+
+async function materializeMediaString(value: string) {
+  const source = objectUrlSourceMap.get(value) ?? value;
+  const locator = parseStoredMediaLocator(source);
+  if (!locator) return value;
+
+  const blob = locator.backend === 'opfs'
+    ? await readMediaFromOpfs(locator.id) ?? await readMediaFromCache(source)
+    : await readMediaFromCache(source) ?? await readMediaFromOpfs(locator.id);
+  if (!blob) throw new Error('备份所需的本地媒体文件已丢失，请刷新页面后重试。');
+  return await blobToDataUrl(blob);
+}
+
 async function transformMediaStrings<T>(value: T, transform: (entry: string) => Promise<string>): Promise<T> {
   if (typeof value === 'string') return await transform(value) as T;
   if (!value || typeof value !== 'object') return value;
@@ -363,6 +384,10 @@ function shouldHydrateMediaRefsInWindow() {
 export async function hydrateStoredMediaRefs<T>(value: T, force = false): Promise<T> {
   if (!force && !shouldHydrateMediaRefsInWindow()) return value;
   return await transformMediaStrings(value, hydrateMediaString);
+}
+
+export async function materializeStoredMediaRefs<T>(value: T): Promise<T> {
+  return await transformMediaStrings(value, materializeMediaString);
 }
 
 export function collectStoredMediaLocators(value: unknown) {

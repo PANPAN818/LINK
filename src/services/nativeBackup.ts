@@ -1,4 +1,5 @@
 import { Capacitor, registerPlugin } from '@capacitor/core';
+import { isNativeFileShareAvailable, shareNativeFile } from '@/services/nativeFile';
 
 interface NativeBackupPlugin {
   saveArchive(options: { dataUrl: string; fileName: string }): Promise<{ saved: boolean; fileName: string }>;
@@ -7,7 +8,8 @@ interface NativeBackupPlugin {
 const LinkBackup = registerPlugin<NativeBackupPlugin>('LinkBackup');
 
 export function isNativeBackupSaveAvailable() {
-  return Capacitor.getPlatform() === 'android' && Capacitor.isPluginAvailable('LinkBackup');
+  return Capacitor.getPlatform() === 'android' && Capacitor.isPluginAvailable('LinkBackup')
+    || isNativeFileShareAvailable();
 }
 
 function blobToDataUrl(blob: Blob) {
@@ -21,6 +23,9 @@ function blobToDataUrl(blob: Blob) {
 
 export async function saveNativeBackupArchive(blob: Blob, fileName: string) {
   if (!isNativeBackupSaveAvailable()) return false;
-  const result = await LinkBackup.saveArchive({ dataUrl: await blobToDataUrl(blob), fileName });
-  return result.saved;
+  if (Capacitor.getPlatform() === 'android' && Capacitor.isPluginAvailable('LinkBackup')) {
+    const result = await LinkBackup.saveArchive({ dataUrl: await blobToDataUrl(blob), fileName });
+    return result.saved;
+  }
+  return await shareNativeFile(blob, fileName);
 }

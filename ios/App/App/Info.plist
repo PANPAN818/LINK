@@ -24,6 +24,12 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>BabyLink 需要使用摄像头，以便在视频通话中显示你的实时画面。</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>BabyLink 需要使用麦克风，以便在语音和视频通话中识别你的语音。</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>BabyLink 需要使用语音识别，以便将通话语音转换为文字字幕。</string>
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>
 	<key>UIMainStoryboardFile</key>

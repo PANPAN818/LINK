@@ -302,6 +302,7 @@ import { ListChecks, PanelsTopLeft, Plus, Share2, SlidersHorizontal, Sparkles, U
 import AppModal from '@/components/common/AppModal.vue';
 import { useAppStore } from '@/stores/appStore';
 import type { CharacterProfileHomepageAutoCleanupSettings, ProfileHomepageAutoCleanupPreset, ProfileHomepageRecord, ProfileTheme } from '@/types/domain';
+import { downloadDataUrl } from '@/utils/download';
 import { composeProfileThemeCode, decodeProfileThemesFromPng, defaultCustomProfileThemeCode, defaultProfileThemePrompt, encodeProfileThemesToPng, renderProfileThemeHtml, scopeProfileThemeCss, splitProfileThemeCode } from '@/utils/profileThemes';
 
 const props = defineProps<{ id: string }>();
@@ -757,15 +758,6 @@ async function submitCreator() {
   await saveThemeDraft({ closeCreator: true });
 }
 
-function downloadDataUrl(dataUrl: string, fileName: string) {
-  const link = document.createElement('a');
-  link.href = dataUrl;
-  link.download = fileName;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-}
-
 function getExportFileName(items: ProfileTheme[]) {
   const firstName = items[0]?.name?.replace(/[^\u4e00-\u9fa5\w-]+/g, '-').replace(/^-+|-+$/g, '') || 'profile-theme';
   return `link-profile-${firstName}-${Date.now()}.png`;
@@ -782,7 +774,7 @@ async function exportSelectedThemes() {
   exporting.value = true;
   try {
     const dataUrl = await encodeProfileThemesToPng(selectedThemes);
-    downloadDataUrl(dataUrl, getExportFileName(selectedThemes));
+    await downloadDataUrl(dataUrl, getExportFileName(selectedThemes));
     showExporter.value = false;
   } catch (error) {
     exportError.value = error instanceof Error ? error.message : '主页主题导出失败。';

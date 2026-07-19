@@ -2,9 +2,9 @@ import { computed, ref, toRaw, watch } from 'vue';
 import { defineStore } from 'pinia';
 import { deleteEntity, loadSnapshot, pruneUnusedStoredMediaCache, putEntity, replaceSnapshot, scheduleStartupStorageMaintenance } from '@/data/db';
 import { defaultSettings } from '@/data/seed';
-import type { AppSettings, AppSnapshot, CharacterProfile, CharacterProfileHistoryEntry, CharacterProfileHistoryField, ChatCallAttachment, ChatCallMode, ChatCallStatus, ChatImageAttachment, ChatImageCandidate, ChatLocationAttachment, ChatMessage, ChatMessageQuote, ChatMode, ChatModelOverrides, ChatModelScope, ChatMusicListenInviteAttachment, ChatMusicListenInviteStatus, ChatOfflineInvitationAttachment, ChatOfflineInvitationStatus, ChatSmallTheaterLinkAttachment, ChatTransferAttachment, ChatTransferStatus, ChatVoiceAttachment, Conversation, ConversationMemoryRecord, ConversationSettings, FavoriteMessageKind, FavoriteMessageRecord, GenerateReplyInput, GeneratedImageRecord, GroupDiscoveryCandidate, GroupMember, GroupNpcDraft, ImageModuleId, MusicCommentThread, MusicListeningContext, MusicTrack, ProfileHomepageRecord, ProfileTheme, SmallTheater, SmallTheaterTopic, Sticker, StickerGroup, UserProfile, VisualProfile, VoomComment, VoomFrequency, VoomImageCandidate, VoomPost, VoomPostVisibility, WorldBookEntry } from '@/types/domain';
+import type { AppSettings, AppSnapshot, CharacterProfile, CharacterProfileHistoryEntry, CharacterProfileHistoryField, ChatCallAttachment, ChatCallMode, ChatCallStatus, ChatImageAttachment, ChatImageCandidate, ChatLocationAttachment, ChatMessage, ChatMessageQuote, ChatMode, ChatModelOverrides, ChatModelScope, ChatMusicListenInviteAttachment, ChatMusicListenInviteStatus, ChatOfflineInvitationAttachment, ChatOfflineInvitationStatus, ChatSmallTheaterLinkAttachment, ChatTransferAttachment, ChatTransferStatus, ChatVoiceAttachment, Conversation, ConversationMemoryRecord, ConversationSettings, CoupleSpaceState, FavoriteMessageKind, FavoriteMessageRecord, GenerateReplyInput, GeneratedImageRecord, GroupDiscoveryCandidate, GroupMember, GroupNpcDraft, ImageModuleId, MusicCommentThread, MusicListeningContext, MusicTrack, ProfileHomepageRecord, ProfileTheme, SmallTheater, SmallTheaterTopic, Sticker, StickerGroup, UserProfile, VisualProfile, VoomComment, VoomFrequency, VoomImageCandidate, VoomPost, VoomPostVisibility, WorldBookEntry } from '@/types/domain';
 import { createAccountId, createId } from '@/utils/id';
-import { getCharacterAiName, getCharacterInitialProfile, getCharacterVoomAuthorName, getCharacterVoomDisplayName, normalizeCharacterMindStateLines, normalizeCharacterProfile } from '@/utils/character';
+import { getCharacterAiName, getCharacterInitialProfile, getCharacterVoomAuthorName, getCharacterVoomDisplayName, getFriendRelationship, isCharacterFriend, normalizeCharacterMindStateLines, normalizeCharacterProfile } from '@/utils/character';
 import { getUserAiName, getUserDisplayName, getUserVoomAuthorName, normalizeUserProfile, normalizeVisualProfile } from '@/utils/profile';
 import { getImageGenerationSize, getImagePromptPresetForProvider, getSelectedImageModelOption, isImageModelSelectionDisabled, mergeVendorModels, normalizeAppSettings, normalizeChatModelOverrides } from '@/utils/settings';
 import { normalizeWorldBookEntry, normalizeWorldBooks } from '@/utils/worldBook';
@@ -14,7 +14,7 @@ import { getSmallTheaterVisibleText } from '@/utils/smallTheaterHtml';
 import { RECENT_STICKER_GROUP_NAME, cacheStickerImageUrl, createStickerFromDraft, createStickerGroup, getStickerDisplayImageUrl, isLegacyGanadiSticker, isLegacyGanadiStickerGroup, isRecentStickerGroupId, normalizeSticker, normalizeStickerGroup, shouldLocalizeStickerImageUrl, sortRecentStickers, type StickerImportDraft } from '@/utils/stickers';
 import { ageMemoryKind, collectIncrementalGrandSummaries, createMemoryRecord, estimateTokenCount, filterHighestMemoryLayers, getConversationActiveMessages, getConversationFloorCount, getGrandSummaryHiddenRange, getHiddenMessageIds, getMemoryContext, getMemoryMergeDepth, getMessageFloorMap, getMessagesInFloorRange, getNextSummaryRange, getNextSummaryStartFloor, getVisibleMessages, isIncrementalGrandSummary, normalizeConversationSettings, normalizeMemoryRecordEntries, renderCharacterMemoryPrompt, shouldCompressMemory } from '@/utils/memory';
 import { formatContentWithChineseTranslation, normalizeTranslationText } from '@/utils/translation';
-import { discoverGeneratedGroups, estimateRoleplayReplyInputTokens, fetchVendorModels, generateConversationSummary, generateGroupChatReply, generateImageByProvider, generateRoleplayReply, generateSmallTheater, generateUserVoomComments, generateVoomCommentReplies, generateVoomPost, hasTextGenerationConfig, shouldAutoGenerateMoment, type ConversationSummaryIdentityRule, type GroupDiscoveryCharacterContext, type RoleplayCallResponse, type RoleplayReplyResult, type RoleplayReplySegment } from '@/services/ai';
+import { discoverGeneratedGroups, estimateRoleplayReplyInputTokens, fetchVendorModels, generateConversationSummary, generateCoupleSpaceSnapshot, generateGroupChatReply, generateImageByProvider, generateRoleplayReply, generateSmallTheater, generateUserVoomComments, generateVoomCommentReplies, generateVoomPost, hasTextGenerationConfig, shouldAutoGenerateMoment, type ConversationSummaryIdentityRule, type GroupDiscoveryCharacterContext, type RoleplayCallResponse, type RoleplayReplyResult, type RoleplayReplySegment } from '@/services/ai';
 import { fetchMusicCoverUrl, mergeMusicTrack, refreshPlayableMusicTrack, searchMusicTracks } from '@/services/music';
 import { useMusicPlayerStore } from '@/stores/musicPlayerStore';
 import { GitHubBackupError, downloadGitHubBackup, downloadGitHubBackupVersion, ensureGitHubBackupRepository, formatGitHubBackupError, listGitHubBackupHistory, uploadGitHubBackup } from '@/services/githubBackup';
@@ -25,7 +25,8 @@ import { createLinkBackupFile, parseLinkBackupFileText, parseLinkBackupText, sti
 import { markRestoredGlobalNoticesSeen } from '@/utils/globalNotices';
 import { getVoomFrequencyChance, stripVoomCommentReplyPrefix } from '@/utils/voom';
 import { compressInlineImageDataUrl } from '@/utils/imageFile';
-import { hydrateStoredMediaRefs, isLocalMediaCacheUrl } from '@/utils/mediaStorage';
+import { hydrateStoredMediaRefs, isLocalMediaCacheUrl, materializeStoredMediaRefs } from '@/utils/mediaStorage';
+import { normalizeCoupleSpaceState } from '@/utils/coupleSpace';
 
 interface CreateUserVoomPostPayload {
   userId: string;
@@ -92,6 +93,8 @@ interface RequestRoleplayReplyOptions {
   excludeSourceMessageIds?: string[];
   callSession?: RoleplayCallSessionOptions;
   callResponseTargetMessageId?: string;
+  relationshipEvent?: 'character-reapply';
+  blockedInteraction?: boolean;
 }
 
 interface IncrementalGrandSummaryOptions {
@@ -141,7 +144,6 @@ const memoryTimelineTimeFormatter = new Intl.DateTimeFormat('zh-CN', {
   second: '2-digit',
   hourCycle: 'h23'
 });
-const oversizedImportSourceBytes = 48 * 1024 * 1024;
 const oneDayMs = 24 * 60 * 60 * 1000;
 
 function formatMemoryTimelineTime(timestamp: number) {
@@ -335,6 +337,7 @@ export const useAppStore = defineStore('app', () => {
   const regeneratingVoomImagePostIds = new Set<string>();
   const activeReplyRunIds = new Map<string, string>();
   const replyCancelVersions = new Map<string, number>();
+  const characterReadReceiptTimers = new Map<string, number>();
   const replyingConversationIds = ref<string[]>([]);
   const loadingReply = computed(() => replyingConversationIds.value.length > 0);
   const replyingVoomCommentPostIds = ref<string[]>([]);
@@ -370,14 +373,15 @@ export const useAppStore = defineStore('app', () => {
 
   const charactersForActiveUser = computed(() => {
     const activeUserId = user.value?.id;
-    return activeUserId ? characters.value.filter((character) => character.boundUserId === activeUserId) : characters.value;
+    const scopedCharacters = activeUserId ? characters.value.filter((character) => character.boundUserId === activeUserId) : characters.value;
+    return scopedCharacters.filter(isCharacterFriend);
   });
   const conversationsForActiveUser = computed(() => {
     const activeUserId = user.value?.id;
     return activeUserId ? conversations.value.filter((conversation) => conversation.userId === activeUserId) : conversations.value;
   });
   const displayAllFriends = computed(() => settings.value?.friendsDisplayScope === 'all-users');
-  const charactersForFriendsDisplay = computed(() => displayAllFriends.value ? characters.value : charactersForActiveUser.value);
+  const charactersForFriendsDisplay = computed(() => displayAllFriends.value ? characters.value.filter(isCharacterFriend) : charactersForActiveUser.value);
   const conversationsForFriendsDisplay = computed(() => displayAllFriends.value ? conversations.value : conversationsForActiveUser.value);
   const sortedConversations = computed(() => [...conversationsForActiveUser.value].sort((a, b) => b.updatedAt - a.updatedAt));
   const sortedVoomPosts = computed(() => [...voomPosts.value].sort((a, b) => b.createdAt - a.createdAt));
@@ -651,10 +655,6 @@ export const useAppStore = defineStore('app', () => {
     };
   }
 
-  function shouldUseMobileSafeRestore(sourceByteSize = 0) {
-    return Number.isFinite(sourceByteSize) && sourceByteSize >= oversizedImportSourceBytes;
-  }
-
   function stripMemoryVectorCache(memory: ConversationMemoryRecord): ConversationMemoryRecord {
     const hasMemoryVector = Array.isArray(memory.vector) && memory.vector.length > 0;
     const entries = memory.entries?.map((entry) => entry.vector?.length ? { ...entry, vector: [] } : entry);
@@ -684,57 +684,6 @@ export const useAppStore = defineStore('app', () => {
     return {
       ...snapshot,
       conversationMemories: snapshot.conversationMemories.map((memory) => stripMemoryVectorCache(memory))
-    };
-  }
-
-  function stripVoomPostMediaCache(post: VoomPost): VoomPost {
-    return {
-      ...post,
-      authorAvatar: stripInlineMediaUrl(post.authorAvatar),
-      image: stripInlineMediaUrl(post.image),
-      imageCandidates: undefined
-    };
-  }
-
-  function stripFavoriteMediaCache(record: FavoriteMessageRecord): FavoriteMessageRecord {
-    return {
-      ...record,
-      authorAvatar: stripInlineMediaUrl(record.authorAvatar),
-      characterAvatar: stripInlineMediaUrl(record.characterAvatar),
-      userAvatar: stripInlineMediaUrl(record.userAvatar),
-      message: stripMessageMediaCache(record.message)
-    };
-  }
-
-  function stripSettingsMediaCache(entry: AppSettings): AppSettings {
-    return normalizeAppSettings({
-      ...entry,
-      imageOpenAi: {
-        ...entry.imageOpenAi,
-        lastImageUrl: ''
-      },
-      imageNovelAi: {
-        ...entry.imageNovelAi,
-        lastImageUrl: ''
-      },
-      imagePollinations: {
-        ...entry.imagePollinations,
-        lastImageUrl: '',
-        referenceImage: stripInlineMediaUrl(entry.imagePollinations.referenceImage)
-      }
-    });
-  }
-
-  function slimOversizedRestoreSnapshot(snapshot: AppSnapshot): AppSnapshot {
-    const vectorSlimmedSnapshot = stripRestoreVectorCaches(snapshot);
-    return {
-      ...vectorSlimmedSnapshot,
-      messages: vectorSlimmedSnapshot.messages.map((message) => stripMessageMediaCache(message)),
-      voomPosts: vectorSlimmedSnapshot.voomPosts.map((post) => stripVoomPostMediaCache(post)),
-      stickers: vectorSlimmedSnapshot.stickers.map((sticker) => stripStickerLocalCache(sticker)),
-      generatedImages: [],
-      favorites: vectorSlimmedSnapshot.favorites.map((record) => stripFavoriteMediaCache(record)),
-      settings: stripSettingsMediaCache(vectorSlimmedSnapshot.settings)
     };
   }
 
@@ -2558,7 +2507,8 @@ export const useAppStore = defineStore('app', () => {
       callId: normalizedCall.callId,
       callMode: normalizedCall.mode,
       createdAt: normalizedCall.startedAt,
-      status: 'sent'
+      status: 'sent',
+      readAt: conversation.kind !== 'group' ? null : undefined
     };
     messages.value.push(message);
     await putEntity('messages', message);
@@ -3680,7 +3630,8 @@ export const useAppStore = defineStore('app', () => {
       subtitle: '刚刚成为好友',
       lastSeen: '现在',
       localWorldBookIds: payload.localWorldBookIds ?? [],
-      voomFrequency: payload.voomFrequency ?? 'medium'
+      voomFrequency: payload.voomFrequency ?? 'medium',
+      relationship: { status: 'friend', updatedAt: Date.now() }
     }, payload.boundUserId);
     const conversation: Conversation = {
       id: `conv_${character.id}`,
@@ -3702,6 +3653,137 @@ export const useAppStore = defineStore('app', () => {
       });
     }
     await Promise.all([putEntity('characters', character), putEntity('conversations', conversation)]);
+  }
+
+  async function setCharacterRelationship(
+    characterId: string,
+    status: NonNullable<CharacterProfile['relationship']>['status'],
+    options: { reason?: string; requestMessage?: string; requestedAt?: number; notice?: string } = {}
+  ) {
+    const character = characterById(characterId);
+    if (!character) return false;
+    const current = getFriendRelationship(character);
+    const reason = String(options.reason ?? '').trim();
+    const requestMessage = String(options.requestMessage ?? '').trim();
+    const now = Date.now();
+    await saveCharacterSnapshot({
+      ...character,
+      relationship: {
+        status,
+        updatedAt: now,
+        ...(reason ? { reason } : {}),
+        ...(['pending-user-request', 'pending-character-request'].includes(status) && requestMessage ? { requestMessage } : {}),
+        ...(['pending-user-request', 'pending-character-request'].includes(status) ? { requestedAt: options.requestedAt ?? now } : {})
+      }
+    });
+    const conversation = conversations.value.find((entry) => entry.kind !== 'group' && entry.charId === characterId);
+    if (conversation && options.notice && (current.status !== status || current.reason !== reason)) {
+      await appendConversationEvent(conversation.id, options.notice, { mode: 'online' });
+    }
+    return true;
+  }
+
+  async function blockCharacter(characterId: string) {
+    const character = characterById(characterId);
+    if (!character || !isCharacterFriend(character)) return false;
+    const conversation = conversations.value.find((entry) => entry.kind !== 'group' && entry.charId === characterId);
+    if (conversation) cancelConversationReply(conversation.id);
+    return setCharacterRelationship(characterId, 'blocked-by-user', {
+      notice: `你已将${getCharacterVoomDisplayName(character)}加入黑名单。`
+    });
+  }
+
+  async function unblockCharacter(characterId: string) {
+    const character = characterById(characterId);
+    if (!character || getFriendRelationship(character).status !== 'blocked-by-user') return false;
+    return setCharacterRelationship(characterId, 'friend', {
+      notice: `你已将${getCharacterVoomDisplayName(character)}移出黑名单，可以继续聊天。`
+    });
+  }
+
+  async function removeCharacterFriend(characterId: string) {
+    const character = characterById(characterId);
+    if (!character || !isCharacterFriend(character)) return false;
+    const conversation = conversations.value.find((entry) => entry.kind !== 'group' && entry.charId === characterId);
+    if (conversation) cancelConversationReply(conversation.id);
+    return setCharacterRelationship(characterId, 'deleted-by-user', {
+      notice: `你已删除${getCharacterVoomDisplayName(character)}。聊天记录和角色资料已保留，可重新发送好友申请。`
+    });
+  }
+
+  async function requestCharacterFriend(characterId: string, message: string) {
+    const character = characterById(characterId);
+    if (!character) return false;
+    const relationship = getFriendRelationship(character);
+    if (!['blocked-by-character', 'deleted-by-character', 'deleted-by-user'].includes(relationship.status)) return false;
+    const verification = message.trim().slice(0, 120) || '我是我，想重新加你为好友。';
+    const changed = await setCharacterRelationship(characterId, 'pending-user-request', {
+      requestMessage: verification,
+      requestedAt: Date.now(),
+      notice: `好友验证已发送：${verification}`
+    });
+    const conversation = conversations.value.find((entry) => entry.kind !== 'group' && entry.charId === characterId);
+    if (changed && conversation) {
+      await requestRoleplayReply(conversation.id, {
+        replyInstruction: `关系事件：用户在你拉黑或删除好友后重新发来好友验证：“${verification}”。你必须结合人设、最近冲突和关系记忆，在 messageActions.relationshipAction 明确输出 accept_request 或 reject_request。`
+      });
+    }
+    return changed;
+  }
+
+  async function applyCharacterRelationshipAction(characterId: string, action: NonNullable<RoleplayReplyResult['messageActions']>['relationshipAction']) {
+    if (!action) return false;
+    const character = characterById(characterId);
+    if (!character) return false;
+    const relationship = getFriendRelationship(character);
+    const reason = String(action.reason ?? '').trim();
+    if (action.type === 'block' && relationship.status === 'friend') {
+      return setCharacterRelationship(characterId, 'blocked-by-character', {
+        reason,
+        notice: `${getCharacterVoomDisplayName(character)}已将你加入黑名单。${reason ? ` 原因：${reason}` : ''}`
+      });
+    }
+    if (action.type === 'delete' && relationship.status === 'friend') {
+      return setCharacterRelationship(characterId, 'deleted-by-character', {
+        reason,
+        notice: `${getCharacterVoomDisplayName(character)}已删除好友关系。${reason ? ` 原因：${reason}` : ''}`
+      });
+    }
+    if (action.type === 'request_friend' && ['blocked-by-user', 'deleted-by-user'].includes(relationship.status)) {
+      const requestMessage = reason || '我想重新加你为好友。';
+      return setCharacterRelationship(characterId, 'pending-character-request', {
+        reason,
+        requestMessage,
+        requestedAt: Date.now(),
+        notice: `${getCharacterVoomDisplayName(character)}请求添加你为好友：${requestMessage}`
+      });
+    }
+    if (action.type === 'accept_request' && relationship.status === 'pending-user-request') {
+      return setCharacterRelationship(characterId, 'friend', {
+        reason,
+        notice: `${getCharacterVoomDisplayName(character)}已通过你的好友申请。`
+      });
+    }
+    if (action.type === 'reject_request' && relationship.status === 'pending-user-request') {
+      return setCharacterRelationship(characterId, 'blocked-by-character', {
+        reason,
+        notice: `${getCharacterVoomDisplayName(character)}拒绝了你的好友申请。${reason ? ` 原因：${reason}` : ''}`
+      });
+    }
+    return false;
+  }
+
+  async function respondCharacterFriendRequest(characterId: string, decision: 'accepted' | 'rejected') {
+    const character = characterById(characterId);
+    if (!character || getFriendRelationship(character).status !== 'pending-character-request') return false;
+    if (decision === 'accepted') {
+      return setCharacterRelationship(characterId, 'friend', {
+        notice: `你已通过${getCharacterVoomDisplayName(character)}的好友申请，可以继续聊天。`
+      });
+    }
+    return setCharacterRelationship(characterId, 'blocked-by-user', {
+      notice: `你已拒绝${getCharacterVoomDisplayName(character)}的好友申请。`
+    });
   }
 
   function groupCharacterContext(character: CharacterProfile): GroupDiscoveryCharacterContext {
@@ -4562,24 +4644,41 @@ export const useAppStore = defineStore('app', () => {
     queueStoredMediaPrune();
   }
 
-  async function compactChatImageForBackup(image: ChatImageAttachment): Promise<ChatImageAttachment> {
-    const sourceUrl = image.url?.trim() ?? '';
-    const nextUrl = sourceUrl ? await compactInlineDisplayImage(sourceUrl) : image.url;
-    const nextCandidates = sourceUrl && nextUrl
-      ? image.candidates
-        ?.filter((candidate) => candidate.image.trim() === sourceUrl)
-        .map((candidate) => ({ ...candidate, image: nextUrl }))
-      : undefined;
-    return {
-      ...image,
-      url: nextUrl,
-      candidates: nextCandidates?.length ? nextCandidates : undefined
+  type BackupImageCompactor = (value: string) => Promise<string>;
+
+  function createBackupImageCompactor(): BackupImageCompactor {
+    const compactedBySource = new Map<string, Promise<string>>();
+    return async (value: string) => {
+      const source = value.trim();
+      if (!source) return value;
+      let compacted = compactedBySource.get(source);
+      if (!compacted) {
+        compacted = compactInlineDisplayImage(source);
+        compactedBySource.set(source, compacted);
+      }
+      return await compacted;
     };
   }
 
-  async function compactMessageForBackup(message: ChatMessage): Promise<ChatMessage> {
-    const nextImage = message.image ? await compactChatImageForBackup(message.image) : message.image;
-    const nextQuoteImage = message.quote?.image ? await compactChatImageForBackup(message.quote.image) : message.quote?.image;
+  async function compactChatImageForBackup(image: ChatImageAttachment, compactImage: BackupImageCompactor): Promise<ChatImageAttachment> {
+    const sourceUrl = image.url?.trim() ?? '';
+    const nextUrl = sourceUrl ? await compactImage(sourceUrl) : image.url;
+    const nextCandidates = image.candidates
+      ? await Promise.all(image.candidates.map(async (candidate) => ({
+          ...candidate,
+          image: await compactImage(candidate.image)
+        })))
+      : image.candidates;
+    return {
+      ...image,
+      url: nextUrl,
+      candidates: nextCandidates
+    };
+  }
+
+  async function compactMessageForBackup(message: ChatMessage, compactImage: BackupImageCompactor): Promise<ChatMessage> {
+    const nextImage = message.image ? await compactChatImageForBackup(message.image, compactImage) : message.image;
+    const nextQuoteImage = message.quote?.image ? await compactChatImageForBackup(message.quote.image, compactImage) : message.quote?.image;
     return {
       ...message,
       image: nextImage,
@@ -4587,35 +4686,36 @@ export const useAppStore = defineStore('app', () => {
     };
   }
 
-  async function compactVoomPostForBackup(post: VoomPost): Promise<VoomPost> {
+  async function compactVoomPostForBackup(post: VoomPost, compactImage: BackupImageCompactor): Promise<VoomPost> {
     const sourceImage = post.image?.trim() ?? '';
-    const nextImage = sourceImage ? await compactInlineDisplayImage(sourceImage) : post.image;
-    const nextCandidates = sourceImage && nextImage
-      ? post.imageCandidates
-        ?.filter((candidate) => candidate.image.trim() === sourceImage)
-        .map((candidate) => ({ ...candidate, image: nextImage }))
-      : undefined;
+    const nextImage = sourceImage ? await compactImage(sourceImage) : post.image;
+    const nextCandidates = post.imageCandidates
+      ? await Promise.all(post.imageCandidates.map(async (candidate) => ({
+          ...candidate,
+          image: await compactImage(candidate.image)
+        })))
+      : post.imageCandidates;
     return {
       ...post,
       image: nextImage,
-      imageCandidates: nextCandidates?.length ? nextCandidates : undefined
+      imageCandidates: nextCandidates
     };
   }
 
-  async function compactGeneratedImageForBackup(record: GeneratedImageRecord): Promise<GeneratedImageRecord> {
+  async function compactGeneratedImageForBackup(record: GeneratedImageRecord, compactImage: BackupImageCompactor): Promise<GeneratedImageRecord> {
     return {
       ...record,
-      imageUrl: await compactInlineDisplayImage(record.imageUrl)
+      imageUrl: await compactImage(record.imageUrl)
     };
   }
 
-  async function compactCharacterForBackup(character: CharacterProfile): Promise<CharacterProfile> {
+  async function compactCharacterForBackup(character: CharacterProfile, compactImage: BackupImageCompactor): Promise<CharacterProfile> {
     const imageProfile = character.imageProfile;
     if (!imageProfile?.photos.length) return character;
     const photos = imageProfile.photos;
     const nextPhotos = await Promise.all(photos.map(async (photo) => ({
       ...photo,
-      imageUrl: await compactInlineDisplayImage(photo.imageUrl)
+      imageUrl: await compactImage(photo.imageUrl)
     })));
     return {
       ...character,
@@ -4626,24 +4726,40 @@ export const useAppStore = defineStore('app', () => {
     };
   }
 
+  async function compactStickerForBackup(sticker: Sticker, compactImage: BackupImageCompactor): Promise<Sticker> {
+    if (sticker.sourceType !== 'local-image') return sticker;
+    const localImage = sticker.cachedImageUrl?.trim()
+      || (sticker.imageUrl !== stickerBackupPlaceholder ? sticker.imageUrl.trim() : '');
+    if (!localImage) throw new Error(`本地贴纸“${sticker.description}”的图片文件已丢失，无法创建完整备份。`);
+    return {
+      ...sticker,
+      imageUrl: stickerBackupPlaceholder,
+      cachedImageUrl: await compactImage(localImage)
+    };
+  }
+
   async function compactSnapshotMediaForBackup(snapshot: AppSnapshot): Promise<AppSnapshot> {
+    const compactImage = createBackupImageCompactor();
     const characters: CharacterProfile[] = [];
-    for (const character of snapshot.characters) characters.push(await compactCharacterForBackup(character));
+    for (const character of snapshot.characters) characters.push(await compactCharacterForBackup(character, compactImage));
 
     const messages: ChatMessage[] = [];
-    for (const message of snapshot.messages) messages.push(await compactMessageForBackup(message));
+    for (const message of snapshot.messages) messages.push(await compactMessageForBackup(message, compactImage));
 
     const voomPostsForBackup: VoomPost[] = [];
-    for (const post of snapshot.voomPosts) voomPostsForBackup.push(await compactVoomPostForBackup(post));
+    for (const post of snapshot.voomPosts) voomPostsForBackup.push(await compactVoomPostForBackup(post, compactImage));
 
     const generatedImagesForBackup: GeneratedImageRecord[] = [];
-    for (const record of snapshot.generatedImages ?? []) generatedImagesForBackup.push(await compactGeneratedImageForBackup(record));
+    for (const record of snapshot.generatedImages ?? []) generatedImagesForBackup.push(await compactGeneratedImageForBackup(record, compactImage));
+
+    const stickersForBackup: Sticker[] = [];
+    for (const sticker of snapshot.stickers) stickersForBackup.push(await compactStickerForBackup(sticker, compactImage));
 
     const favoritesForBackup: FavoriteMessageRecord[] = [];
     for (const favorite of snapshot.favorites ?? []) {
       favoritesForBackup.push({
         ...favorite,
-        message: await compactMessageForBackup(favorite.message)
+        message: await compactMessageForBackup(favorite.message, compactImage)
       });
     }
 
@@ -4653,6 +4769,7 @@ export const useAppStore = defineStore('app', () => {
       messages,
       voomPosts: voomPostsForBackup,
       generatedImages: generatedImagesForBackup,
+      stickers: stickersForBackup,
       favorites: favoritesForBackup
     };
   }
@@ -4660,7 +4777,7 @@ export const useAppStore = defineStore('app', () => {
   async function createBackupFile(onProgress?: BackupProgressCallback) {
     if (!ready.value) await hydrate();
     await onProgress?.('正在读取本地数据', 20);
-    const snapshot = await loadSnapshot();
+    const snapshot = await materializeStoredMediaRefs(await loadSnapshot());
     await onProgress?.('正在整理备份内容', 65);
     const backupSnapshot = await compactSnapshotMediaForBackup({
       ...snapshot,
@@ -4676,13 +4793,11 @@ export const useAppStore = defineStore('app', () => {
   async function importBackupSnapshot(snapshot: AppSnapshot, options: ImportBackupOptions = {}): Promise<ImportBackupResult> {
     await options.onProgress?.('正在整理导入数据', 45);
     const normalizedSnapshot = keepDeviceBackupSettings(normalizeSnapshotForRestore(snapshot));
-    const slimmedForMobile = shouldUseMobileSafeRestore(options.sourceByteSize);
-    const restorableSnapshot = slimmedForMobile
-      ? slimOversizedRestoreSnapshot(normalizedSnapshot)
-      : stripRestoreVectorCaches(normalizedSnapshot);
+    const slimmedForMobile = false;
+    const restorableSnapshot = stripRestoreVectorCaches(normalizedSnapshot);
     const preparedSnapshot = prepareSnapshotForStore(restorableSnapshot);
     const persistentStorageGranted = await requestPersistentStorage();
-    await options.onProgress?.(slimmedForMobile ? '备份较大，正在写入轻量数据' : '正在写入本地数据库', 75);
+    await options.onProgress?.('正在写入本地数据库', 75);
 
     try {
       await replaceSnapshot(preparedSnapshot);
@@ -5025,11 +5140,50 @@ export const useAppStore = defineStore('app', () => {
 
   async function markConversationRead(conversationId: string) {
     const conversation = conversationById(conversationId);
-    if (!conversation || conversation.unreadCount === 0) return;
-    const nextConversation = { ...conversation, unreadCount: 0 };
-    const index = conversations.value.findIndex((item) => item.id === conversationId);
-    conversations.value[index] = nextConversation;
-    await putEntity('conversations', nextConversation);
+    if (!conversation) return;
+    const unreadMessages = messagesForConversation(conversationId)
+      .filter((message) => message.mode === 'online' && message.sender === 'char' && message.readAt === null)
+      .map((message) => ({ ...message, readAt: Date.now() }));
+    const tasks: Array<Promise<unknown>> = unreadMessages.map((message) => putEntity('messages', message));
+    if (unreadMessages.length) {
+      const readById = new Map(unreadMessages.map((message) => [message.id, message]));
+      messages.value = messages.value.map((message) => readById.get(message.id) ?? message);
+    }
+    if (conversation.unreadCount > 0) {
+      const nextConversation = { ...conversation, unreadCount: 0 };
+      const index = conversations.value.findIndex((item) => item.id === conversationId);
+      conversations.value[index] = nextConversation;
+      tasks.push(putEntity('conversations', nextConversation));
+    }
+    await Promise.all(tasks);
+  }
+
+  async function markUserMessagesReadByCharacter(conversationId: string, sentBefore: number) {
+    const unreadMessages = messagesForConversation(conversationId)
+      .filter((message) => message.mode === 'online'
+        && message.sender === 'user'
+        && message.readAt === null
+        && message.createdAt <= sentBefore)
+      .map((message) => ({ ...message, readAt: Date.now() }));
+    if (!unreadMessages.length) return;
+    const readById = new Map(unreadMessages.map((message) => [message.id, message]));
+    messages.value = messages.value.map((message) => readById.get(message.id) ?? message);
+    await Promise.all(unreadMessages.map((message) => putEntity('messages', message)));
+  }
+
+  function scheduleCharacterReadReceipt(conversationId: string, sentBefore: number) {
+    const previousTimer = characterReadReceiptTimers.get(conversationId);
+    if (previousTimer !== undefined) window.clearTimeout(previousTimer);
+    const unreadCount = messagesForConversation(conversationId)
+      .filter((message) => message.mode === 'online' && message.sender === 'user' && message.readAt === null && message.createdAt <= sentBefore)
+      .length;
+    if (!unreadCount) return;
+    const delay = 700 + Math.min(1_300, unreadCount * 180 + conversationId.length * 37 % 900);
+    const timer = window.setTimeout(() => {
+      characterReadReceiptTimers.delete(conversationId);
+      void markUserMessagesReadByCharacter(conversationId, sentBefore);
+    }, delay);
+    characterReadReceiptTimers.set(conversationId, timer);
   }
 
   async function appendUserMessage(conversationId: string, content: string, quote?: ChatMessageQuote | null) {
@@ -5037,6 +5191,8 @@ export const useAppStore = defineStore('app', () => {
     const conversation = conversationById(conversationId);
     if (!trimmedContent || !conversation) return;
     if (conversation.kind === 'group' && !isActiveGroupMember(groupUserMember(conversation))) return;
+    const privateCharacter = conversation.kind !== 'group' ? characterById(conversation.charId) : null;
+    const privateMessageBlocked = Boolean(privateCharacter && !isCharacterFriend(privateCharacter));
 
     const userMessage: ChatMessage = {
       id: createId('msg'),
@@ -5047,7 +5203,8 @@ export const useAppStore = defineStore('app', () => {
       content: trimmedContent,
       quote: cloneMessageQuote(quote),
       createdAt: Date.now(),
-      status: 'sent'
+      status: privateMessageBlocked ? 'failed' : 'sent',
+      readAt: !privateMessageBlocked && conversation.activeMode === 'online' && conversation.kind !== 'group' ? null : undefined
     };
     messages.value.push(userMessage);
     await putEntity('messages', userMessage);
@@ -5055,7 +5212,7 @@ export const useAppStore = defineStore('app', () => {
     const conversationIndex = conversations.value.findIndex((item) => item.id === conversationId);
     if (conversationIndex >= 0) conversations.value[conversationIndex] = nextConversation;
     await putEntity('conversations', nextConversation);
-    void maybeAutoSummarizeConversation(conversationId);
+    if (!privateMessageBlocked) void maybeAutoSummarizeConversation(conversationId);
     return userMessage;
   }
 
@@ -5073,7 +5230,8 @@ export const useAppStore = defineStore('app', () => {
       callId: callId.trim(),
       callMode,
       createdAt: Date.now(),
-      status: 'sent'
+      status: 'sent',
+      readAt: conversation.kind !== 'group' ? null : undefined
     };
     messages.value.push(userMessage);
     await putEntity('messages', userMessage);
@@ -5106,7 +5264,8 @@ export const useAppStore = defineStore('app', () => {
       callMode,
       contextOnly: true,
       createdAt: Date.now(),
-      status: 'sent'
+      status: 'sent',
+      readAt: conversation.kind !== 'group' ? null : undefined
     };
     messages.value.push(userMessage);
     await putEntity('messages', userMessage);
@@ -5162,7 +5321,8 @@ export const useAppStore = defineStore('app', () => {
       },
       quote: cloneMessageQuote(quote),
       createdAt: sentAt,
-      status: 'sent'
+      status: 'sent',
+      readAt: conversation.activeMode === 'online' && conversation.kind !== 'group' ? null : undefined
     };
     messages.value.push(userMessage);
     await putEntity('messages', userMessage);
@@ -5500,7 +5660,8 @@ export const useAppStore = defineStore('app', () => {
       },
       quote: cloneMessageQuote(quote),
       createdAt: Date.now(),
-      status: 'sent'
+      status: 'sent',
+      readAt: conversation.activeMode === 'online' && conversation.kind !== 'group' ? null : undefined
     };
     messages.value.push(userMessage);
     await putEntity('messages', userMessage);
@@ -5536,7 +5697,8 @@ export const useAppStore = defineStore('app', () => {
       },
       quote: cloneMessageQuote(quote),
       createdAt: Date.now(),
-      status: 'sent'
+      status: 'sent',
+      readAt: conversation.activeMode === 'online' && conversation.kind !== 'group' ? null : undefined
     };
     messages.value.push(userMessage);
     await putEntity('messages', userMessage);
@@ -5563,7 +5725,8 @@ export const useAppStore = defineStore('app', () => {
       location: normalizedLocation,
       quote: cloneMessageQuote(quote),
       createdAt: Date.now(),
-      status: 'sent'
+      status: 'sent',
+      readAt: conversation.activeMode === 'online' && conversation.kind !== 'group' ? null : undefined
     };
     messages.value.push(userMessage);
     await putEntity('messages', userMessage);
@@ -5589,7 +5752,8 @@ export const useAppStore = defineStore('app', () => {
       transfer: normalizedTransfer,
       quote: cloneMessageQuote(quote),
       createdAt: Date.now(),
-      status: 'sent'
+      status: 'sent',
+      readAt: conversation.activeMode === 'online' && conversation.kind !== 'group' ? null : undefined
     };
     messages.value.push(userMessage);
     await putEntity('messages', userMessage);
@@ -5617,7 +5781,8 @@ export const useAppStore = defineStore('app', () => {
       musicListenInvite: invitation,
       quote: cloneMessageQuote(quote),
       createdAt: Date.now(),
-      status: 'sent'
+      status: 'sent',
+      readAt: conversation.kind !== 'group' ? null : undefined
     };
     messages.value.push(userMessage);
     await putEntity('messages', userMessage);
@@ -5643,7 +5808,8 @@ export const useAppStore = defineStore('app', () => {
       theaterLink,
       quote: cloneMessageQuote(quote),
       createdAt: sentAt,
-      status: 'sent'
+      status: 'sent',
+      readAt: conversation.kind !== 'group' ? null : undefined
     };
     messages.value.push(userMessage);
     await putEntity('messages', userMessage);
@@ -6449,6 +6615,11 @@ export const useAppStore = defineStore('app', () => {
     if (!conversation || isConversationReplying(conversationId)) return;
     const character = characterById(conversation.charId);
     if (!character) return;
+    const relationshipStatus = getFriendRelationship(character).status;
+    const isCharacterReapplyEvent = options?.relationshipEvent === 'character-reapply'
+      && ['blocked-by-user', 'deleted-by-user'].includes(relationshipStatus);
+    const isBlockedInteraction = Boolean(options?.blockedInteraction && relationshipStatus !== 'friend');
+    if (relationshipStatus !== 'friend' && relationshipStatus !== 'pending-user-request' && !isCharacterReapplyEvent && !isBlockedInteraction) return;
     const boundUser = userById(character.boundUserId) ?? user.value;
     if (!boundUser) return;
 
@@ -6465,6 +6636,9 @@ export const useAppStore = defineStore('app', () => {
     if (!replyRunId) return;
     const replyCancelVersion = replyCancelVersions.get(conversationId) ?? 0;
     const generationStartedAt = Date.now();
+    if (conversation.activeMode === 'online' && conversation.kind !== 'group') {
+      scheduleCharacterReadReceipt(conversationId, generationStartedAt);
+    }
     try {
       if (chatSettings.stickerVisionEnabled) {
         await localizeRecentStickerMessagesForVision(conversationId);
@@ -6616,6 +6790,7 @@ export const useAppStore = defineStore('app', () => {
         : null;
       const callInvite = conversation.activeMode === 'online' ? parsedReply.messageActions?.callInvite ?? null : null;
       const callResponse = conversation.activeMode === 'online' ? parsedReply.messageActions?.callResponse ?? null : null;
+      const relationshipAction = conversation.activeMode === 'online' ? parsedReply.messageActions?.relationshipAction ?? null : null;
       const directCallResponseTargetMessage = findOutgoingCallResponseTarget(conversationId, options?.callResponseTargetMessageId);
       if (options?.callResponseTargetMessageId && directCallResponseTargetMessage?.call?.status !== 'ringing') {
         return [];
@@ -6629,7 +6804,7 @@ export const useAppStore = defineStore('app', () => {
         const quote = targetMessage ? createMessageQuoteSnapshot(targetMessage) : null;
         if (quote) quoteByReplyIndex.set(Math.max(0, Math.floor(quoteAction.replyIndex)), quote);
       }
-      if (!effectiveReplyMessages.length && !replyStickers.length && !replyImages.length && !narrationMessages.length && !hasOrderedSticker && !hasOrderedNarration && !hasOrderedImage && !hasOrderedVoice && !hasOrderedLocation && !hasOrderedTransfer && !hasOrderedMusicAction && !validRecallMessageIds.length && !validTransferDecisions.length && !validMusicListenInviteDecisions.length && !canSendMusicListenInvite && !(parsedReply.messageActions?.musicActions ?? []).length && !offlineInvitation && !callInvite && !callResponseTargetMessage) {
+      if (!effectiveReplyMessages.length && !replyStickers.length && !replyImages.length && !narrationMessages.length && !hasOrderedSticker && !hasOrderedNarration && !hasOrderedImage && !hasOrderedVoice && !hasOrderedLocation && !hasOrderedTransfer && !hasOrderedMusicAction && !validRecallMessageIds.length && !validTransferDecisions.length && !validMusicListenInviteDecisions.length && !canSendMusicListenInvite && !(parsedReply.messageActions?.musicActions ?? []).length && !offlineInvitation && !callInvite && !callResponseTargetMessage && !relationshipAction) {
         showConfigAlert('AI 返回内容中没有可显示的聊天文本，请重试或检查模型输出格式。', '回复异常');
         return;
       }
@@ -6904,6 +7079,14 @@ export const useAppStore = defineStore('app', () => {
       }
       appendStickerMessages(replyStickers);
       const charMessages: ChatMessage[] = orderedSegments.length ? orderedCharMessages : [...charNarrationMessages, ...charMessagesAfterNarration];
+      if (isCharacterReapplyEvent || (isBlockedInteraction && ['blocked-by-user', 'deleted-by-user'].includes(relationshipStatus))) {
+        charMessages.forEach((message) => {
+          if (message.sender === 'char') {
+            message.status = 'failed';
+            message.readAt = undefined;
+          }
+        });
+      }
       appendRemainingMusicActionNotices(charMessages);
       if (isReplyRunCancelled(conversationId, replyCancelVersion)) return [];
       if (offlineInvitation) {
@@ -6960,6 +7143,12 @@ export const useAppStore = defineStore('app', () => {
         if (plotChoiceMessage) plotChoiceMessage.plotChoices = plotChoices;
       }
       if (charMessages.length) {
+        if (conversation.activeMode === 'online' && conversation.kind !== 'group') {
+          await markUserMessagesReadByCharacter(conversationId, generationStartedAt);
+          charMessages.forEach((message) => {
+            if (message.sender === 'char' && message.mode === 'online') message.readAt = null;
+          });
+        }
         messages.value.push(...charMessages);
         await Promise.all(charMessages.map((message) => putEntity('messages', message)));
         const incomingCharMessages = charMessages.filter((message) => message.sender === 'char');
@@ -6978,6 +7167,8 @@ export const useAppStore = defineStore('app', () => {
       } else {
         await touchConversationAfterMessageChange(conversationId);
       }
+
+      await applyCharacterRelationshipAction(character.id, relationshipAction);
 
       void maybeAutoSummarizeConversation(conversationId);
 
@@ -7142,6 +7333,10 @@ export const useAppStore = defineStore('app', () => {
   async function maybeRequestProactiveReply(conversationId: string) {
     const conversation = conversationById(conversationId);
     if (!conversation || isConversationReplying(conversationId)) return false;
+    const character = conversation.kind !== 'group' ? characterById(conversation.charId) : null;
+    const relationshipStatus = character ? getFriendRelationship(character).status : 'friend';
+    const canConsiderReapply = ['blocked-by-user', 'deleted-by-user'].includes(relationshipStatus);
+    if (relationshipStatus !== 'friend' && !canConsiderReapply) return false;
     const chatSettings = settingsForConversation(conversationId);
     if (!chatSettings.proactiveReply.enabled) return false;
 
@@ -7156,7 +7351,13 @@ export const useAppStore = defineStore('app', () => {
     await touchProactiveReplyAttempt(chatSettings, now);
     if (Math.random() >= getVoomFrequencyChance(chatSettings.proactiveReply.frequency)) return false;
 
-    await requestRoleplayReply(conversationId, { proactive: true });
+    await requestRoleplayReply(conversationId, canConsiderReapply
+      ? {
+        proactive: true,
+        relationshipEvent: 'character-reapply',
+        replyInstruction: '这是独立关系事件：你被用户拉黑或删除后，正在考虑是否重新申请好友。普通聊天消息无法送达。只有你按人设和关系记忆确实想恢复联系时，才在 relationshipAction 输出 request_friend，并把 reason 写成简短好友验证；否则保持 null。'
+      }
+      : { proactive: true });
     return true;
   }
 
@@ -7788,6 +7989,63 @@ export const useAppStore = defineStore('app', () => {
       await saveSettings({ ...settings.value, smallTheaterAutoCleanup: cleanupSettings });
     }
     return removedCount;
+  }
+
+  async function saveCoupleSpaceState(characterId: string, nextState: CoupleSpaceState) {
+    const character = characterById(characterId);
+    const coupleSpace = normalizeCoupleSpaceState(nextState);
+    if (!character || !coupleSpace) return null;
+    await saveCharacterSnapshot({ ...character, coupleSpace });
+    return coupleSpace;
+  }
+
+  async function refreshCoupleSpace(conversationId: string) {
+    const conversation = conversationById(conversationId);
+    if (!conversation) return null;
+    const character = characterById(conversation.charId);
+    if (!character?.coupleSpace?.consentGrantedAt) {
+      showConfigAlert('请先确认双方自愿共享，再同步情侣空间。', '需要共享授权');
+      return null;
+    }
+    const boundUser = userById(character.boundUserId) ?? user.value;
+    if (!boundUser) return null;
+    const chatSettings = settingsForConversation(conversationId);
+    const modelOverride = getConversationTextModelOverride(chatSettings, 'online');
+    if (!hasConfiguredTextModel(modelOverride)) {
+      showConfigAlert('请先配置当前线上聊天的 API 模型，再同步情侣空间。', '需要配置 API 模型');
+      return null;
+    }
+
+    const visibleMessages = visibleMessagesForConversation(conversationId);
+    const snapshot = await generateCoupleSpaceSnapshot({
+      context: {
+        user: boundUser,
+        character,
+        boundUser,
+        mode: conversation.activeMode,
+        messages: visibleMessages,
+        worldBooks: worldBooks.value,
+        conversationSummary: conversation.summary,
+        memorySummary: await memoryContextForConversationAsync(conversationId, visibleMessages.slice(-10).map((message) => messageReadableContent(message)).join('\n'), {
+          modelOverride: getConversationTextModelOverride(chatSettings, 'summary', conversation.activeMode)
+        }),
+        stickerVisionEnabled: chatSettings.stickerVisionEnabled,
+        timeAwareness: chatSettings.timeAwareness,
+        timeAwarenessNow: Date.now(),
+        musicListening: musicListeningContextForConversation(conversationId)
+      },
+      previousSnapshot: character.coupleSpace.snapshot,
+      settings: settings.value ?? undefined,
+      modelOverride
+    });
+    const latestCharacter = characterById(character.id) ?? character;
+    const currentState = normalizeCoupleSpaceState(latestCharacter.coupleSpace) ?? character.coupleSpace;
+    const history = [
+      ...(currentState.snapshot ? [currentState.snapshot] : []),
+      ...currentState.history
+    ].filter((item, index, items) => items.findIndex((candidate) => candidate.id === item.id) === index).slice(0, 11);
+    await saveCoupleSpaceState(character.id, { ...currentState, snapshot, history });
+    return snapshot;
   }
 
   async function createSmallTheaterFromConversation(conversationId: string, topicId?: string, options?: { silent?: boolean }) {
@@ -8843,11 +9101,18 @@ export const useAppStore = defineStore('app', () => {
     saveAccountProfile,
     deleteUserProfile,
     deleteCharacterProfile,
+    blockCharacter,
+    unblockCharacter,
+    removeCharacterFriend,
+    requestCharacterFriend,
+    respondCharacterFriendRequest,
     clearCharacterHistory,
     setActiveUser,
     markVoomCharactersRead,
     saveVisualProfile,
     saveCharacter,
+    saveCoupleSpaceState,
+    refreshCoupleSpace,
     deleteCharacterProfileHistoryEntry,
     clearCharacterProfileHistory,
     markCharacterMindStateRead,

@@ -35,6 +35,17 @@ function clickDownload(url: string, filename: string) {
   anchor.remove();
 }
 
+export async function downloadDataUrl(dataUrl: string, fileName: string) {
+  const response = await fetch(dataUrl);
+  if (!response.ok) throw new Error('导出图片读取失败。');
+  const blob = await response.blob();
+  if (isNativeImageSaveAvailable()) {
+    await saveNativeImage(blob, fileName);
+    return;
+  }
+  clickDownload(dataUrl, fileName);
+}
+
 async function fetchImage(source: string) {
   try {
     const response = await fetch(source, { mode: 'cors' });

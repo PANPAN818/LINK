@@ -8,7 +8,7 @@
         <button v-if="isStyleTab" class="header-add-button" type="button" :aria-label="`分享${activeStyleLabel}样式`" :title="`分享${activeStyleLabel}样式`" @click="openStyleExporter">
           <Share2 :size="18" stroke-width="2.35" />
         </button>
-        <button v-if="activeTab !== 'global'" class="header-add-button" type="button" :aria-label="isStyleTab ? `添加${activeStyleLabel}样式` : '导入字体'" :title="isStyleTab ? `添加${activeStyleLabel}样式` : '导入字体'" @click="openActiveImporter">
+        <button class="header-add-button" type="button" :aria-label="isStyleTab ? `添加${activeStyleLabel}样式` : '导入字体'" :title="isStyleTab ? `添加${activeStyleLabel}样式` : '导入字体'" @click="openActiveImporter">
           <Plus :size="19" stroke-width="2.4" />
         </button>
       </div>
@@ -71,6 +71,61 @@
         </section>
 
         <section v-else-if="isStyleTab" class="online-style-library" :aria-label="`${activeStyleLabel}样式`">
+          <section v-if="activeTab === 'global'" class="global-library global-display-settings" aria-label="全局显示设置">
+            <article class="global-scale-card">
+              <header class="global-card-head">
+                <span class="font-mark"><Globe2 :size="18" /></span>
+                <div>
+                  <p class="section-kicker">Global Scale</p>
+                  <h2>整体显示</h2>
+                </div>
+                <strong>{{ globalScalePercent }}%</strong>
+              </header>
+
+              <input
+                class="scale-range"
+                type="range"
+                min="85"
+                max="120"
+                step="5"
+                :value="globalScalePercent"
+                aria-label="调整全站显示大小"
+                @input="updateGlobalScaleFromInput"
+              />
+
+              <footer class="scale-actions" aria-label="显示大小快捷操作">
+                <button class="scale-action" type="button" :disabled="globalScalePercent <= minGlobalScalePercent" aria-label="缩小显示" @click="nudgeGlobalScale(-5)">
+                  <Minus :size="16" />
+                </button>
+                <button class="scale-reset" type="button" :disabled="globalScalePercent === 100" @click="setGlobalScale(100)">默认</button>
+                <button class="scale-action" type="button" :disabled="globalScalePercent >= maxGlobalScalePercent" aria-label="放大显示" @click="nudgeGlobalScale(5)">
+                  <Plus :size="16" />
+                </button>
+              </footer>
+            </article>
+
+            <article class="global-fullscreen-card">
+              <span class="font-mark"><Maximize2 :size="18" /></span>
+              <div class="global-fullscreen-copy">
+                <p class="section-kicker">Immersive View</p>
+                <h2>全屏显示</h2>
+                <small>开启后隐藏手机顶部状态栏与底部导航/手势栏；关闭后自动恢复并保留安全区。</small>
+              </div>
+              <button
+                class="fullscreen-switch"
+                :class="{ active: fullscreenEnabled }"
+                type="button"
+                role="switch"
+                :aria-checked="fullscreenEnabled"
+                :aria-label="fullscreenEnabled ? '关闭全屏显示' : '开启全屏显示'"
+                :disabled="fullscreenBusy"
+                @click="toggleFullscreen"
+              >
+                <span></span>
+              </button>
+            </article>
+          </section>
+
           <header class="font-library-head">
             <div>
               <p class="section-kicker">{{ activeStyleKicker }}</p>
@@ -109,64 +164,7 @@
             </article>
           </section>
 
-          <p v-if="feedbackMessage" class="sync-feedback success">{{ feedbackMessage }}</p>
-        </section>
-
-        <section v-else class="global-library" aria-label="全局主题">
-          <article class="global-scale-card">
-            <header class="global-card-head">
-              <span class="font-mark"><Globe2 :size="18" /></span>
-              <div>
-                <p class="section-kicker">Global Scale</p>
-                <h2>整体显示</h2>
-              </div>
-              <strong>{{ globalScalePercent }}%</strong>
-            </header>
-
-            <input
-              class="scale-range"
-              type="range"
-              min="85"
-              max="120"
-              step="5"
-              :value="globalScalePercent"
-              aria-label="调整全站显示大小"
-              @input="updateGlobalScaleFromInput"
-            />
-
-            <footer class="scale-actions" aria-label="显示大小快捷操作">
-              <button class="scale-action" type="button" :disabled="globalScalePercent <= minGlobalScalePercent" aria-label="缩小显示" @click="nudgeGlobalScale(-5)">
-                <Minus :size="16" />
-              </button>
-              <button class="scale-reset" type="button" :disabled="globalScalePercent === 100" @click="setGlobalScale(100)">默认</button>
-              <button class="scale-action" type="button" :disabled="globalScalePercent >= maxGlobalScalePercent" aria-label="放大显示" @click="nudgeGlobalScale(5)">
-                <Plus :size="16" />
-              </button>
-            </footer>
-          </article>
-
-          <article class="global-fullscreen-card">
-            <span class="font-mark"><Maximize2 :size="18" /></span>
-            <div class="global-fullscreen-copy">
-              <p class="section-kicker">Immersive View</p>
-              <h2>全屏显示</h2>
-              <small>开启后隐藏手机顶部状态栏与底部导航/手势栏；关闭后自动恢复并保留安全区。</small>
-            </div>
-            <button
-              class="fullscreen-switch"
-              :class="{ active: fullscreenEnabled }"
-              type="button"
-              role="switch"
-              :aria-checked="fullscreenEnabled"
-              :aria-label="fullscreenEnabled ? '关闭全屏显示' : '开启全屏显示'"
-              :disabled="fullscreenBusy"
-              @click="toggleFullscreen"
-            >
-              <span></span>
-            </button>
-          </article>
-
-          <p v-if="fullscreenFeedback" class="sync-feedback" :class="fullscreenFeedbackError ? 'error' : 'success'">{{ fullscreenFeedback }}</p>
+          <p v-if="activeTab === 'global' && fullscreenFeedback" class="sync-feedback" :class="fullscreenFeedbackError ? 'error' : 'success'">{{ fullscreenFeedback }}</p>
           <p v-else-if="feedbackMessage" class="sync-feedback success">{{ feedbackMessage }}</p>
         </section>
       </section>
@@ -268,7 +266,7 @@
         <section v-if="activeStyleImportTab === 'code'" class="composer-section form-grid">
           <label class="field">
             <span>样式名称</span>
-            <input v-model="styleNameDraft" :placeholder="activeStyleScopeId === 'offline' ? '例如：月雾小说页' : '例如：浅雾绿聊天页'" />
+            <input v-model="styleNameDraft" :placeholder="activeStyleScopeId === 'global' ? '例如：薄荷全站主题' : activeStyleScopeId === 'offline' ? '例如：月雾小说页' : '例如：浅雾绿聊天页'" />
           </label>
           <label class="field style-code-field">
             <span>完整 CSS</span>
@@ -387,9 +385,12 @@ import { getLastNativeDisplayState } from '@/services/nativeDisplay';
 import { setFullscreenEnabled } from '@/services/systemBars';
 import type { AppSettings, AppThemeSettings, ThemeFontEntry, ThemeFontSource, ThemeStylePreset, ThemeStyleScopeSettings } from '@/types/domain';
 import { createId } from '@/utils/id';
+import { downloadDataUrl } from '@/utils/download';
 import { normalizeAppSettings } from '@/utils/settings';
 import {
   decodeThemeStylePresetsFromPng,
+  defaultGlobalThemeCss,
+  defaultGlobalThemePresetId,
   defaultOfflineThemeCss,
   defaultOfflineThemePresetId,
   defaultOnlineThemeCss,
@@ -400,7 +401,7 @@ import {
 type ThemeTab = 'font' | 'global' | 'online' | 'offline';
 type ImportTab = 'link' | 'file';
 type StyleImportTab = 'code' | 'png';
-type StyleScopeId = 'online' | 'offline';
+type StyleScopeId = 'global' | 'online' | 'offline';
 
 interface FontLoadErrorState {
   open: boolean;
@@ -485,17 +486,18 @@ const activeTab = computed<ThemeTab>(() => {
   return tabs.some((item) => item.id === tab) ? tab as ThemeTab : 'font';
 });
 const activeFontEntry = computed(() => fontEntries.value.find((entry) => entry.id === fontSettings.value.activeFontId) ?? null);
-const isStyleTab = computed(() => activeTab.value === 'online' || activeTab.value === 'offline');
-const activeStyleScopeId = computed<StyleScopeId>(() => activeTab.value === 'offline' ? 'offline' : 'online');
-const activeStyleLabel = computed(() => activeStyleScopeId.value === 'offline' ? '线下' : '线上');
-const activeStyleKicker = computed(() => activeStyleScopeId.value === 'offline' ? 'Offline Style' : 'Online Style');
-const activeStyleSettings = computed(() => themeSettings.value[activeStyleScopeId.value]);
+const isStyleTab = computed(() => activeTab.value !== 'font');
+const activeStyleScopeId = computed<StyleScopeId>(() => activeTab.value === 'global' ? 'global' : activeTab.value === 'offline' ? 'offline' : 'online');
+const activeStyleLabel = computed(() => getThemeStyleScopeLabel(activeStyleScopeId.value));
+const activeStyleKicker = computed(() => activeStyleScopeId.value === 'global' ? 'Global Style' : activeStyleScopeId.value === 'offline' ? 'Offline Style' : 'Online Style');
+const activeStyleSettings = computed(() => getThemeStyleScope(themeSettings.value, activeStyleScopeId.value));
 const stylePresets = computed(() => activeStyleSettings.value.presets);
-const activeDefaultStylePresetId = computed(() => activeStyleScopeId.value === 'offline' ? defaultOfflineThemePresetId : defaultOnlineThemePresetId);
+const activeDefaultStylePresetId = computed(() => activeStyleScopeId.value === 'global' ? defaultGlobalThemePresetId : activeStyleScopeId.value === 'offline' ? defaultOfflineThemePresetId : defaultOnlineThemePresetId);
+const activeDefaultStyleCss = computed(() => activeStyleScopeId.value === 'global' ? defaultGlobalThemeCss : activeStyleScopeId.value === 'offline' ? defaultOfflineThemeCss : defaultOnlineThemeCss);
 const defaultStylePreset = computed<ThemeStylePreset>(() => ({
   id: activeDefaultStylePresetId.value,
   name: `默认${activeStyleLabel.value}样式`,
-  css: activeStyleScopeId.value === 'offline' ? defaultOfflineThemeCss : defaultOnlineThemeCss,
+  css: activeDefaultStyleCss.value,
   source: 'custom',
   createdAt: 0,
   updatedAt: 0
@@ -552,13 +554,26 @@ function cloneStyleScope(scope: ThemeStyleScopeSettings): ThemeStyleScopeSetting
   };
 }
 
+function getThemeStyleScope(settings: AppThemeSettings, scopeId: StyleScopeId) {
+  return scopeId === 'global' ? settings.global.style : settings[scopeId];
+}
+
+function getThemeStyleScopeLabel(scopeId: StyleScopeId) {
+  if (scopeId === 'global') return '全站';
+  return scopeId === 'offline' ? '线下' : '线上';
+}
+
 function cloneThemeSettings(settings: AppThemeSettings): AppThemeSettings {
   return {
     fonts: {
       activeFontId: settings.fonts.activeFontId,
       entries: settings.fonts.entries.map(cloneFontEntry)
     },
-    global: { scale: settings.global.scale, fullscreen: settings.global.fullscreen },
+    global: {
+      scale: settings.global.scale,
+      fullscreen: settings.global.fullscreen,
+      style: cloneStyleScope(settings.global.style)
+    },
     online: cloneStyleScope(settings.online),
     offline: cloneStyleScope(settings.offline)
   };
@@ -684,17 +699,19 @@ async function saveThemeSettings(nextThemeSettings: AppThemeSettings) {
 
 function getThemeSaveErrorMessage(error: unknown) {
   if (error instanceof DOMException && ['QuotaExceededError', 'UnknownError'].includes(error.name)) {
-    return '字体文件没有写入本机存储，可能是浏览器空间不足或字体文件过大。请删除一些本地数据后重试，或改用字体链接导入。';
+    return '主题内容没有写入本机存储，可能是浏览器空间不足或导入内容过大。请删除一些本地数据后重试。';
   }
-  return error instanceof Error && error.message ? error.message : '字体设置没有写入本机存储，请重试。';
+  return error instanceof Error && error.message ? error.message : '主题设置没有写入本机存储，请重试。';
 }
 
-async function trySaveThemeSettings(nextThemeSettings: AppThemeSettings) {
+async function trySaveThemeSettings(nextThemeSettings: AppThemeSettings, target: 'font' | 'style' = 'font') {
   try {
     await saveThemeSettings(nextThemeSettings);
     return true;
   } catch (error) {
-    importError.value = getThemeSaveErrorMessage(error);
+    const message = getThemeSaveErrorMessage(error);
+    if (target === 'style') styleImportError.value = message;
+    else importError.value = message;
     return false;
   }
 }
@@ -718,7 +735,7 @@ function openStyleImporter() {
   activeStyleImportTab.value = 'code';
   editingStylePresetId.value = '';
   styleNameDraft.value = '';
-  styleCssDraft.value = activeStyleScopeId.value === 'offline' ? defaultOfflineThemeCss : defaultOnlineThemeCss;
+  styleCssDraft.value = activeDefaultStyleCss.value;
   selectedStylePngFile.value = null;
   styleImportError.value = '';
   feedbackMessage.value = '';
@@ -854,10 +871,10 @@ async function importThemeStyleFromCode() {
   }
   const entry = createStylePreset({ name: styleNameDraft.value, css });
   const nextThemeSettings = cloneThemeSettings(themeSettings.value);
-  const scope = nextThemeSettings[activeStyleScopeId.value];
+  const scope = getThemeStyleScope(nextThemeSettings, activeStyleScopeId.value);
   scope.presets = [entry, ...scope.presets];
   scope.activePresetId = entry.id;
-  if (!await trySaveThemeSettings(nextThemeSettings)) return;
+  if (!await trySaveThemeSettings(nextThemeSettings, 'style')) return;
   resetStyleImporterDraft();
   feedbackMessage.value = `已保存并应用 ${entry.name}。`;
 }
@@ -869,7 +886,7 @@ async function updateThemeStyleFromCode() {
     return;
   }
   const nextThemeSettings = cloneThemeSettings(themeSettings.value);
-  const scope = nextThemeSettings[activeStyleScopeId.value];
+  const scope = getThemeStyleScope(nextThemeSettings, activeStyleScopeId.value);
   const entry = scope.presets.find((item) => item.id === editingStylePresetId.value);
   if (!entry) {
     styleImportError.value = '没有找到要编辑的样式，请关闭后重试。';
@@ -878,7 +895,7 @@ async function updateThemeStyleFromCode() {
   entry.name = styleNameDraft.value.trim() || `自定义${activeStyleLabel.value}样式`;
   entry.css = css;
   entry.updatedAt = Date.now();
-  if (!await trySaveThemeSettings(nextThemeSettings)) return;
+  if (!await trySaveThemeSettings(nextThemeSettings, 'style')) return;
   const updatedName = entry.name;
   resetStyleImporterDraft();
   feedbackMessage.value = `已更新 ${updatedName}。`;
@@ -897,7 +914,7 @@ async function importThemeStylesFromPng() {
   try {
     const decoded = await decodeThemeStylePresetsFromPng(await readFileAsDataUrl(file));
     if (decoded.scope && decoded.scope !== activeStyleScopeId.value) {
-      styleImportError.value = `这张 PNG 是${decoded.scope === 'offline' ? '线下' : '线上'}样式，请切换到对应标签后再导入。`;
+      styleImportError.value = `这张 PNG 是${getThemeStyleScopeLabel(decoded.scope)}样式，请切换到对应标签后再导入。`;
       return;
     }
     const importedPresets = decoded.presets
@@ -912,10 +929,10 @@ async function importThemeStylesFromPng() {
       return;
     }
     const nextThemeSettings = cloneThemeSettings(themeSettings.value);
-    const scope = nextThemeSettings[activeStyleScopeId.value];
+    const scope = getThemeStyleScope(nextThemeSettings, activeStyleScopeId.value);
     scope.presets = [...importedPresets, ...scope.presets];
     scope.activePresetId = importedPresets[0].id;
-    if (!await trySaveThemeSettings(nextThemeSettings)) return;
+    if (!await trySaveThemeSettings(nextThemeSettings, 'style')) return;
     resetStyleImporterDraft();
     feedbackMessage.value = `已导入并应用 ${importedPresets[0].name}。`;
   } catch (error) {
@@ -1145,7 +1162,7 @@ async function resetFont() {
 
 async function applyThemeStyle(styleId: string) {
   const nextThemeSettings = cloneThemeSettings(themeSettings.value);
-  const scope = nextThemeSettings[activeStyleScopeId.value];
+  const scope = getThemeStyleScope(nextThemeSettings, activeStyleScopeId.value);
   const styleName = styleId === activeDefaultStylePresetId.value
     ? `默认${activeStyleLabel.value}样式`
     : scope.presets.find((entry) => entry.id === styleId)?.name ?? `${activeStyleLabel.value}样式`;
@@ -1156,7 +1173,7 @@ async function applyThemeStyle(styleId: string) {
 
 async function removeThemeStyle(styleId: string) {
   const nextThemeSettings = cloneThemeSettings(themeSettings.value);
-  const scope = nextThemeSettings[activeStyleScopeId.value];
+  const scope = getThemeStyleScope(nextThemeSettings, activeStyleScopeId.value);
   scope.presets = scope.presets.filter((entry) => entry.id !== styleId);
   if (scope.activePresetId === styleId) scope.activePresetId = '';
   await saveThemeSettings(nextThemeSettings);
@@ -1177,15 +1194,6 @@ function getDownloadFileName(presets: ThemeStylePreset[]) {
   return `${baseName.replace(/[\/:*?"<>|]+/g, '-').slice(0, 48) || `LINK${activeStyleLabel.value}样式`}.png`;
 }
 
-function downloadDataUrl(dataUrl: string, fileName: string) {
-  const link = document.createElement('a');
-  link.href = dataUrl;
-  link.download = fileName;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-}
-
 function exportSelectedThemeStyles() {
   if (isExportingStyle.value) return;
   const selectedIds = new Set(selectedExportStyleIds.value);
@@ -1201,7 +1209,7 @@ function exportSelectedThemeStyles() {
         scope: activeStyleScopeId.value,
         coverImageDataUrl: styleExportCoverPreview.value || undefined
       });
-      downloadDataUrl(dataUrl, getDownloadFileName(presets));
+      await downloadDataUrl(dataUrl, getDownloadFileName(presets));
       styleExportError.value = '';
       showStyleExporter.value = false;
       feedbackMessage.value = `已导出 ${presets.length} 个${activeStyleLabel.value}样式 PNG。`;

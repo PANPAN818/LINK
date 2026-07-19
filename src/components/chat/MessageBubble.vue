@@ -208,6 +208,7 @@
           <img v-if="quoteThumbnail" class="quote-thumbnail" :src="quoteThumbnail" :alt="quoteText" draggable="false" />
         </div>
       </div>
+      <span v-if="message.status === 'failed'" class="message-failed-indicator" title="消息发送失败" aria-label="消息发送失败">!</span>
         <div v-if="showMessageMeta" class="message-meta">
           <span v-if="showReadState" class="read-state">{{ statusLabel }}</span>
           <time v-if="showMessageTime">{{ formatChatTime(message.createdAt) }}</time>
@@ -272,6 +273,7 @@ import { DoorOpen, Globe2, LoaderCircle, Music2, Pause, Play, Quote, X } from 'l
 import AppModal from '@/components/common/AppModal.vue';
 import type { CharacterProfile, ChatAppearanceSettings, ChatImageCandidate, ChatMessage, UserProfile } from '@/types/domain';
 import { useAppStore } from '@/stores/appStore';
+import { extractJsonContent, normalizeLooseModelReply } from '@/utils/aiResponse';
 import { getCharacterDisplayName } from '@/utils/character';
 import { formatChatTime } from '@/utils/time';
 import { defaultConversationSettings } from '@/utils/memory';
@@ -358,22 +360,6 @@ let activeVoiceAudio: HTMLAudioElement | null = null;
 const swipeTriggerDistance = 54;
 const swipeMaxDistance = 74;
 
-function extractJsonContent(content: string) {
-  const trimmed = content.trim();
-  const fenced = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
-  if (fenced) return fenced[1].trim();
-
-  if (trimmed.startsWith('{') && trimmed.endsWith('}')) return trimmed;
-
-  const firstBrace = trimmed.indexOf('{');
-  const lastBrace = trimmed.lastIndexOf('}');
-  if (firstBrace >= 0 && lastBrace > firstBrace) {
-    return trimmed.slice(firstBrace, lastBrace + 1).trim();
-  }
-
-  return trimmed;
-}
-
 function normalizeTextFragments(value: unknown): string[] {
   if (Array.isArray(value)) return value.flatMap((item) => normalizeTextFragments(item));
   if (typeof value === 'string' || typeof value === 'number') {
@@ -395,10 +381,10 @@ const displayContent = computed(() => {
   if (props.message.sender !== 'char') return props.message.content;
   try {
     const parsed = JSON.parse(extractJsonContent(props.message.content)) as Record<string, unknown>;
-    const fragments = normalizeTextFragments(parsed.replies ?? parsed.reply ?? parsed.content ?? parsed.message ?? parsed.text);
-    return fragments.length ? fragments.join('\n') : props.message.content;
+    const fragments = normalizeTextFragments(parsed.replies ?? parsed.reply ?? parsed.messages ?? parsed.content ?? parsed.message ?? parsed.text);
+    return fragments.length ? fragments.join('\n') : normalizeLooseModelReply(props.message.content);
   } catch {
-    return props.message.content;
+    return normalizeLooseModelReply(props.message.content);
   }
 });
 
@@ -686,11 +672,7 @@ const showMessageTime = computed(() => props.appearance.showMessageTime && !prop
 const showReadState = computed(() => props.appearance.showReadStatus && messageVisualSender.value !== 'system' && !props.message.voomEventType && !props.message.voomPostId);
 const showMessageMeta = computed(() => showMessageTime.value || showReadState.value);
 
-const statusLabel = computed(() => ({
-  sending: '发送中',
-  sent: '已读',
-  failed: '未送达'
-}[props.message.status ?? 'sent']));
+const statusLabel = computed(() => props.message.readAt === null ? '未读' : '已读');
 const swipeQuoteReady = computed(() => swipeOffset.value >= swipeTriggerDistance);
 const swipeStyle = computed(() => ({
   '--swipe-quote-offset': `${0 - swipeOffset.value}px`
@@ -1171,6 +1153,22 @@ onBeforeUnmount(() => {
 .message-row.user .bubble-wrap {
   order: 1;
   flex-direction: row-reverse;
+}
+
+.message-failed-indicator {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  margin-bottom: 7px;
+  border-radius: 50%;
+  background: #f04444;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1;
+  box-shadow: 0 2px 6px rgba(240, 68, 68, 0.28);
 }
 
 .bubble-stack {

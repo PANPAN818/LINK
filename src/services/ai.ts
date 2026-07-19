@@ -1,6 +1,7 @@
 import { unzipSync } from 'fflate';
-import type { ApiVendor, AppSettings, CharacterProfile, ChatMessage, ConversationTimeAwarenessSettings, GenerateReplyInput, GroupDiscoveryCandidate, GroupMember, ImageProviderType, MusicComment, MusicTrack, NovelAiModelOption, PollinationsModelOption, PromptContext, SmallTheater, SmallTheaterTopic, UserProfile, VoomComment, VoomFrequency, VoomPost, WorldBookEntry } from '@/types/domain';
+import type { ApiVendor, AppSettings, CharacterProfile, ChatMessage, ConversationTimeAwarenessSettings, CoupleSpaceSnapshot, GenerateReplyInput, GroupDiscoveryCandidate, GroupMember, ImageProviderType, MusicComment, MusicTrack, NovelAiModelOption, PollinationsModelOption, PromptContext, SmallTheater, SmallTheaterTopic, UserProfile, VoomComment, VoomFrequency, VoomPost, WorldBookEntry } from '@/types/domain';
 import { createId } from '@/utils/id';
+import { extractJsonContent, normalizeLooseModelReply } from '@/utils/aiResponse';
 import { getCharacterAiName } from '@/utils/character';
 import { getUserAiName } from '@/utils/profile';
 import { defaultNovelAiModels, defaultPollinationsModels, getResolvedApiConfig, getResolvedOpenAiImageConfig, isNovelAiV4FamilyModel, normalizeNovelAiUcPreset, novelAiOfficialApiUrl, novelAiProxyApiUrl } from '@/utils/settings';
@@ -8,8 +9,9 @@ import { estimateTokenCount } from '@/utils/memory';
 import { getStickerDisplayImageUrl } from '@/utils/stickers';
 import { assertRenderableSmallTheaterHtml, getSmallTheaterVisibleText, withSmallTheaterRuntimeGuard } from '@/utils/smallTheaterHtml';
 import { renderTimeAwarenessPrompt } from '@/utils/timeAwareness';
-import { formatContentWithChineseTranslation, normalizeTranslationText } from '@/utils/translation';
+import { formatContentWithChineseTranslation, needsChineseTranslation, normalizeTranslationText } from '@/utils/translation';
 import { getVoomFrequencyChance, stripVoomCommentReplyPrefix } from '@/utils/voom';
+import { normalizeCoupleSpaceSnapshot } from '@/utils/coupleSpace';
 import { buildMomentPrompt, buildPrompt } from './prompt';
 
 const modelSelectionSeparator = '::';
@@ -36,6 +38,12 @@ export interface RoleplayMessageActions {
   offlineInvitation?: { prompt: string } | null;
   callInvite?: RoleplayCallInvite | null;
   callResponse?: RoleplayCallResponse | null;
+  relationshipAction?: RoleplayRelationshipAction | null;
+}
+
+export interface RoleplayRelationshipAction {
+  type: 'block' | 'delete' | 'request_friend' | 'accept_request' | 'reject_request';
+  reason?: string;
 }
 
 export interface RoleplayMusicAction {
@@ -936,22 +944,6 @@ function splitModelSelection(selection = '') {
   };
 }
 
-function extractJsonContent(content: string) {
-  const trimmed = content.trim();
-  const fenced = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
-  if (fenced) return fenced[1].trim();
-
-  if (trimmed.startsWith('{') && trimmed.endsWith('}')) return trimmed;
-
-  const firstBrace = trimmed.indexOf('{');
-  const lastBrace = trimmed.lastIndexOf('}');
-  if (firstBrace >= 0 && lastBrace > firstBrace) {
-    return trimmed.slice(firstBrace, lastBrace + 1).trim();
-  }
-
-  return trimmed;
-}
-
 function normalizeTextFragments(value: unknown): string[] {
   if (Array.isArray(value)) {
     return value.flatMap((item) => normalizeTextFragments(item));
@@ -1668,8 +1660,33 @@ function normalizeRoleplayMessageActions(record: Record<string, unknown>): Rolep
     musicActions,
     offlineInvitation: normalizeOfflineInvitationAction(record, actionRecord),
     callInvite: normalizeCallInviteAction(record, actionRecord),
-    callResponse: normalizeCallResponseAction(record, actionRecord)
+    callResponse: normalizeCallResponseAction(record, actionRecord),
+    relationshipAction: normalizeRelationshipAction(record, actionRecord)
   };
+}
+
+function normalizeRelationshipAction(record: Record<string, unknown>, actionRecord: Record<string, unknown>): RoleplayRelationshipAction | null {
+  const candidates = [actionRecord.relationshipAction, actionRecord.friendshipAction, record.relationshipAction, record.friendshipAction];
+  for (const candidate of candidates) {
+    if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) continue;
+    const action = candidate as Record<string, unknown>;
+    const rawType = String(action.type ?? action.action ?? action.decision ?? '').trim().toLowerCase();
+    const type = rawType === 'block' || rawType === '拉黑'
+      ? 'block'
+      : rawType === 'delete' || rawType === 'remove' || rawType === '删除'
+        ? 'delete'
+        : rawType === 'request_friend' || rawType === 'reapply' || rawType === 'add_friend' || rawType === '申请好友'
+          ? 'request_friend'
+          : rawType === 'accept_request' || rawType === 'accept' || rawType === 'approve' || rawType === '同意'
+            ? 'accept_request'
+            : rawType === 'reject_request' || rawType === 'reject' || rawType === '拒绝'
+              ? 'reject_request'
+              : null;
+    if (!type) continue;
+    const reason = String(action.reason ?? action.note ?? '').trim();
+    return { type, ...(reason ? { reason: reason.slice(0, 160) } : {}) };
+  }
+  return null;
 }
 
 function normalizeOfflineInvitationAction(record: Record<string, unknown>, actionRecord: Record<string, unknown>): { prompt: string } | null {
@@ -1704,7 +1721,7 @@ function normalizeOfflineInvitationAction(record: Record<string, unknown>, actio
 }
 
 function normalizeRawOnlineReply(content: string) {
-  const trimmed = content.trim();
+  const trimmed = normalizeLooseModelReply(content);
   if (!trimmed) return [];
 
   const lines = trimmed.split(/\r?\n+/).map((line) => line.trim()).filter(Boolean);
@@ -1985,7 +2002,19 @@ function parseVoomMomentPayload(rawContent: string): VoomMomentPayload {
 
 async function generateVoomPayload(context: PromptContext, settings?: AppSettings, modelOverride = '') {
   const apiReply = await callTextApi(settings, buildMomentPrompt(context), modelOverride);
-  return parseVoomMomentPayload(apiReply);
+  const payload = parseVoomMomentPayload(apiReply);
+  const translationByContent = await completeMissingChineseTranslations([
+    { content: payload.content, translation: payload.contentTranslation },
+    ...payload.comments.map((comment) => ({ content: comment.content, translation: comment.contentTranslation }))
+  ], settings, modelOverride);
+  return {
+    ...payload,
+    contentTranslation: normalizeTranslationText(payload.contentTranslation) || translationByContent.get(payload.content.trim()) || undefined,
+    comments: payload.comments.map((comment) => ({
+      ...comment,
+      contentTranslation: normalizeTranslationText(comment.contentTranslation) || translationByContent.get(comment.content.trim()) || undefined
+    }))
+  };
 }
 
 function normalizeVoomCommentReplies(input: unknown, fallbackAuthorName: string, post: VoomPost, blockedAuthorNames: string[] = []): VoomCommentReplyResult[] {
@@ -2066,7 +2095,7 @@ function requireTextGenerationConfig(settings: AppSettings | undefined, modelOve
   throw new Error(`请先配置可用的 API 模型后再使用${target}。`);
 }
 
-async function callTextApi(settings: AppSettings | undefined, prompt: string, modelOverride = '', imageParts: TextApiContentPart[] = []) {
+async function callTextApi(settings: AppSettings | undefined, prompt: string, modelOverride = '', imageParts: TextApiContentPart[] = [], temperature = 0.9) {
   const resolved = getResolvedTextApiConfig(settings, modelOverride);
   if (!resolved.endpoint.trim()) return '';
 
@@ -2083,7 +2112,7 @@ async function callTextApi(settings: AppSettings | undefined, prompt: string, mo
     body: JSON.stringify({
       model: resolved.model,
       messages: [{ role: 'user', content }],
-      temperature: 0.9
+      temperature
     })
   };
 
@@ -2105,6 +2134,86 @@ async function callTextApi(settings: AppSettings | undefined, prompt: string, mo
 
   const data = await readJsonPayload(response, '文本模型 API 返回异常');
   return String(data.choices?.[0]?.message?.content ?? data.choices?.[0]?.text ?? data.content ?? '').trim();
+}
+
+interface ChineseTranslationEntry {
+  content: string;
+  translation?: string;
+}
+
+async function completeMissingChineseTranslations(entries: ChineseTranslationEntry[], settings: AppSettings | undefined, modelOverride = '') {
+  const translationByContent = new Map<string, string>();
+  for (const entry of entries) {
+    const content = entry.content.trim();
+    const translation = normalizeTranslationText(entry.translation);
+    if (content && translation && !translationByContent.has(content)) translationByContent.set(content, translation);
+  }
+
+  const pendingContents = [...new Set(entries
+    .map((entry) => entry.content.trim())
+    .filter((content) => content && needsChineseTranslation(content, translationByContent.get(content))))];
+  if (!pendingContents.length) return translationByContent;
+
+  const items = pendingContents.map((content, index) => ({ id: `translation_${index}`, content }));
+  const contentById = new Map(items.map((item) => [item.id, item.content]));
+  const prompt = `你是严格的翻译补全器。只处理输入 JSON 中的 content，不续写、不改写角色内容。
+
+翻译规则：
+1. 把每条 content 中的非中文外语或粤语翻译成自然现代简体普通话。
+2. 如果 content 是外语或粤语整句，translation 给出整句普通话译文。
+3. 如果 content 是普通话与外语或粤语混用，translation 只给出外语或粤语部分的普通话译文，不重复原有普通话部分。
+4. 不添加“翻译：”“译文：”等前缀，不加括号，不解释。
+5. 每个输入 id 必须原样返回且只能返回一次。
+
+只输出以下 JSON，不要输出 Markdown 或其他文字：
+{"translations":[{"id":"translation_0","translation":"普通话译文"}]}
+
+输入：
+${JSON.stringify({ items })}`;
+
+  try {
+    const apiReply = await callTextApi(settings, prompt, modelOverride, [], 0.2);
+    const parsed = JSON.parse(extractJsonContent(apiReply)) as unknown;
+    const source = Array.isArray(parsed)
+      ? parsed
+      : parsed && typeof parsed === 'object' && Array.isArray((parsed as { translations?: unknown[] }).translations)
+        ? (parsed as { translations: unknown[] }).translations
+        : [];
+    for (const item of source) {
+      if (!item || typeof item !== 'object') continue;
+      const record = item as Record<string, unknown>;
+      const content = contentById.get(String(record.id ?? '').trim());
+      const translation = normalizeTranslationText(record.translation ?? record.contentTranslation ?? record.translationZh ?? record.chineseTranslation);
+      if (content && translation && translation !== content) translationByContent.set(content, translation);
+    }
+  } catch {
+    return translationByContent;
+  }
+
+  return translationByContent;
+}
+
+async function completeRoleplayReplyTranslations(result: RoleplayReplyResult, settings: AppSettings | undefined, modelOverride = ''): Promise<RoleplayReplyResult> {
+  const replies = result.replies ?? (result.reply ? [result.reply] : []);
+  const replyTranslations = result.replyTranslations ?? [];
+  const segments = result.segments ?? [];
+  const entries: ChineseTranslationEntry[] = [
+    ...replies.map((content, index) => ({ content, translation: replyTranslations[index] })),
+    ...segments.flatMap((segment) => segment.type === 'reply' || segment.type === 'voice'
+      ? [{ content: segment.content, translation: segment.translation }]
+      : [])
+  ];
+  const translationByContent = await completeMissingChineseTranslations(entries, settings, modelOverride);
+
+  return {
+    ...result,
+    replyTranslations: replies.map((content, index) => normalizeTranslationText(replyTranslations[index]) || translationByContent.get(content.trim()) || ''),
+    segments: segments.map((segment) => {
+      if (segment.type !== 'reply' && segment.type !== 'voice') return segment;
+      const translation = normalizeTranslationText(segment.translation) || translationByContent.get(segment.content.trim()) || '';
+      return translation ? { ...segment, translation } : segment;
+    })
+  };
 }
 
 export async function fetchVendorModels(vendor: Pick<ApiVendor, 'apiUrl' | 'apiKey'>): Promise<string[]> {
@@ -2467,7 +2576,7 @@ export async function generateRoleplayReply(input: GenerateReplyInput): Promise<
         ...normalizeStickerPlacements(parsedRecordAny.stickerMessages),
         ...normalizeReplyStickerPlacements(parsedRecordAny.replies ?? parsedRecordAny.messages)
       ];
-      return JSON.stringify({
+      const result = {
         reply: replies[0] ?? '',
         replies,
         plotChoices,
@@ -2498,17 +2607,23 @@ export async function generateRoleplayReply(input: GenerateReplyInput): Promise<
               ).trim()
             }
           : null
-      } satisfies RoleplayReplyResult);
+      } satisfies RoleplayReplyResult;
+      return JSON.stringify(input.mode === 'online'
+        ? await completeRoleplayReplyTranslations(result, input.settings, input.modelOverride)
+        : result);
     } catch {
       const hiddenPlotChoices: string[] = [];
-      const replies = (input.mode === 'online' ? normalizeRawOnlineReply(apiReply) : [apiReply])
+      const replies = (input.mode === 'online' ? normalizeRawOnlineReply(apiReply) : [normalizeLooseModelReply(apiReply)])
         .map((reply) => {
           const parsedReply = parsePlotChoicesFromText(reply);
           hiddenPlotChoices.push(...parsedReply.choices);
           return parsedReply.content || reply;
         });
       const plotChoices = input.mode === 'offline' ? [...new Set(hiddenPlotChoices)].slice(0, 6) : [];
-      return JSON.stringify({ reply: replies[0] ?? '', replies, plotChoices, narrations: [], images: [], stickers: [], stickerPlacements: [], segments: [], messageActions: { recallMessageIds: [], quotes: [] }, profileUpdate: null } satisfies RoleplayReplyResult);
+      const result = { reply: replies[0] ?? '', replies, plotChoices, narrations: [], images: [], stickers: [], stickerPlacements: [], segments: [], messageActions: { recallMessageIds: [], quotes: [] }, profileUpdate: null } satisfies RoleplayReplyResult;
+      return JSON.stringify(input.mode === 'online'
+        ? await completeRoleplayReplyTranslations(result, input.settings, input.modelOverride)
+        : result);
     }
   }
   throw new Error('角色回复模型没有返回内容。');
@@ -2599,6 +2714,42 @@ function extractSmallTheaterSummary(html: string, fallback: string) {
   const metaMatch = html.match(/<meta\s+name=["']description["']\s+content=["']([^"']+)["'][^>]*>/i)
     ?? html.match(/<p[^>]*>([\s\S]*?)<\/p>/i);
   return compactHtmlText(metaMatch?.[1] ?? '', 90) || fallback;
+}
+
+function buildCoupleSpacePrompt(input: { context: PromptContext; previousSnapshot?: CoupleSpaceSnapshot }) {
+  const characterName = getCharacterAiName(input.context.character);
+  const userName = getUserAiName(input.context.boundUser ?? input.context.user);
+  const previousSnapshot = input.previousSnapshot
+    ? `上一次状态（只用于保持生活路线连续，不必重复）：\n${JSON.stringify(input.previousSnapshot)}`
+    : '';
+  return [
+    buildPrompt(input.context, { includeAvailableStickers: false }),
+    `现在为 ${userName} 与 ${characterName} 的「情侣守护空间」生成一次角色生活状态快照。`,
+    `这是双方授权查看的角色互动模拟，不是真实 GPS、系统监控或设备取证。请根据角色设定、世界书、记忆、近期聊天、当前时间与角色生活轨迹，创造可信且有连续性的状态；不要声称读取真实手机权限，不要替用户行动。`,
+    previousSnapshot,
+    `内容要求：
+1. location 要像可阅读的陪伴地图：当前地点、通俗地址、正在做什么、彼此距离、交通方式、预计到达/下一站、停留分钟数，以及 3–6 个有时间的路线节点。
+2. device 是角色主动分享的手机报告：0–100 电量、是否充电、using/locked/idle 三选一、最近解锁与锁屏时间、今日使用分钟数、当前应用、当前网络和 2–5 条网络历史。
+3. bond 要强烈贴合角色本人和当前关系，不要通用甜言蜜语；想念值与默契值为 0–100，悄悄话必须像角色会说的话。
+4. moments 给出 3–6 个今天发生的小片段，可以有吃饭、通勤、摸鱼、偶遇、想起对方、悄悄准备惊喜等，兼顾趣味与生活感。
+5. 信息必须内部一致：地点、路线、交通、时间、应用与小片段不能互相冲突；不要每次都生成完美约会或极端戏剧。
+6. 地名可以来自角色设定；设定不足时创造符合世界观的地点，不要把未知信息说成现实事实。`,
+    `只输出以下结构的 JSON，不要输出 Markdown、代码块或解释：
+{"location":{"place":"当前地点","address":"地址或场景描述","status":"正在做什么","distance":"与对方的距离描述","transport":"交通方式","eta":"预计到达或下一站","stayMinutes":35,"route":[{"name":"节点","time":"18:20","kind":"start|pass|stay|arrival","detail":"发生的小事"}]},"device":{"battery":76,"charging":false,"screenStatus":"using|locked|idle","lastUnlockedAt":"18:42","lastLockedAt":"18:39","usageMinutes":186,"activeApp":"应用或用途","network":"当前网络","networkHistory":[{"name":"网络名称","time":"17:10","kind":"wifi|cellular|offline"}]},"bond":{"mood":"心情短语","moodEmoji":"emoji","missLevel":82,"syncScore":91,"nextPlan":"下一件想一起做的事","whisper":"角色口吻悄悄话"},"moments":[{"time":"17:45","title":"片段标题","detail":"生活细节","emoji":"emoji"}]}`
+  ].filter(Boolean).join('\n\n');
+}
+
+export async function generateCoupleSpaceSnapshot(input: {
+  context: PromptContext;
+  previousSnapshot?: CoupleSpaceSnapshot;
+  settings?: AppSettings;
+  modelOverride?: string;
+}): Promise<CoupleSpaceSnapshot> {
+  requireTextGenerationConfig(input.settings, input.modelOverride, '情侣空间同步');
+  const apiReply = await callTextApi(input.settings, buildCoupleSpacePrompt(input), input.modelOverride, [], 0.82);
+  if (!apiReply.trim()) throw new Error('情侣空间模型没有返回状态内容。');
+  const parsed = JSON.parse(extractJsonContent(apiReply)) as unknown;
+  return normalizeCoupleSpaceSnapshot(parsed, Date.now());
 }
 
 function buildSmallTheaterPrompt(input: { context: PromptContext; topic: SmallTheaterTopic; recentTheaters?: SmallTheater[] }) {
@@ -2816,15 +2967,24 @@ export async function generateUserVoomComments(input: {
   const apiReply = await callTextApi(input.settings, prompt, input.modelOverride);
   if (!apiReply) return [];
 
+  let comments: UserVoomCommentResult[];
   try {
-    return normalizeUserVoomComments(JSON.parse(extractJsonContent(apiReply)), input.targetCharacters);
+    comments = normalizeUserVoomComments(JSON.parse(extractJsonContent(apiReply)), input.targetCharacters);
   } catch {
     const content = apiReply.trim();
     const character = input.targetCharacters[0];
-    return content && character
+    comments = content && character
       ? [{ authorName: getCharacterAiName(character), authorId: character.id, content }]
       : [];
   }
+  const translationByContent = await completeMissingChineseTranslations(comments.map((comment) => ({
+    content: comment.content,
+    translation: comment.contentTranslation
+  })), input.settings, input.modelOverride);
+  return comments.map((comment) => ({
+    ...comment,
+    contentTranslation: normalizeTranslationText(comment.contentTranslation) || translationByContent.get(comment.content.trim()) || undefined
+  }));
 }
 
 export async function generateVoomCommentReplies(input: {
@@ -2867,19 +3027,29 @@ export async function generateVoomCommentReplies(input: {
 
   const apiReply = await callTextApi(input.settings, prompt, input.modelOverride);
   if (apiReply) {
+    let replies: VoomCommentReplyResult[] = [];
     try {
       const parsed = JSON.parse(extractJsonContent(apiReply));
-      const replies = normalizeVoomCommentReplies(parsed, fallbackAuthorName, input.post, blockedAuthorNames);
-      if (replies.length) return replies;
+      replies = normalizeVoomCommentReplies(parsed, fallbackAuthorName, input.post, blockedAuthorNames);
     } catch {
       const content = apiReply.trim();
       if (content) {
-        return [{
+        replies = [{
           authorName: fallbackAuthorName,
           content,
           parentId: targetComments[0]?.id
         }];
       }
+    }
+    if (replies.length) {
+      const translationByContent = await completeMissingChineseTranslations(replies.map((reply) => ({
+        content: reply.content,
+        translation: reply.contentTranslation
+      })), input.settings, input.modelOverride);
+      return replies.map((reply) => ({
+        ...reply,
+        contentTranslation: normalizeTranslationText(reply.contentTranslation) || translationByContent.get(reply.content.trim()) || undefined
+      }));
     }
   }
   throw new Error('评论区回复模型没有返回内容。');
@@ -3006,7 +3176,15 @@ export async function generateMusicCommentThread(input: {
   const apiReply = await callTextApi(input.settings, prompt, input.modelOverride);
   if (!apiReply) return [];
   try {
-    return normalizeMusicComments(JSON.parse(extractJsonContent(apiReply)), { user: input.user, characters: boundCharacters, existingComments });
+    const comments = normalizeMusicComments(JSON.parse(extractJsonContent(apiReply)), { user: input.user, characters: boundCharacters, existingComments });
+    const translationByContent = await completeMissingChineseTranslations(comments.map((comment) => ({
+      content: comment.content,
+      translation: comment.contentTranslation
+    })), input.settings, input.modelOverride);
+    return comments.map((comment) => ({
+      ...comment,
+      contentTranslation: normalizeTranslationText(comment.contentTranslation) || translationByContent.get(comment.content.trim()) || undefined
+    }));
   } catch {
     return [];
   }

@@ -72,6 +72,20 @@
       </button>
     </section>
 
+    <section v-if="!isFriendRelationship" class="relationship-state-card" aria-live="polite">
+      <div>
+        <strong>{{ relationshipStateTitle }}</strong>
+        <span>{{ relationshipStateDescription }}</span>
+      </div>
+      <button v-if="relationshipStatus === 'blocked-by-user'" type="button" @click="restoreBlockedFriend">移出黑名单</button>
+      <button v-else-if="canSendFriendRequest" type="button" @click="openFriendRequest">重新添加好友</button>
+      <button v-else-if="relationshipStatus === 'pending-user-request'" type="button" disabled>等待验证</button>
+      <span v-else-if="relationshipStatus === 'pending-character-request'" class="relationship-request-actions">
+        <button type="button" class="secondary" @click="respondToCharacterRequest('rejected')">拒绝</button>
+        <button type="button" @click="respondToCharacterRequest('accepted')">通过</button>
+      </span>
+    </section>
+
     <MessageComposer
       ref="composerRef"
       :model-value="composerText"
@@ -323,6 +337,9 @@
         <button type="button" :disabled="chatActionLocked" @click="openLocationPanel">
           <span>发送定位</span>
         </button>
+        <button type="button" @click="openCoupleSpace">
+          <span>情侣守护</span>
+        </button>
         <button type="button" :disabled="chatActionLocked" @click="openTransferPanel">
           <span>转账</span>
         </button>
@@ -355,6 +372,9 @@
         </button>
         <button class="danger-menu-action" type="button" :disabled="chatActionLocked" @click="openDeleteFriendConfirm">
           <span>删除好友</span>
+        </button>
+        <button class="danger-menu-action" type="button" :disabled="chatActionLocked" @click="openBlockFriendConfirm">
+          <span>拉黑好友</span>
         </button>
         <button class="danger-menu-action" type="button" :disabled="chatActionLocked" @click="openClearHistoryConfirm">
           <span>清空记忆</span>
@@ -620,12 +640,35 @@
     <AppModal v-model="showDeleteFriendConfirm" title="确认删除" :show-header="false" variant="ins">
       <section class="delete-confirm-sheet">
         <h3>删除好友？</h3>
-        <p>会同时删除与 {{ characterDisplayName }} 的聊天记录、线下 RP、关联 VOOM，以及角色当前绑定的所有局部世界书，删除后不可恢复。</p>
+        <p>删除后无法继续聊天，但会保留聊天记录、角色资料、记忆和世界书。以后可以重新发送好友验证，对方会按人设决定是否通过。</p>
         <div class="delete-confirm-actions">
           <button class="secondary-action" type="button" :disabled="deletingFriend" @click="showDeleteFriendConfirm = false">取消</button>
           <button class="danger-action" type="button" :disabled="deletingFriend || chatActionLocked" @click="confirmDeleteFriend">{{ deletingFriend ? '删除中' : '删除好友' }}</button>
         </div>
       </section>
+    </AppModal>
+
+    <AppModal v-model="showBlockFriendConfirm" title="确认拉黑" :show-header="false" variant="ins">
+      <section class="delete-confirm-sheet">
+        <h3>将 {{ characterDisplayName }} 加入黑名单？</h3>
+        <p>拉黑后双方无法互发消息，角色也不会主动联系你；聊天记录会保留，之后可随时移出黑名单。</p>
+        <div class="delete-confirm-actions">
+          <button class="secondary-action" type="button" @click="showBlockFriendConfirm = false">取消</button>
+          <button class="danger-action" type="button" :disabled="deletingFriend || currentConversationReplying" @click="confirmBlockFriend">加入黑名单</button>
+        </div>
+      </section>
+    </AppModal>
+
+    <AppModal v-model="showFriendRequest" title="好友验证" :show-header="false" variant="ins">
+      <form class="friend-request-sheet" @submit.prevent="submitFriendRequest">
+        <h3>重新添加 {{ characterDisplayName }}</h3>
+        <p>验证消息会交给角色阅读。对方会结合人设、最近冲突和关系记忆决定通过或拒绝。</p>
+        <textarea v-model="friendRequestDraft" maxlength="120" rows="4" placeholder="填写好友验证"></textarea>
+        <div class="delete-confirm-actions">
+          <button class="secondary-action" type="button" @click="showFriendRequest = false">取消</button>
+          <button class="primary-action" type="submit" :disabled="requestingFriend || currentConversationReplying">{{ requestingFriend ? '等待回应' : '发送申请' }}</button>
+        </div>
+      </form>
     </AppModal>
 
     <AppModal v-model="showClearHistoryConfirm" title="确认清空" :show-header="false" variant="ins">
@@ -660,6 +703,7 @@
 </template>
 
 <script setup lang="ts">
+import { Capacitor } from '@capacitor/core';
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { Mic, MicOff, Minimize, Phone, PhoneOff, RefreshCw, Video, VideoOff, Volume2, VolumeX, X } from 'lucide-vue-next';
@@ -676,7 +720,7 @@ import { useMusicPlayerStore } from '@/stores/musicPlayerStore';
 import { generateImageByProvider } from '@/services/ai';
 import { synthesizeSpeech } from '@/services/tts';
 import type { AppSettings, CharacterImageProfile, CharacterProfile, ChatCallMode, ChatCallStatus, ChatImageAttachment, ChatLocationAttachment, ChatMessage, ChatMessageQuote, ChatTransferStatus, ChatVoiceAttachment, ImageProviderType, Sticker, UserProfile } from '@/types/domain';
-import { getCharacterAiName, getCharacterDisplayName } from '@/utils/character';
+import { getCharacterAiName, getCharacterDisplayName, getFriendRelationship } from '@/utils/character';
 import { collectCharacterPhotoImages, createCharacterPhotoRecord, normalizeCharacterPhotoRecords, normalizeHiddenSourcePhotoKeys } from '@/utils/characterPhotos';
 import { readChatImageFile } from '@/utils/imageFile';
 import { useKeyboardScrollGuard } from '@/utils/keyboardScrollGuard';
@@ -828,9 +872,13 @@ const showMessageMenu = ref(false);
 const showEditModal = ref(false);
 const showDeleteConfirm = ref(false);
 const showDeleteFriendConfirm = ref(false);
+const showBlockFriendConfirm = ref(false);
+const showFriendRequest = ref(false);
 const showClearHistoryConfirm = ref(false);
 const generatingVoom = ref(false);
 const deletingFriend = ref(false);
+const requestingFriend = ref(false);
+const friendRequestDraft = ref('');
 const clearingHistory = ref(false);
 const regeneratingChatImageMessageIds = ref<string[]>([]);
 const regeneratingVoiceMessageIds = ref<string[]>([]);
@@ -961,6 +1009,7 @@ let callInputBlurTimer: number | undefined;
 let callSpeechFlushTimer: number | undefined;
 const callReplyQueue = ref<QueuedCallReply[]>([]);
 let proactiveReplyTimer: number | undefined;
+let conversationReadTimer: number | undefined;
 let bottomRestoreQueued = false;
 let bottomRestoreTimeouts: number[] = [];
 let discardRecording = false;
@@ -987,6 +1036,25 @@ const bottomRestoreDelays = [40, 120, 260, 520];
 
 const conversation = computed(() => store.conversationById(props.id));
 const character = computed(() => (conversation.value ? store.characterById(conversation.value.charId) : undefined));
+const relationship = computed(() => getFriendRelationship(character.value ?? { relationship: undefined }));
+const relationshipStatus = computed(() => relationship.value.status);
+const isFriendRelationship = computed(() => relationshipStatus.value === 'friend');
+const canSendFriendRequest = computed(() => ['blocked-by-character', 'deleted-by-character', 'deleted-by-user'].includes(relationshipStatus.value));
+const relationshipStateTitle = computed(() => ({
+  friend: '好友',
+  'blocked-by-user': '已加入黑名单',
+  'blocked-by-character': '消息已被对方拒收',
+  'pending-user-request': '好友验证已发送',
+  'pending-character-request': `${characterDisplayName.value}请求添加好友`,
+  'deleted-by-user': '你已删除该好友',
+  'deleted-by-character': '对方已删除好友关系'
+}[relationshipStatus.value] ?? '暂时无法聊天'));
+const relationshipStateDescription = computed(() => {
+  if (relationshipStatus.value === 'blocked-by-user') return '移出黑名单后即可恢复好友关系。';
+  if (relationshipStatus.value === 'pending-user-request') return '正在等待对方决定是否重新成为好友。';
+  if (relationshipStatus.value === 'pending-character-request') return relationship.value.requestMessage || '对方想重新成为好友。';
+  return relationship.value.reason || '可以发送一条好友验证，尝试重新建立联系。';
+});
 const characterDisplayName = computed(() => character.value ? getCharacterDisplayName(character.value) : '该好友');
 const boundUser = computed(() => {
   const userId = conversation.value?.userId || character.value?.boundUserId || '';
@@ -1120,7 +1188,7 @@ const activeListenTrackLabel = computed(() => {
   if (!track) return '等待选歌';
   return `${track.name}-${track.artists.join('/') || '未知歌手'}`;
 });
-const chatActionLocked = computed(() => currentConversationReplying.value);
+const chatActionLocked = computed(() => currentConversationReplying.value || !isFriendRelationship.value);
 const pendingIncomingCallMessage = computed(() => [...store.messagesForConversation(props.id)]
   .reverse()
   .find((message) => message.call?.direction === 'incoming' && message.call.status === 'ringing') ?? null);
@@ -1518,11 +1586,33 @@ function queueMessagesToBottomAfterLayout() {
 }
 
 async function syncConversationState(id: string) {
-  await store.markConversationRead(id);
   const currentConversation = store.conversationById(id);
   if (currentConversation?.activeMode !== 'online') {
     await store.updateConversationMode(id, 'online');
   }
+}
+
+function clearConversationReadTimer() {
+  if (conversationReadTimer === undefined) return;
+  window.clearTimeout(conversationReadTimer);
+  conversationReadTimer = undefined;
+}
+
+function scheduleConversationRead() {
+  clearConversationReadTimer();
+  if (document.visibilityState !== 'visible') return;
+  const conversationId = props.id;
+  conversationReadTimer = window.setTimeout(() => {
+    conversationReadTimer = undefined;
+    if (document.visibilityState === 'visible' && props.id === conversationId) {
+      void store.markConversationRead(conversationId);
+    }
+  }, 650);
+}
+
+function handleDocumentVisibilityChange() {
+  if (document.visibilityState === 'visible') scheduleConversationRead();
+  else clearConversationReadTimer();
 }
 
 async function scrollMessagesToBottom() {
@@ -1621,13 +1711,16 @@ function resumeActiveCallFromStore() {
   if (call.status === 'active' && call.connectedAt) startCallTimer(call.connectedAt);
   syncCallRingtonePlayback();
   syncCallAmbientPlayback();
-  if (call.status === 'active' && !call.muted) startCallTranscription();
+  if (call.status === 'active' && !call.muted) void startCallTranscription();
   syncActiveCallMetadata();
 }
 
 onMounted(async () => {
   await store.hydrate();
+  store.setActiveConversation(props.id);
+  document.addEventListener('visibilitychange', handleDocumentVisibilityChange);
   await syncConversationState(props.id);
+  scheduleConversationRead();
   resumeActiveCallFromStore();
   resetMessageWindow();
   const focusId = focusedMessageId();
@@ -1644,9 +1737,11 @@ onMounted(async () => {
 
 watch(() => props.id, (id) => {
   void (async () => {
+    store.setActiveConversation(id);
     composerText.value = readComposerDraft(id);
     resetMessageWindow();
     await syncConversationState(id);
+    scheduleConversationRead();
     const focusId = focusedMessageId();
     if (focusId) {
       await scrollToOnlineMessage(focusId);
@@ -1656,6 +1751,11 @@ watch(() => props.id, (id) => {
     void store.maybeRequestProactiveReply(id);
   })();
 });
+
+watch(() => allOnlineMessages.value
+  .filter((message) => message.sender === 'char' && message.readAt === null)
+  .map((message) => message.id)
+  .join('|'), scheduleConversationRead, { flush: 'post' });
 
 watch(() => route.query.focus, (value) => {
   const focusId = Array.isArray(value) ? value[0] ?? '' : typeof value === 'string' ? value : '';
@@ -1755,7 +1855,16 @@ async function sendAndReply(content: string) {
     quoteTarget.value = null;
     writeComposerDraft(props.id, '');
   }
-  await store.requestRoleplayReply(props.id);
+  const blockedInteraction = !isFriendRelationship.value;
+  const relationshipInstruction = blockedInteraction
+    ? relationshipStatus.value === 'blocked-by-user' || relationshipStatus.value === 'deleted-by-user'
+      ? '黑名单互动：用户已拉黑或删除你，普通消息会发送失败并显示感叹号，但用户点击了“回复”让你继续行动。你可以按人设尝试发送消息，也可以在确实想恢复关系时用 relationshipAction.request_friend 重新申请好友；不要假装消息已正常送达。'
+      : '黑名单互动：你已拉黑或删除用户，但用户点击了“回复”让关系继续发展。请按人设决定保持边界、说出反应，或等待用户通过正式好友验证恢复关系；不要把当前状态假装成正常好友聊天。'
+    : undefined;
+  await store.requestRoleplayReply(props.id, {
+    blockedInteraction,
+    replyInstruction: relationshipInstruction
+  });
 }
 
 async function sendStickerSuggestion(sticker: Sticker) {
@@ -2238,6 +2347,27 @@ async function startCallVoiceActivityDetection() {
   }
 }
 
+async function ensureNativeCallMicrophoneAccess(runId: number) {
+  if (!Capacitor.isNativePlatform()) return true;
+  if (!navigator.mediaDevices?.getUserMedia) {
+    callSpeechNotice.value = '麦克风不可用';
+    return false;
+  }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+      video: false
+    });
+    stream.getTracks().forEach((track) => track.stop());
+    return runId === callRecognitionRunId;
+  } catch (error) {
+    if (runId === callRecognitionRunId) {
+      callSpeechNotice.value = error instanceof Error && error.name === 'NotAllowedError' ? '未授权麦克风' : '麦克风开启失败';
+    }
+    return false;
+  }
+}
+
 function scheduleCallSpeechFlush() {
   clearCallSpeechFlushTimer();
   callSpeechFlushTimer = window.setTimeout(() => {
@@ -2259,7 +2389,7 @@ async function flushCallSpeechFinalText() {
   void requestCallReply(`当前正在${scene}中，${callUserAiName.value}刚刚直接说：“${content}”。请让${callCharacterAiName.value}像真实通话一样用适合朗读的短句回应；可以连续发送多个短句，每个短句会显示成字幕并播放 TTS。不要替${callUserAiName.value}补充未说出口的动作、位置或心理。`);
 }
 
-function startCallTranscription() {
+async function startCallTranscription() {
   stopCallTranscription(true);
   callRecognitionRunId += 1;
   const runId = callRecognitionRunId;
@@ -2272,6 +2402,8 @@ function startCallTranscription() {
     callSpeechNotice.value = '语音转文字不可用';
     return;
   }
+  if (!await ensureNativeCallMicrophoneAccess(runId)) return;
+  if (runId !== callRecognitionRunId || activeCall.value?.status !== 'active' || activeCall.value.muted) return;
 
   const recognition = new SpeechRecognition();
   recognition.continuous = true;
@@ -2325,7 +2457,7 @@ function startCallTranscription() {
   try {
     recognition.start();
     callSpeechListening.value = true;
-    void startCallVoiceActivityDetection();
+    if (!Capacitor.isNativePlatform()) void startCallVoiceActivityDetection();
   } catch {
     callRecognition = null;
     callSpeechNotice.value = '语音转文字启动失败';
@@ -2679,7 +2811,7 @@ async function connectActiveCall(direction: 'incoming' | 'outgoing', options: { 
   stopCallRingtone();
   syncCallAmbientPlayback();
   startCallTimer(connectedAt);
-  if (!activeCall.value.muted) startCallTranscription();
+  if (!activeCall.value.muted) await startCallTranscription();
   if (options.requestOpeningReply !== false) await startCallOpeningReply(direction);
 }
 
@@ -2820,7 +2952,7 @@ function toggleCallMute() {
   const muted = !call.muted;
   activeCall.value = { ...call, muted };
   if (muted) stopCallTranscription();
-  else if (activeCall.value.status === 'active') startCallTranscription();
+  else if (activeCall.value.status === 'active') void startCallTranscription();
 }
 
 function toggleCallSpeaker() {
@@ -3387,6 +3519,11 @@ function openUserProfile() {
   showUserProfile.value = true;
 }
 
+function openCoupleSpace() {
+  showActionMenu.value = false;
+  void router.push({ name: 'couple-space', params: { id: props.id } });
+}
+
 async function openCharacterProfile() {
   showActionMenu.value = false;
   showProfile.value = true;
@@ -3404,6 +3541,56 @@ function openDeleteFriendConfirm() {
   showDeleteFriendConfirm.value = true;
 }
 
+function openBlockFriendConfirm() {
+  if (chatActionLocked.value) return;
+  showActionMenu.value = false;
+  showBlockFriendConfirm.value = true;
+}
+
+async function confirmBlockFriend() {
+  const currentCharacter = character.value;
+  if (!currentCharacter || deletingFriend.value || currentConversationReplying.value) return;
+  deletingFriend.value = true;
+  try {
+    await store.blockCharacter(currentCharacter.id);
+    showBlockFriendConfirm.value = false;
+    store.showConfigAlert('已加入黑名单，聊天记录仍会保留。', '已拉黑');
+  } finally {
+    deletingFriend.value = false;
+  }
+}
+
+async function restoreBlockedFriend() {
+  const currentCharacter = character.value;
+  if (!currentCharacter) return;
+  await store.unblockCharacter(currentCharacter.id);
+  store.showConfigAlert('已恢复好友关系。', '已移出黑名单');
+}
+
+async function respondToCharacterRequest(decision: 'accepted' | 'rejected') {
+  const currentCharacter = character.value;
+  if (!currentCharacter) return;
+  await store.respondCharacterFriendRequest(currentCharacter.id, decision);
+  store.showConfigAlert(decision === 'accepted' ? '已恢复好友关系。' : '已拒绝好友申请。', decision === 'accepted' ? '已通过' : '已拒绝');
+}
+
+function openFriendRequest() {
+  friendRequestDraft.value = '我是我，想重新加你为好友。';
+  showFriendRequest.value = true;
+}
+
+async function submitFriendRequest() {
+  const currentCharacter = character.value;
+  if (!currentCharacter || requestingFriend.value || currentConversationReplying.value) return;
+  requestingFriend.value = true;
+  try {
+    showFriendRequest.value = false;
+    await store.requestCharacterFriend(currentCharacter.id, friendRequestDraft.value);
+  } finally {
+    requestingFriend.value = false;
+  }
+}
+
 function openClearHistoryConfirm() {
   if (chatActionLocked.value) return;
   showActionMenu.value = false;
@@ -3415,10 +3602,9 @@ async function confirmDeleteFriend() {
   if (!currentCharacter || deletingFriend.value || chatActionLocked.value) return;
   deletingFriend.value = true;
   try {
-    await store.deleteCharacterProfile(currentCharacter.id);
+    await store.removeCharacterFriend(currentCharacter.id);
     showDeleteFriendConfirm.value = false;
-    store.showConfigAlert('已删除好友。', '删除完成');
-    await router.replace({ name: 'home' });
+    store.showConfigAlert('已删除好友，聊天记录和角色资料已保留。', '删除完成');
   } finally {
     deletingFriend.value = false;
   }
@@ -3557,6 +3743,9 @@ async function enterOffline() {
 
 onBeforeUnmount(() => {
   writeComposerDraft(props.id, composerText.value);
+  clearConversationReadTimer();
+  document.removeEventListener('visibilitychange', handleDocumentVisibilityChange);
+  store.setActiveConversation(null);
   abortVoiceRecording();
   if (activeCall.value) {
     callMinimized.value = true;
@@ -5588,6 +5777,89 @@ onBeforeUnmount(() => {
 
 .selection-toolbar button:disabled {
   opacity: 0.45;
+}
+
+.relationship-state-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0 12px calc(10px + var(--safe-bottom));
+  padding: 13px 14px;
+  border: 1px solid rgba(17, 17, 17, 0.08);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 0 8px 24px rgba(35, 45, 40, 0.08);
+}
+
+.relationship-state-card div {
+  display: grid;
+  flex: 1;
+  gap: 3px;
+  min-width: 0;
+}
+
+.relationship-state-card strong {
+  font-size: 13px;
+}
+
+.relationship-state-card span {
+  color: rgba(17, 17, 17, 0.58);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.relationship-state-card button {
+  flex: 0 0 auto;
+  min-height: 34px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 999px;
+  background: #111;
+  color: #fff;
+  font: inherit;
+}
+
+.relationship-state-card button:disabled {
+  background: rgba(17, 17, 17, 0.1);
+  color: rgba(17, 17, 17, 0.42);
+}
+
+.relationship-request-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 6px;
+}
+
+.relationship-state-card .relationship-request-actions .secondary {
+  background: rgba(17, 17, 17, 0.08);
+  color: #111;
+}
+
+.friend-request-sheet {
+  display: grid;
+  gap: 12px;
+}
+
+.friend-request-sheet h3,
+.friend-request-sheet p {
+  margin: 0;
+}
+
+.friend-request-sheet p {
+  color: rgba(17, 17, 17, 0.58);
+  line-height: 1.6;
+}
+
+.friend-request-sheet textarea {
+  width: 100%;
+  resize: none;
+  border: 1px solid rgba(17, 17, 17, 0.12);
+  border-radius: 13px;
+  padding: 12px;
+  background: rgba(248, 249, 248, 0.92);
+  color: inherit;
+  font: inherit;
+  line-height: 1.55;
 }
 
 .action-menu {

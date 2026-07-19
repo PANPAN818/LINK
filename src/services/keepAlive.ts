@@ -368,6 +368,9 @@ export async function requestKeepAliveNotificationPermission() {
   if (isNativeKeepAliveAvailable()) {
     try {
       applyNativeStatus(await requestNativeNotificationPermission());
+      if (status.notificationPermission === 'granted' && typeof Notification !== 'undefined' && Notification.permission === 'default') {
+        await Notification.requestPermission().catch(() => Notification.permission);
+      }
       status.lastError = status.notificationPermission === 'granted' ? '' : '系统通知权限未允许，请在应用设置中重新开启。';
     } catch (error) {
       setLastError(error, 'Android 通知授权失败，请在系统应用设置中允许通知。');
@@ -498,6 +501,45 @@ async function getNativeNotificationIcon(source = '') {
   }
 }
 
+async function showWebLinkNotification(payload: LinkNotificationPayload) {
+  if (getNotificationPermission() !== 'granted') return false;
+  const notificationUrl = getNotificationUrl(payload.url || '');
+  const notificationBody = payload.messages?.map((message) => message.trim()).filter(Boolean).join('\n') || payload.body;
+  const options: NotificationOptions & { renotify: boolean } = {
+    body: notificationBody,
+    tag: payload.tag,
+    icon: payload.icon || getNotificationUrl('link-icon.png'),
+    badge: getNotificationUrl('link-icon.png'),
+    silent: false,
+    renotify: true,
+    data: { url: notificationUrl, kind: payload.kind }
+  };
+
+  const registration = await getServiceWorkerRegistration();
+  if (registration?.showNotification) {
+    try {
+      await registration.showNotification(payload.title, options);
+      return true;
+    } catch (error) {
+      setLastError(error, '系统通知发送失败，请检查浏览器通知权限。');
+    }
+  }
+
+  if (typeof Notification === 'undefined') return false;
+  try {
+    const notification = new Notification(payload.title, options);
+    notification.onclick = () => {
+      window.focus();
+      if (notificationUrl) window.location.assign(notificationUrl);
+      notification.close();
+    };
+    return true;
+  } catch (error) {
+    setLastError(error, '系统通知发送失败，请检查浏览器通知权限。');
+    return false;
+  }
+}
+
 export async function showLinkNotification(settings: Partial<AppKeepAliveSettings> | null | undefined, payload: LinkNotificationPayload) {
   const keepAliveSettings = normalizeKeepAliveSettings(settings);
   if (!keepAliveSettings.enabled || !keepAliveSettings.notifications) return false;
@@ -513,30 +555,5 @@ export async function showLinkNotification(settings: Partial<AppKeepAliveSetting
       url: getNotificationUrl(payload.url || '')
     });
   }
-  if (getNotificationPermission() !== 'granted') return false;
-
-  const notificationUrl = getNotificationUrl(payload.url || '');
-  const options: NotificationOptions = {
-    body: payload.body,
-    tag: payload.tag,
-    icon: payload.icon || getNotificationUrl('link-icon.png'),
-    badge: getNotificationUrl('link-icon.png'),
-    silent: false,
-    data: { url: notificationUrl, kind: payload.kind }
-  };
-
-  const registration = await getServiceWorkerRegistration();
-  if (registration?.showNotification) {
-    await registration.showNotification(payload.title, options).catch((error) => setLastError(error, '系统通知发送失败，请检查浏览器通知权限。'));
-    return true;
-  }
-
-  if (typeof Notification === 'undefined') return false;
-  const notification = new Notification(payload.title, options);
-  notification.onclick = () => {
-    window.focus();
-    if (notificationUrl) window.location.assign(notificationUrl);
-    notification.close();
-  };
-  return true;
+  return await showWebLinkNotification(payload);
 }

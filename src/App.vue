@@ -50,7 +50,7 @@ import { setFullscreenEnabled } from '@/services/systemBars';
 import { useAppStore } from '@/stores/appStore';
 import { useMusicPlayerStore } from '@/stores/musicPlayerStore';
 import type { ThemeFontEntry, ThemeStylePreset, ThemeStyleScopeSettings } from '@/types/domain';
-import { defaultOfflineThemeCss, defaultOfflineThemePresetId, defaultOnlineThemeCss, defaultOnlineThemePresetId } from '@/utils/themeStyles';
+import { defaultGlobalThemeCss, defaultGlobalThemePresetId, defaultOfflineThemeCss, defaultOfflineThemePresetId, defaultOnlineThemeCss, defaultOnlineThemePresetId } from '@/utils/themeStyles';
 
 const store = useAppStore();
 const route = useRoute();
@@ -65,6 +65,7 @@ let stopAccessHeartbeat: (() => void) | undefined;
 let globalCallFloatDrag: { pointerId: number; startX: number; startY: number; originX: number; originY: number; moved: boolean } | null = null;
 let suppressGlobalCallFloatClick = false;
 const themeFontStyleId = 'link-theme-fonts';
+const globalThemeStyleId = 'link-global-theme-styles';
 const onlineThemeStyleId = 'link-online-theme-styles';
 const offlineThemeStyleId = 'link-offline-theme-styles';
 const systemFontStack = '-apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif';
@@ -81,7 +82,8 @@ const webDavBackupScheduleKey = computed(() => {
   return [backup.url, backup.username, backup.path, backup.intervalMinutes].join('|');
 });
 const themeFontSettings = computed(() => store.settings?.themeSettings.fonts ?? { activeFontId: '', entries: [] as ThemeFontEntry[] });
-const globalThemeSettings = computed(() => store.settings?.themeSettings.global ?? { scale: 1, fullscreen: false });
+const globalThemeSettings = computed(() => store.settings?.themeSettings.global ?? { scale: 1, fullscreen: false, style: { activePresetId: '', presets: [] } });
+const globalThemeStyleSettings = computed(() => globalThemeSettings.value.style ?? { activePresetId: '', presets: [] });
 const onlineThemeSettings = computed(() => store.settings?.themeSettings.online ?? { activePresetId: '', presets: [] });
 const offlineThemeSettings = computed(() => store.settings?.themeSettings.offline ?? { activePresetId: '', presets: [] });
 const routeConversationId = computed(() => {
@@ -223,6 +225,18 @@ function getOnlineThemeStyleElement() {
   return styleElement;
 }
 
+function getGlobalThemeStyleElement() {
+  let styleElement = document.getElementById(globalThemeStyleId) as HTMLStyleElement | null;
+  if (!styleElement) {
+    styleElement = document.createElement('style');
+    styleElement.id = globalThemeStyleId;
+    const onlineStyleElement = document.getElementById(onlineThemeStyleId);
+    if (onlineStyleElement) document.head.insertBefore(styleElement, onlineStyleElement);
+    else document.head.appendChild(styleElement);
+  }
+  return styleElement;
+}
+
 function getOfflineThemeStyleElement() {
   let styleElement = document.getElementById(offlineThemeStyleId) as HTMLStyleElement | null;
   if (!styleElement) {
@@ -303,6 +317,15 @@ function applyOnlineThemeStyles() {
     defaultOnlineThemePresetId,
     defaultOnlineThemeCss,
     routeCharacter.value?.themeStyleBindings?.onlinePresetId
+  );
+}
+
+function applyGlobalThemeStyles() {
+  if (typeof document === 'undefined') return;
+  getGlobalThemeStyleElement().textContent = resolveThemePresetCss(
+    globalThemeStyleSettings.value,
+    defaultGlobalThemePresetId,
+    defaultGlobalThemeCss
   );
 }
 
@@ -416,6 +439,7 @@ watch(
 watch(themeFontSettings, applyThemeFonts, { immediate: true, deep: true });
 watch(globalThemeSettings, applyGlobalThemeScale, { immediate: true, deep: true });
 watch(() => globalThemeSettings.value.fullscreen, (enabled) => void setFullscreenEnabled(Boolean(enabled)), { immediate: true });
+watch(globalThemeStyleSettings, applyGlobalThemeStyles, { immediate: true, deep: true });
 watch(onlineThemeSettings, applyOnlineThemeStyles, { immediate: true, deep: true });
 watch(offlineThemeSettings, applyOfflineThemeStyles, { immediate: true, deep: true });
 watch(routeCharacter, () => {

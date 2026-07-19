@@ -1,11 +1,35 @@
-import type { CharacterImageProfile, CharacterInitialProfile, CharacterProfile, CharacterProfileHistoryEntry, CharacterProfileHistoryField, CharacterThemeStyleBindings, VisualProfile } from '@/types/domain';
+import type { CharacterImageProfile, CharacterInitialProfile, CharacterProfile, CharacterProfileHistoryEntry, CharacterProfileHistoryField, CharacterThemeStyleBindings, FriendRelationship, FriendRelationshipStatus, VisualProfile } from '@/types/domain';
 import { normalizeCharacterPhotoRecords, normalizeHiddenSourcePhotoKeys } from '@/utils/characterPhotos';
 import { normalizeVisualProfile, removeVisualProfileAvatar, toCharacterVisualProfile } from '@/utils/profile';
 import { normalizeChatModelOverrides } from '@/utils/settings';
 import { normalizeVoomFrequency } from '@/utils/voom';
+import { normalizeCoupleSpaceState } from '@/utils/coupleSpace';
 
 const maxMindStateLines = 5;
 const profileHistoryFields = new Set<CharacterProfileHistoryField>(['nickname', 'signature', 'mood']);
+const friendRelationshipStatuses = new Set<FriendRelationshipStatus>(['friend', 'blocked-by-user', 'blocked-by-character', 'pending-user-request', 'pending-character-request', 'deleted-by-user', 'deleted-by-character']);
+
+function normalizeFriendRelationship(value: unknown): FriendRelationship {
+  const record = value && typeof value === 'object' ? value as Partial<FriendRelationship> : {};
+  const status = friendRelationshipStatuses.has(record.status as FriendRelationshipStatus)
+    ? record.status as FriendRelationshipStatus
+    : 'friend';
+  return {
+    status,
+    updatedAt: Number.isFinite(record.updatedAt) ? Number(record.updatedAt) : 0,
+    reason: String(record.reason ?? '').trim() || undefined,
+    requestMessage: String(record.requestMessage ?? '').trim() || undefined,
+    requestedAt: Number.isFinite(record.requestedAt) ? Number(record.requestedAt) : undefined
+  };
+}
+
+export function getFriendRelationship(character: Pick<CharacterProfile, 'relationship'>): FriendRelationship {
+  return normalizeFriendRelationship(character.relationship);
+}
+
+export function isCharacterFriend(character: Pick<CharacterProfile, 'relationship'>) {
+  return getFriendRelationship(character).status === 'friend';
+}
 
 export function normalizeCharacterMindStateLines(lines: unknown) {
   if (Array.isArray(lines)) {
@@ -109,7 +133,7 @@ export function getCharacterInitialProfile(character: Pick<CharacterProfile, 'in
 }
 
 export function normalizeCharacterProfile(character: CharacterProfile, fallbackUserId = ''): CharacterProfile {
-  const { initialProfile: rawInitialProfile, ...characterBase } = character;
+  const { initialProfile: rawInitialProfile, coupleSpace: rawCoupleSpace, ...characterBase } = character;
   const nickname = String(character.nickname ?? '').trim();
   const name = String(character.name ?? '').trim() || nickname || 'new.friend';
   const description = String(character.description ?? '').trim();
@@ -134,6 +158,7 @@ export function normalizeCharacterProfile(character: CharacterProfile, fallbackU
     : undefined;
   const initialProfile = normalizeCharacterInitialProfile(rawInitialProfile, { nickname, signature });
   const profileHistory = normalizeCharacterProfileHistory(character.profileHistory);
+  const coupleSpace = normalizeCoupleSpaceState(rawCoupleSpace);
 
   return {
     ...characterBase,
@@ -154,6 +179,8 @@ export function normalizeCharacterProfile(character: CharacterProfile, fallbackU
     ...(boundUserProfile ? { boundUserProfile } : {}),
     ...(initialProfile ? { initialProfile } : {}),
     ...(profileHistory.length ? { profileHistory } : {}),
+    ...(coupleSpace ? { coupleSpace } : {}),
+    relationship: normalizeFriendRelationship(character.relationship),
     mindState: mindStateLines.length || hasProfileThemeSnapshot
       ? {
           lines: mindStateLines,

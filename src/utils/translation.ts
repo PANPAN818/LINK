@@ -16,7 +16,7 @@ function hasKanaOrHangul(value: string) {
 }
 
 function hasForeignLetters(value: string) {
-  return /[A-Za-zÀ-ÖØ-öø-ÿА-Яа-яЁёΑ-Ωα-ω]/u.test(value);
+  return Array.from(value).some((character) => /\p{L}/u.test(character) && !/\p{Script=Han}/u.test(character));
 }
 
 function looksCantonese(value: string) {
@@ -27,11 +27,25 @@ function looksLikeChineseTranslation(value: string) {
   return hasHanText(value) && !hasKanaOrHangul(value);
 }
 
-function shouldTranslateContent(content: string) {
+function hasInlineChineseTranslation(content: string) {
+  return /[（(][^（）()]*[\u3400-\u9fff][^（）()]*[）)]/u.test(content);
+}
+
+export function shouldTranslateContent(content: string) {
   if (hasKanaOrHangul(content)) return true;
   if (looksCantonese(content)) return true;
-  if (!hasHanText(content) && hasForeignLetters(content)) return true;
+  if (hasForeignLetters(content)) return true;
   return false;
+}
+
+export function needsChineseTranslation(content: string, translation?: string) {
+  const normalizedContent = content.trim();
+  return Boolean(
+    normalizedContent
+    && shouldTranslateContent(normalizedContent)
+    && !normalizeTranslationText(translation)
+    && !hasInlineChineseTranslation(normalizedContent)
+  );
 }
 
 export function shouldShowChineseTranslation(content: string, translation?: string) {
