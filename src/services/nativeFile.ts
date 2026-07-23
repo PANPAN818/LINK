@@ -3,6 +3,9 @@ import { Directory, Filesystem } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
 import { FilePicker } from '@capawesome/capacitor-file-picker';
 
+const nativeShareDirectory = 'exports';
+const nativeShareFileMaxAgeMs = 24 * 60 * 60 * 1000;
+
 function sanitizeFileName(fileName: string) {
   return fileName
     .trim()
@@ -27,6 +30,26 @@ function blobToBase64(blob: Blob) {
     reader.addEventListener('error', () => reject(reader.error ?? new Error('导出文件读取失败。')));
     reader.readAsDataURL(blob);
   });
+}
+
+async function cleanupExpiredNativeShareFiles(now = Date.now()) {
+  let entries;
+  try {
+    entries = await Filesystem.readdir({ path: nativeShareDirectory, directory: Directory.Cache });
+  } catch {
+    return;
+  }
+
+  await Promise.all(entries.files.map(async (entry) => {
+    if (entry.type !== 'file') return;
+    const timestamp = Number(entry.name.match(/^(\d+)-/)?.[1] ?? 0);
+    const modifiedAt = Math.max(Number(entry.mtime) || 0, Number(entry.ctime) || 0, timestamp);
+    if (!modifiedAt || now - modifiedAt < nativeShareFileMaxAgeMs) return;
+    await Filesystem.deleteFile({
+      path: `${nativeShareDirectory}/${entry.name}`,
+      directory: Directory.Cache
+    }).catch(() => undefined);
+  }));
 }
 
 export function isNativeFileShareAvailable() {
@@ -75,7 +98,8 @@ export async function shareNativeDataUrl(dataUrl: string, fileName: string) {
 export async function shareNativeFile(blob: Blob, fileName: string) {
   if (!isNativeFileShareAvailable()) return false;
   const safeFileName = sanitizeFileName(fileName);
-  const path = `exports/${Date.now()}-${safeFileName}`;
+  await cleanupExpiredNativeShareFiles();
+  const path = `${nativeShareDirectory}/${Date.now()}-${safeFileName}`;
   const writtenFile = await Filesystem.writeFile({
     path,
     data: await blobToBase64(blob),
@@ -83,14 +107,10 @@ export async function shareNativeFile(blob: Blob, fileName: string) {
     recursive: true
   });
 
-  try {
-    await Share.share({
-      title: safeFileName,
-      files: [writtenFile.uri],
-      dialogTitle: '导出 BabyLink 文件'
-    });
-    return true;
-  } finally {
-    await Filesystem.deleteFile({ path, directory: Directory.Cache }).catch(() => undefined);
-  }
+  await Share.share({
+    title: safeFileName,
+    files: [writtenFile.uri],
+    dialogTitle: '导出 BabyLink 文件'
+  });
+  return true;
 }

@@ -3,7 +3,7 @@ import { defineStore } from 'pinia';
 import { deleteEntity, loadCommerceSnapshot, putEntity } from '@/data/db';
 import { createCharacterProducts, createCharacterStorefronts, createDefaultShopMoments, createDefaultWalletAccounts, createDefaultWalletTransactions, defaultShopProducts, defaultShopStorefronts } from '@/data/commerceSeed';
 import { chooseCharacterCommerceProduct, generateCharacterCommerceCatalog, generateCommerceProductImage } from '@/services/commerce';
-import type { AppSettings, CharacterProfile, UserProfile } from '@/types/domain';
+import type { AppSettings, CharacterProfile, ChatTransferStatus, UserProfile } from '@/types/domain';
 import type { ChatCommerceAttachment, CommerceSnapshot, ShopCartItem, ShopMoment, ShopOrder, ShopProduct, ShopStorefront, ShopWishlistItem, WalletAccount, WalletTransaction } from '@/types/commerce';
 import { createId } from '@/utils/id';
 import { externalizeLargeMediaRefs, hydrateStoredMediaRefs } from '@/utils/mediaStorage';
@@ -16,6 +16,24 @@ function centsFromAmount(amount: string) {
 function parseItemPrice(price: string | undefined, totalCents: number, quantityTotal: number) {
   const cents = centsFromAmount(price ?? '');
   return cents > 0 ? cents : Math.max(0, Math.round(totalCents / Math.max(1, quantityTotal)));
+}
+
+type RelationshipScope = {
+  characterId?: string;
+  conversationId?: string;
+};
+
+type CartAddOptions = RelationshipScope & {
+  addedByCharacterId?: string;
+  note?: string;
+};
+
+function belongsToRelationship(item: Pick<ShopCartItem | ShopWishlistItem, 'characterId' | 'relationshipCharacterId' | 'conversationId'>, scope: RelationshipScope) {
+  const characterId = scope.characterId?.trim() ?? '';
+  const conversationId = scope.conversationId?.trim() ?? '';
+  if (!characterId && !conversationId) return !item.relationshipCharacterId && !item.conversationId && !item.characterId;
+  if (conversationId && item.conversationId) return item.conversationId === conversationId;
+  return (item.relationshipCharacterId || item.characterId) === characterId;
 }
 
 export const useCommerceStore = defineStore('commerce', () => {
@@ -136,16 +154,20 @@ export const useCommerceStore = defineStore('commerce', () => {
     return walletTransactions.value.filter((entry) => entry.walletId === walletId).sort((left, right) => right.createdAt - left.createdAt);
   }
 
-  function cartForUser(userId: string) {
-    return cartItems.value.filter((item) => item.userId === userId);
+  function cartForUser(userId: string, scope: RelationshipScope = {}) {
+    return cartItems.value.filter((item) => item.userId === userId && belongsToRelationship(item, scope));
   }
 
-  function wishlistForUser(userId: string) {
-    return wishlistItems.value.filter((item) => item.userId === userId);
+  function wishlistForUser(userId: string, scope: RelationshipScope = {}) {
+    return wishlistItems.value.filter((item) => item.userId === userId && belongsToRelationship(item, scope));
   }
 
-  async function addToCart(userId: string, productId: string, characterId = '', note = '') {
-    const existing = cartItems.value.find((item) => item.userId === userId && item.productId === productId);
+  async function addToCart(userId: string, productId: string, options: CartAddOptions = {}) {
+    const characterId = options.characterId?.trim() ?? '';
+    const conversationId = options.conversationId?.trim() ?? '';
+    const addedByCharacterId = options.addedByCharacterId?.trim() ?? '';
+    const note = options.note?.trim() ?? '';
+    const existing = cartItems.value.find((item) => item.userId === userId && item.productId === productId && belongsToRelationship(item, { characterId, conversationId }));
     const now = Date.now();
     const item: ShopCartItem = existing
       ? { ...existing, quantity: existing.quantity + 1, selected: true, ...(note ? { note } : {}), updatedAt: now }
@@ -155,8 +177,10 @@ export const useCommerceStore = defineStore('commerce', () => {
           productId,
           quantity: 1,
           selected: true,
-          addedBy: characterId ? 'character' : 'user',
-          ...(characterId ? { characterId } : {}),
+          addedBy: addedByCharacterId ? 'character' : 'user',
+          ...(addedByCharacterId ? { characterId: addedByCharacterId } : {}),
+          ...(characterId ? { relationshipCharacterId: characterId } : {}),
+          ...(conversationId ? { conversationId } : {}),
           ...(note ? { note } : {}),
           createdAt: now,
           updatedAt: now
@@ -167,14 +191,15 @@ export const useCommerceStore = defineStore('commerce', () => {
     return item;
   }
 
-  async function addCharacterPickToCart(userId: string, character: CharacterProfile, user: UserProfile | null, settings: AppSettings) {
-    const existingProductIds = new Set(cartForUser(userId).map((item) => item.productId));
+  async function addCharacterPickToCart(userId: string, character: CharacterProfile, user: UserProfile | null, settings: AppSettings, conversationId = '') {
+    const scope = { characterId: character.id, conversationId };
+    const existingProductIds = new Set(cartForUser(userId, scope).map((item) => item.productId));
     const availableProducts = featuredProducts.value.filter((product) => !existingProductIds.has(product.id));
     if (!availableProducts.length) return null;
     const decision = await chooseCharacterCommerceProduct({ character, user, products: availableProducts, settings });
     const product = availableProducts.find((entry) => entry.id === decision.productId);
     if (!product) throw new Error('角色选择的商品已经不可购买，请再试一次。');
-    await addToCart(userId, product.id, character.id, decision.reason);
+    await addToCart(userId, product.id, { ...scope, addedByCharacterId: character.id, note: decision.reason });
     return { product, reason: decision.reason };
   }
 
@@ -191,8 +216,10 @@ export const useCommerceStore = defineStore('commerce', () => {
     await putEntity('shopCartItems', nextItem);
   }
 
-  async function toggleWishlist(userId: string, productId: string, characterId = '') {
-    const existing = wishlistItems.value.find((item) => item.userId === userId && item.productId === productId);
+  async function toggleWishlist(userId: string, productId: string, scope: RelationshipScope = {}, addedByCharacterId = '') {
+    const characterId = scope.characterId?.trim() ?? '';
+    const conversationId = scope.conversationId?.trim() ?? '';
+    const existing = wishlistItems.value.find((item) => item.userId === userId && item.productId === productId && belongsToRelationship(item, { characterId, conversationId }));
     if (existing) {
       wishlistItems.value = wishlistItems.value.filter((item) => item.id !== existing.id);
       await deleteEntity('shopWishlistItems', existing.id);
@@ -202,8 +229,10 @@ export const useCommerceStore = defineStore('commerce', () => {
       id: createId('wish'),
       userId,
       productId,
-      addedBy: characterId ? 'character' : 'user',
-      ...(characterId ? { characterId } : {}),
+      addedBy: addedByCharacterId ? 'character' : 'user',
+      ...(addedByCharacterId ? { characterId: addedByCharacterId } : {}),
+      ...(characterId ? { relationshipCharacterId: characterId } : {}),
+      ...(conversationId ? { conversationId } : {}),
       createdAt: Date.now()
     };
     wishlistItems.value.push(item);
@@ -362,8 +391,8 @@ export const useCommerceStore = defineStore('commerce', () => {
     await Promise.all(updates);
   }
 
-  async function checkoutCart(userId: string, userName: string) {
-    const selectedItems = cartForUser(userId).filter((item) => item.selected);
+  async function checkoutCart(userId: string, userName: string, scope: RelationshipScope = {}, characterName = '') {
+    const selectedItems = cartForUser(userId, scope).filter((item) => item.selected);
     if (!selectedItems.length) throw new Error('共享购物车里还没有选中的商品。');
     const selectedProducts = selectedItems.flatMap((item) => {
       const product = products.value.find((entry) => entry.id === item.productId);
@@ -373,18 +402,22 @@ export const useCommerceStore = defineStore('commerce', () => {
     const wallet = walletForUser(userId);
     if (!wallet || wallet.balanceCents < totalCents) throw new Error('Wallet 余额不足。');
     const now = Date.now();
+    const isRelationshipGift = Boolean(scope.characterId && selectedProducts.every(({ product }) => product.kind === 'gift'));
     const order: ShopOrder = {
       id: createId('order'),
       userId,
       purchaserType: 'user',
       purchaserId: userId,
       purchaserName: userName,
+      ...(scope.characterId ? { relationshipCharacterId: scope.characterId, recipientType: 'character' as const, recipientId: scope.characterId, recipientName: characterName || '对方' } : {}),
       storeName: '共享购物车',
-      kind: 'shopping',
+      kind: isRelationshipGift ? 'gift' : 'shopping',
       status: 'paid',
       items: selectedProducts.map(({ item, product }) => ({ productId: product.id, title: product.title, quantity: item.quantity, unitPriceCents: product.priceCents, mark: product.mark })),
       totalCents,
-      note: '共同挑选的生活小物',
+      note: isRelationshipGift ? `送给 ${characterName || '对方'} 的礼物` : '共同挑选的生活小物',
+      ...(isRelationshipGift ? { cardMessage: `给 ${characterName || '你'}：看到它的时候，第一个想到的就是你。` } : {}),
+      ...(scope.conversationId ? { conversationId: scope.conversationId } : {}),
       createdAt: now,
       updatedAt: now
     };
@@ -392,11 +425,13 @@ export const useCommerceStore = defineStore('commerce', () => {
     const transaction: WalletTransaction = {
       id: createId('wallet-tx'),
       walletId: wallet.id,
-      type: 'purchase',
+      type: isRelationshipGift ? 'gift' : 'purchase',
       amountCents: -totalCents,
-      title: '共享购物车结算',
+      title: isRelationshipGift ? `送给 ${characterName || '对方'} 的礼物` : '共享购物车结算',
       subtitle: `${selectedProducts.length} 件商品`,
       relatedOrderId: order.id,
+      ...(scope.conversationId ? { relatedConversationId: scope.conversationId } : {}),
+      ...(scope.characterId ? { counterpartyType: 'character' as const, counterpartyId: scope.characterId, counterpartyName: characterName || '对方' } : {}),
       createdAt: now
     };
     walletAccounts.value[walletAccounts.value.indexOf(wallet)] = nextWallet;
@@ -430,6 +465,9 @@ export const useCommerceStore = defineStore('commerce', () => {
       purchaserType: 'character',
       purchaserId: input.characterId,
       purchaserName: input.characterName,
+      relationshipCharacterId: input.characterId,
+      recipientType: 'user',
+      recipientId: input.userId,
       storeName: input.attachment.storeName,
       kind: input.attachment.kind,
       status: input.attachment.status,
@@ -466,6 +504,10 @@ export const useCommerceStore = defineStore('commerce', () => {
         title: input.attachment.kind === 'takeout' ? `给你点了 ${input.attachment.storeName}` : input.attachment.kind === 'gift' ? '送给你的礼物' : `在 ${input.attachment.storeName} 下单`,
         subtitle: input.attachment.items.map((item) => item.name).join('、'),
         relatedOrderId: order.id,
+        relatedConversationId: input.conversationId,
+        relatedMessageId: input.sourceMessageId,
+        counterpartyType: 'user',
+        counterpartyId: input.userId,
         createdAt: now
       };
       walletAccounts.value[walletAccounts.value.indexOf(wallet)] = nextWallet;
@@ -478,6 +520,8 @@ export const useCommerceStore = defineStore('commerce', () => {
       characterName: input.characterName,
       kind: 'purchase',
       orderId: order.id,
+      conversationId: input.conversationId,
+      sourceMessageId: input.sourceMessageId,
       content: input.attachment.kind === 'gift'
         ? input.attachment.cardMessage || `挑了很久，最后觉得这个最适合你。`
         : input.attachment.kind === 'takeout'
@@ -495,6 +539,92 @@ export const useCommerceStore = defineStore('commerce', () => {
     };
     moments.value.push(moment);
     writes.push(putEntity('shopMoments', moment));
+    await Promise.all(writes);
+  }
+
+  async function linkOrderToChat(orderId: string, conversationId: string, sourceMessageId: string) {
+    const order = orders.value.find((entry) => entry.id === orderId);
+    if (!order || !conversationId || !sourceMessageId) return null;
+    const nextOrder = { ...order, conversationId, sourceMessageId, updatedAt: Date.now() };
+    orders.value[orders.value.indexOf(order)] = nextOrder;
+    await putEntity('shopOrders', nextOrder);
+    return nextOrder;
+  }
+
+  async function syncChatTransfer(input: {
+    messageId: string;
+    conversationId: string;
+    userId: string;
+    userName: string;
+    characterId: string;
+    characterName: string;
+    sender: 'user' | 'character';
+    amount: string;
+    status: ChatTransferStatus;
+    note?: string;
+  }) {
+    const amountCents = centsFromAmount(input.amount);
+    const userWallet = walletForUser(input.userId);
+    const characterWallet = walletForCharacter(input.characterId);
+    if (!userWallet || !characterWallet) return;
+    const accepted = input.status === 'accepted' && amountCents > 0;
+    const targets = [
+      {
+        wallet: userWallet,
+        transactionId: `wallet_transfer_${input.messageId}_user`,
+        amountCents: accepted ? (input.sender === 'user' ? -amountCents : amountCents) : 0,
+        counterpartyType: 'character' as const,
+        counterpartyId: input.characterId,
+        counterpartyName: input.characterName
+      },
+      {
+        wallet: characterWallet,
+        transactionId: `wallet_transfer_${input.messageId}_character`,
+        amountCents: accepted ? (input.sender === 'character' ? -amountCents : amountCents) : 0,
+        counterpartyType: 'user' as const,
+        counterpartyId: input.userId,
+        counterpartyName: input.userName
+      }
+    ];
+    const adjustments = targets.map((target) => {
+      const existing = walletTransactions.value.find((entry) => entry.id === target.transactionId);
+      const previousAmountCents = existing?.amountCents ?? 0;
+      return { ...target, existing, nextBalanceCents: target.wallet.balanceCents + target.amountCents - previousAmountCents };
+    });
+    if (adjustments.some((entry) => entry.nextBalanceCents < 0)) throw new Error('钱包余额不足，无法完成这笔转账。');
+    const now = Date.now();
+    const writes: Array<Promise<unknown>> = [];
+    for (const adjustment of adjustments) {
+      if (adjustment.nextBalanceCents !== adjustment.wallet.balanceCents) {
+        const nextWallet = { ...adjustment.wallet, balanceCents: adjustment.nextBalanceCents, updatedAt: now };
+        walletAccounts.value[walletAccounts.value.indexOf(adjustment.wallet)] = nextWallet;
+        writes.push(putEntity('walletAccounts', nextWallet));
+      }
+      if (!adjustment.amountCents) {
+        if (adjustment.existing) {
+          walletTransactions.value = walletTransactions.value.filter((entry) => entry.id !== adjustment.transactionId);
+          writes.push(deleteEntity('walletTransactions', adjustment.transactionId));
+        }
+        continue;
+      }
+      const transaction: WalletTransaction = {
+        id: adjustment.transactionId,
+        walletId: adjustment.wallet.id,
+        type: 'transfer',
+        amountCents: adjustment.amountCents,
+        title: adjustment.amountCents > 0 ? `收到 ${adjustment.counterpartyName} 的转账` : `转账给 ${adjustment.counterpartyName}`,
+        subtitle: input.note?.trim() || `来自与 ${input.characterName} 的聊天`,
+        relatedConversationId: input.conversationId,
+        relatedMessageId: input.messageId,
+        counterpartyType: adjustment.counterpartyType,
+        counterpartyId: adjustment.counterpartyId,
+        counterpartyName: adjustment.counterpartyName,
+        createdAt: adjustment.existing?.createdAt ?? now
+      };
+      if (adjustment.existing) walletTransactions.value[walletTransactions.value.indexOf(adjustment.existing)] = transaction;
+      else walletTransactions.value.push(transaction);
+      writes.push(putEntity('walletTransactions', transaction));
+    }
     await Promise.all(writes);
   }
 
@@ -527,6 +657,8 @@ export const useCommerceStore = defineStore('commerce', () => {
     generateCharacterCatalog,
     generateProductImage,
     checkoutCart,
-    recordChatPurchase
+    recordChatPurchase,
+    linkOrderToChat,
+    syncChatTransfer
   };
 });

@@ -66,7 +66,7 @@
 
       <section class="originality-card">
         <ShieldCheck :size="22" />
-        <span><small>ORIGINALITY NOTE</small><strong>平行世界原创声明</strong><p>本书只继承 {{ book.userName }} 与 {{ book.characterName }} 的真名和抽象人物气质。职业、背景、地点、能力、关系起点、剧情事件与世界规则均为本书原创；未读取聊天、记忆或世界书。</p></span>
+        <span><small>ORIGINALITY NOTE</small><strong>平行世界原创声明</strong><p>本书只继承 {{ book.userName }} 与 {{ book.characterName }} 的真名和抽象人物气质。创建时若角色绑定了已启用的局部世界书，其内容仅用于补齐抽象人物 DNA；职业、背景、地点、能力、关系起点、剧情事件与世界规则均为本书原创，后续写作不读取原设定、局部世界书原文、聊天或记忆。</p></span>
       </section>
 
       <section class="book-comments">

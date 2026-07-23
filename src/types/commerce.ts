@@ -60,7 +60,7 @@ export interface WalletAccount {
   updatedAt: number;
 }
 
-export type WalletTransactionType = 'opening' | 'income' | 'purchase' | 'gift' | 'refund' | 'saving';
+export type WalletTransactionType = 'opening' | 'income' | 'purchase' | 'gift' | 'refund' | 'saving' | 'transfer';
 
 export interface WalletTransaction {
   id: string;
@@ -70,6 +70,11 @@ export interface WalletTransaction {
   title: string;
   subtitle: string;
   relatedOrderId?: string;
+  relatedConversationId?: string;
+  relatedMessageId?: string;
+  counterpartyType?: 'user' | 'character';
+  counterpartyId?: string;
+  counterpartyName?: string;
   createdAt: number;
 }
 
@@ -119,6 +124,8 @@ export interface ShopCartItem {
   selected: boolean;
   addedBy: 'user' | 'character';
   characterId?: string;
+  relationshipCharacterId?: string;
+  conversationId?: string;
   note?: string;
   createdAt: number;
   updatedAt: number;
@@ -130,6 +137,8 @@ export interface ShopWishlistItem {
   productId: string;
   addedBy: 'user' | 'character';
   characterId?: string;
+  relationshipCharacterId?: string;
+  conversationId?: string;
   note?: string;
   createdAt: number;
 }
@@ -148,6 +157,10 @@ export interface ShopOrder {
   purchaserType: 'user' | 'character';
   purchaserId: string;
   purchaserName: string;
+  relationshipCharacterId?: string;
+  recipientType?: 'user' | 'character';
+  recipientId?: string;
+  recipientName?: string;
   storeId?: string;
   storeName: string;
   kind: CommercePurchaseKind;
@@ -169,6 +182,8 @@ export interface ShopMoment {
   characterName: string;
   kind?: 'purchase' | 'review' | 'favorite';
   orderId?: string;
+  conversationId?: string;
+  sourceMessageId?: string;
   content: string;
   productIds: string[];
   storeName: string;

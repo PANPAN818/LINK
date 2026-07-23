@@ -17,8 +17,8 @@
         <strong>{{ characterDisplayName }}</strong>
       </div>
       <div class="offline-topbar-actions offline-topbar-actions--right">
-        <button class="offline-icon-button" type="button" aria-label="线下总结" @click="openMemoryPanel">
-          <BookOpenText :size="20" />
+        <button class="offline-icon-button" type="button" aria-label="角色记忆" @click="openMemoryPanel">
+          <BrainCircuit :size="20" />
         </button>
         <button class="offline-icon-button" type="button" aria-label="线下设置" @click="openOfflineSettings">
           <Settings2 :size="20" />
@@ -208,7 +208,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { ArrowLeft, BookOpenText, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, ChevronsDown, ChevronsUp, ListTree, MessageCircle, PencilLine, SendHorizontal, Settings2 } from 'lucide-vue-next';
+import { ArrowLeft, BookOpenText, BrainCircuit, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, ChevronsDown, ChevronsUp, ListTree, MessageCircle, PencilLine, SendHorizontal, Settings2 } from 'lucide-vue-next';
 import OfflineMemoryPanel from '@/components/chat/OfflineMemoryPanel.vue';
 import { useAppStore } from '@/stores/appStore';
 import type { ChatMessage } from '@/types/domain';

@@ -2,13 +2,12 @@ import type { FastifyInstance } from 'fastify';
 
 const trendCacheTtlMs = 6 * 60 * 60 * 1000;
 const trendLexicon = [
-  '慢热救赎', '悬疑求生', '网恋掉马', '先婚后爱', '追妻火葬场', '时间循环', '规则怪谈', '无限流',
-  '群像成长', '都市日常', '青春甜宠', '现实向', '小镇文学', '公路文', '职场婚恋', '娱乐圈',
-  '古风世情', '古言脑洞', '宫斗宅斗', '种田经营', '基建', '东方幻想', '仙侠修真', '历史权谋',
-  '科幻末世', '星际机甲', '赛博朋克', '都市异能', '悬疑推理', '轻喜剧', '双向暗恋', '破镜重圆',
-  '欢喜冤家', '双强', '成长流', '治愈日常', '封闭空间', '高概念'
+  '古风世情', '古言脑洞', '宫斗宅斗', '种田经营', '年代重生', '民国言情', '快穿虐渣', '玄幻言情',
+  '现言脑洞', '青春甜宠', '职场婚恋', '豪门总裁', '星光璀璨', '女频悬疑', '科幻末世', '星际机甲',
+  '先婚后爱', '追妻火葬场', '网恋掉马', '双向暗恋', '破镜重圆', '双强', '事业升级', '大女主',
+  '悬疑求生', '规则怪谈', '无限流', '末世基建', '仙侠修真', '轻喜剧', '治愈日常', '娱乐圈'
 ];
-const fallbackKeywords = ['慢热救赎', '悬疑求生', '时间循环', '双强', '科幻末世', '古风世情', '治愈日常', '网恋掉马'];
+const fallbackKeywords = ['现言脑洞', '古言脑洞', '青春甜宠', '职场婚恋', '年代重生', '种田经营', '快穿虐渣', '女频悬疑', '末世基建', '玄幻言情'];
 
 let cachedPayload: { keywords: string[]; fetchedAt: number; sourceLabel: string } | null = null;
 
@@ -39,9 +38,9 @@ async function fetchSearchTrendText(query: string) {
 async function collectTrendKeywords() {
   const year = new Date().getFullYear();
   const queries = [
-    `${year} 中文小说 热门题材 趋势`,
-    `${year} 女频 小说 热门标签 榜单`,
-    `${year} 网络文学 新书 热门类型`
+    `${year} 女频网络小说 热门分类 榜单`,
+    `${year} 女频小说 热门标签 新书`,
+    `${year} 古言 现言 幻想言情 热门题材`
   ];
   const texts = await Promise.all(queries.map((query) => fetchSearchTrendText(query).catch(() => '')));
   const corpus = texts.join('\n');

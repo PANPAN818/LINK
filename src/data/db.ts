@@ -1,7 +1,8 @@
-import { openDB, type DBSchema, type IDBPDatabase } from 'idb';
+import { openDB, unwrap, type DBSchema, type IDBPDatabase } from 'idb';
 import { toRaw } from 'vue';
-import type { AppSettings, AppSnapshot, CharacterProfile, ChatImageAttachment, ChatMessage, Conversation, ConversationMemoryRecord, ConversationSettings, FanficBook, FanficChapter, FanficComment, FanficGenerationJob, FanficTopic, FavoriteMessageRecord, GeneratedImageRecord, MusicCommentThread, MusicTrack, ProfileHomepageRecord, ProfileTheme, SmallTheater, SmallTheaterTopic, Sticker, StickerGroup, UserProfile, VisualProfile, VoomPost, WorldBookEntry } from '@/types/domain';
+import type { AppSettings, AppSnapshot, CharacterProfile, ChatImageAttachment, ChatMessage, Conversation, ConversationSettings, FanficBook, FanficChapter, FanficComment, FanficGenerationJob, FanficTopic, FavoriteMessageRecord, GeneratedImageRecord, MusicCommentThread, MusicTrack, ProfileHomepageRecord, ProfileTheme, SmallTheater, SmallTheaterTopic, Sticker, StickerGroup, UserProfile, VisualProfile, VoomPost, WorldBookEntry } from '@/types/domain';
 import type { CommerceSnapshot, ShopCartItem, ShopMoment, ShopOrder, ShopProduct, ShopStorefront, ShopWishlistItem, WalletAccount, WalletTransaction } from '@/types/commerce';
+import type { MemoryAssertion, MemoryEdge, MemoryEmbeddingCache, MemoryEntity, MemoryEpisode, MemoryStateSnapshot, MemoryTheme } from '@/types/memory';
 import { compressInlineImageDataUrl } from '@/utils/imageFile';
 import { collectStoredMediaLocators, externalizeLargeMediaRefs, pruneStoredMediaCache } from '@/utils/mediaStorage';
 import { normalizeUserProfile, removeVisualProfileAvatar } from '@/utils/profile';
@@ -31,7 +32,13 @@ interface LinkDb extends DBSchema {
   stickerGroups: { key: string; value: StickerGroup };
   stickers: { key: string; value: Sticker };
   conversationSettings: { key: string; value: ConversationSettings };
-  conversationMemories: { key: string; value: ConversationMemoryRecord; indexes: { byConversation: string } };
+  memoryEpisodes: { key: string; value: MemoryEpisode; indexes: { byBrain: string; byConversation: string; byOccurredAt: number } };
+  memoryEntities: { key: string; value: MemoryEntity; indexes: { byBrain: string } };
+  memoryAssertions: { key: string; value: MemoryAssertion; indexes: { byBrain: string; bySubject: string; byUpdatedAt: number } };
+  memoryEdges: { key: string; value: MemoryEdge; indexes: { byBrain: string; byFrom: string; byTo: string } };
+  memoryThemes: { key: string; value: MemoryTheme; indexes: { byBrain: string } };
+  memoryStateSnapshots: { key: string; value: MemoryStateSnapshot; indexes: { byBrain: string; byKind: string } };
+  memoryEmbeddings: { key: string; value: MemoryEmbeddingCache; indexes: { byBrain: string; byOwner: string } };
   generatedImages: { key: string; value: GeneratedImageRecord; indexes: { byProvider: string; byCreatedAt: number } };
   favorites: { key: string; value: FavoriteMessageRecord; indexes: { byConversation: string; byFavoritedAt: number } };
   walletAccounts: { key: string; value: WalletAccount; indexes: { byOwner: string } };
@@ -50,7 +57,7 @@ let backupReadLockDepth = 0;
 let backupReadLockReleased: Promise<void> | null = null;
 let releaseBackupReadLock: (() => void) | null = null;
 
-const storeNames = ['user', 'characters', 'conversations', 'messages', 'voomPosts', 'profileThemes', 'profileHomepages', 'smallTheaterTopics', 'smallTheaters', 'fanficBooks', 'fanficChapters', 'fanficComments', 'fanficTopics', 'fanficGenerationJobs', 'musicFavoriteTracks', 'musicCommentThreads', 'worldBooks', 'stickerGroups', 'stickers', 'conversationSettings', 'conversationMemories', 'generatedImages', 'favorites', 'walletAccounts', 'walletTransactions', 'shopStorefronts', 'shopProducts', 'shopCartItems', 'shopWishlistItems', 'shopOrders', 'shopMoments', 'settings'] as const;
+const storeNames = ['user', 'characters', 'conversations', 'messages', 'voomPosts', 'profileThemes', 'profileHomepages', 'smallTheaterTopics', 'smallTheaters', 'fanficBooks', 'fanficChapters', 'fanficComments', 'fanficTopics', 'fanficGenerationJobs', 'musicFavoriteTracks', 'musicCommentThreads', 'worldBooks', 'stickerGroups', 'stickers', 'conversationSettings', 'memoryEpisodes', 'memoryEntities', 'memoryAssertions', 'memoryEdges', 'memoryThemes', 'memoryStateSnapshots', 'memoryEmbeddings', 'generatedImages', 'favorites', 'walletAccounts', 'walletTransactions', 'shopStorefronts', 'shopProducts', 'shopCartItems', 'shopWishlistItems', 'shopOrders', 'shopMoments', 'settings'] as const;
 const legacyDefaultUserIds = new Set(['1008600002']);
 const legacyDefaultCharacterIds = new Set(['2000100001', '2000100002', '2000100003']);
 const legacyDefaultConversationIds = new Set(['conv_2000100001', 'conv_2000100002', 'conv_2000100003']);
@@ -462,8 +469,216 @@ export function scheduleStartupStorageMaintenance() {
   globalThis.setTimeout(runMaintenance, 1800);
 }
 
+function migrationRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null;
+}
+
+function migrationString(value: unknown) {
+  return String(value ?? '').replace(/\s+/g, ' ').trim();
+}
+
+function migrationTimestamp(value: unknown, fallback: number) {
+  const timestamp = Number(value);
+  return Number.isFinite(timestamp) && timestamp > 0 ? timestamp : fallback;
+}
+
+function migrationTokenEstimate(text: string) {
+  const cjkCount = (text.match(/[\u3400-\u9fff]/g) ?? []).length;
+  const latinWords = text.replace(/[\u3400-\u9fff]/g, ' ').trim().split(/\s+/).filter(Boolean).length;
+  return Math.max(1, Math.ceil(cjkCount * 1.1 + latinWords * 1.35));
+}
+
+function migrateArchivedSummaries(database: IDBDatabase, transaction: IDBTransaction) {
+  if (!database.objectStoreNames.contains('conversationMemories')) return;
+
+  const summaryRequest = transaction.objectStore('conversationMemories').getAll();
+  const conversationRequest = transaction.objectStore('conversations').getAll();
+  const characterRequest = transaction.objectStore('characters').getAll();
+  const userRequest = transaction.objectStore('user').getAll();
+  const episodeRequest = transaction.objectStore('memoryEpisodes').getAll();
+  const entityRequest = transaction.objectStore('memoryEntities').getAll();
+  let summaries: unknown[] = [];
+  let conversations: unknown[] = [];
+  let characters: unknown[] = [];
+  let users: unknown[] = [];
+  let episodes: unknown[] = [];
+  let entities: unknown[] = [];
+  let completedRequests = 0;
+
+  const finishMigration = () => {
+    completedRequests += 1;
+    if (completedRequests < 6) return;
+
+    const conversationsById = new Map(conversations.flatMap((value) => {
+      const record = migrationRecord(value);
+      const id = migrationString(record?.id);
+      return record && id ? [[id, record] as const] : [];
+    }));
+    const charactersById = new Map(characters.flatMap((value) => {
+      const record = migrationRecord(value);
+      const id = migrationString(record?.id);
+      return record && id ? [[id, record] as const] : [];
+    }));
+    const usersById = new Map(users.flatMap((value) => {
+      const record = migrationRecord(value);
+      const id = migrationString(record?.id);
+      return record && id ? [[id, record] as const] : [];
+    }));
+    const existingSourceHashes = new Set(episodes.flatMap((value) => {
+      const sourceHash = migrationString(migrationRecord(value)?.sourceHash);
+      return sourceHash ? [sourceHash] : [];
+    }));
+    const existingEntityIds = new Set(entities.flatMap((value) => {
+      const id = migrationString(migrationRecord(value)?.id);
+      return id ? [id] : [];
+    }));
+    const episodeStore = transaction.objectStore('memoryEpisodes');
+    const entityStore = transaction.objectStore('memoryEntities');
+    const assertionStore = transaction.objectStore('memoryAssertions');
+    const edgeStore = transaction.objectStore('memoryEdges');
+
+    summaries.forEach((value) => {
+      const summaryRecord = migrationRecord(value);
+      const summaryId = migrationString(summaryRecord?.id);
+      const conversationId = migrationString(summaryRecord?.conversationId);
+      const summary = migrationString(summaryRecord?.summary);
+      const conversation = conversationsById.get(conversationId);
+      if (!summaryId || !conversation || !summary) return;
+      const characterId = migrationString(conversation.charId);
+      const userId = migrationString(conversation.userId);
+      const character = charactersById.get(characterId);
+      const user = usersById.get(userId);
+      if (!character || !user) return;
+
+      const archivedSourceHash = `archived-summary:${summaryId}`;
+      if (existingSourceHashes.has(archivedSourceHash) || existingSourceHashes.has(`legacy:${summaryId}`)) return;
+      const brainId = `brain:${characterId}:${userId}`;
+      const selfEntityId = `${brainId}:self`;
+      const userEntityId = `${brainId}:user`;
+      const characterName = migrationString(character.name) || migrationString(character.nickname) || '角色';
+      const userName = migrationString(user.name) || migrationString(user.nickname) || '用户';
+      const now = Date.now();
+      const createdAt = migrationTimestamp(summaryRecord?.createdAt, now);
+      const updatedAt = migrationTimestamp(summaryRecord?.updatedAt, createdAt);
+      const startFloor = Math.max(0, Math.floor(Number(summaryRecord?.startFloor) || 0));
+      const endFloor = Math.max(startFloor, Math.floor(Number(summaryRecord?.endFloor) || startFloor));
+      const sourceMessageIds = Array.isArray(summaryRecord?.sourceMessageIds)
+        ? summaryRecord.sourceMessageIds.map(migrationString).filter(Boolean)
+        : [];
+      const episodeId = `memory:v16:episode:${encodeURIComponent(summaryId)}`;
+      const assertionId = `memory:v16:assertion:${encodeURIComponent(summaryId)}`;
+      const edgeId = `memory:v16:edge:${encodeURIComponent(summaryId)}`;
+      const narrative = `我曾把这段经历记作：${summary}`;
+
+      if (!existingEntityIds.has(selfEntityId)) {
+        void entityStore.put({
+          id: selfEntityId,
+          brainId,
+          type: 'character',
+          name: characterName,
+          normalizedName: characterName.toLocaleLowerCase(),
+          aliases: [migrationString(character.nickname)].filter((name) => Boolean(name && name !== characterName)),
+          description: `${characterName}本人`,
+          createdAt,
+          updatedAt
+        } satisfies MemoryEntity);
+        existingEntityIds.add(selfEntityId);
+      }
+      if (!existingEntityIds.has(userEntityId)) {
+        void entityStore.put({
+          id: userEntityId,
+          brainId,
+          type: 'user',
+          name: userName,
+          normalizedName: userName.toLocaleLowerCase(),
+          aliases: [migrationString(user.nickname)].filter((name) => Boolean(name && name !== userName)),
+          description: `与我共享这些经历的${userName}`,
+          createdAt,
+          updatedAt
+        } satisfies MemoryEntity);
+        existingEntityIds.add(userEntityId);
+      }
+
+      void episodeStore.put({
+        id: episodeId,
+        brainId,
+        characterId,
+        userId,
+        conversationId,
+        channel: 'system',
+        status: 'active',
+        sourceMessageIds,
+        sourceHash: archivedSourceHash,
+        startFloor,
+        endFloor,
+        sourceTokenEstimate: migrationTokenEstimate(summary),
+        title: startFloor || endFloor ? `历史记忆 · ${startFloor}-${endFloor}楼` : '历史记忆',
+        narrative,
+        location: '',
+        emotion: '',
+        valence: 0,
+        arousal: 0.2,
+        salience: 0.55,
+        participantEntityIds: [selfEntityId, userEntityId],
+        themeIds: [],
+        occurredAt: createdAt,
+        occurredEndAt: updatedAt,
+        learnedAt: createdAt,
+        createdAt,
+        updatedAt
+      } satisfies MemoryEpisode);
+      void assertionStore.put({
+        id: assertionId,
+        brainId,
+        subjectEntityId: selfEntityId,
+        predicate: '过去共同经历的记录',
+        objectText: summary,
+        kind: 'interpretation',
+        status: 'current',
+        epistemicKind: 'inferred',
+        perspectiveText: narrative,
+        confidence: 0.55,
+        importance: 0.55,
+        emotionalWeight: 0.25,
+        relationshipImpact: 0.1,
+        evidenceMessageIds: sourceMessageIds,
+        sourceEpisodeIds: [episodeId],
+        themeIds: [],
+        searchText: `${characterName} ${userName} ${summary}`,
+        validFrom: createdAt,
+        learnedAt: createdAt,
+        recallCount: 0,
+        pinned: false,
+        accessibility: 0.72,
+        createdAt,
+        updatedAt
+      } satisfies MemoryAssertion);
+      void edgeStore.put({
+        id: edgeId,
+        brainId,
+        fromId: episodeId,
+        toId: assertionId,
+        type: 'supports',
+        weight: 1,
+        createdAt,
+        updatedAt
+      } satisfies MemoryEdge);
+      existingSourceHashes.add(archivedSourceHash);
+    });
+
+    database.deleteObjectStore('conversationMemories');
+  };
+
+  summaryRequest.onsuccess = () => { summaries = summaryRequest.result; finishMigration(); };
+  conversationRequest.onsuccess = () => { conversations = conversationRequest.result; finishMigration(); };
+  characterRequest.onsuccess = () => { characters = characterRequest.result; finishMigration(); };
+  userRequest.onsuccess = () => { users = userRequest.result; finishMigration(); };
+  episodeRequest.onsuccess = () => { episodes = episodeRequest.result; finishMigration(); };
+  entityRequest.onsuccess = () => { entities = entityRequest.result; finishMigration(); };
+}
+
 export function getDb() {
-  dbPromise ??= openDB<LinkDb>('link-local-db', 14, {
+  dbPromise ??= openDB<LinkDb>('link-local-db', 16, {
     upgrade(db, oldVersion, _newVersion, transaction) {
       if (!db.objectStoreNames.contains('user')) db.createObjectStore('user', { keyPath: 'id' });
       if (!db.objectStoreNames.contains('characters')) db.createObjectStore('characters', { keyPath: 'id' });
@@ -531,11 +746,44 @@ export function getDb() {
       if (!db.objectStoreNames.contains('stickerGroups')) db.createObjectStore('stickerGroups', { keyPath: 'id' });
       if (!db.objectStoreNames.contains('stickers')) db.createObjectStore('stickers', { keyPath: 'id' });
       if (!db.objectStoreNames.contains('conversationSettings')) db.createObjectStore('conversationSettings', { keyPath: 'conversationId' });
-      if (!db.objectStoreNames.contains('conversationMemories')) {
-        const memoryStore = db.createObjectStore('conversationMemories', { keyPath: 'id' });
-        memoryStore.createIndex('byConversation', 'conversationId');
+      if (!db.objectStoreNames.contains('memoryEpisodes')) {
+        const store = db.createObjectStore('memoryEpisodes', { keyPath: 'id' });
+        store.createIndex('byBrain', 'brainId');
+        store.createIndex('byConversation', 'conversationId');
+        store.createIndex('byOccurredAt', 'occurredAt');
       }
-      const migrationDb = db as unknown as Pick<IDBDatabase, 'objectStoreNames' | 'deleteObjectStore'>;
+      if (!db.objectStoreNames.contains('memoryEntities')) {
+        const store = db.createObjectStore('memoryEntities', { keyPath: 'id' });
+        store.createIndex('byBrain', 'brainId');
+      }
+      if (!db.objectStoreNames.contains('memoryAssertions')) {
+        const store = db.createObjectStore('memoryAssertions', { keyPath: 'id' });
+        store.createIndex('byBrain', 'brainId');
+        store.createIndex('bySubject', 'subjectEntityId');
+        store.createIndex('byUpdatedAt', 'updatedAt');
+      }
+      if (!db.objectStoreNames.contains('memoryEdges')) {
+        const store = db.createObjectStore('memoryEdges', { keyPath: 'id' });
+        store.createIndex('byBrain', 'brainId');
+        store.createIndex('byFrom', 'fromId');
+        store.createIndex('byTo', 'toId');
+      }
+      if (!db.objectStoreNames.contains('memoryThemes')) {
+        const store = db.createObjectStore('memoryThemes', { keyPath: 'id' });
+        store.createIndex('byBrain', 'brainId');
+      }
+      if (!db.objectStoreNames.contains('memoryStateSnapshots')) {
+        const store = db.createObjectStore('memoryStateSnapshots', { keyPath: 'id' });
+        store.createIndex('byBrain', 'brainId');
+        store.createIndex('byKind', 'kind');
+      }
+      if (!db.objectStoreNames.contains('memoryEmbeddings')) {
+        const store = db.createObjectStore('memoryEmbeddings', { keyPath: 'id' });
+        store.createIndex('byBrain', 'brainId');
+        store.createIndex('byOwner', 'ownerId');
+      }
+      const migrationDb = unwrap(db);
+      migrateArchivedSummaries(migrationDb, unwrap(transaction));
       if (migrationDb.objectStoreNames.contains('conversationMemoryAtoms')) migrationDb.deleteObjectStore('conversationMemoryAtoms');
       if (!db.objectStoreNames.contains('generatedImages')) {
         const generatedImageStore = db.createObjectStore('generatedImages', { keyPath: 'id' });
@@ -606,7 +854,7 @@ export async function seedDatabase() {
   const existingUser = await db.get('user', defaultUsers[0].id);
   if (existingUser) return;
 
-  const tx = db.transaction(['user', 'characters', 'conversations', 'messages', 'voomPosts', 'profileThemes', 'profileHomepages', 'smallTheaterTopics', 'smallTheaters', 'musicFavoriteTracks', 'musicCommentThreads', 'worldBooks', 'stickerGroups', 'stickers', 'conversationSettings', 'conversationMemories', 'generatedImages', 'favorites', 'settings'], 'readwrite');
+  const tx = db.transaction(['user', 'characters', 'conversations', 'messages', 'voomPosts', 'profileThemes', 'profileHomepages', 'smallTheaterTopics', 'smallTheaters', 'musicFavoriteTracks', 'musicCommentThreads', 'worldBooks', 'stickerGroups', 'stickers', 'conversationSettings', 'generatedImages', 'favorites', 'settings'], 'readwrite');
   await Promise.all(defaultUsers.map((user) => tx.objectStore('user').put(user)));
   await Promise.all(defaultCharacters.map((character) => tx.objectStore('characters').put(character)));
   await Promise.all(defaultConversations.map((conversation) => tx.objectStore('conversations').put(conversation)));
@@ -629,16 +877,14 @@ async function pruneLegacyDefaultData() {
   const userStore = tx.objectStore('user');
   const messageStore = tx.objectStore('messages');
   const voomStore = tx.objectStore('voomPosts');
-  const memoryStore = tx.objectStore('conversationMemories');
   const settingsStore = tx.objectStore('settings');
   const stickerGroupStore = tx.objectStore('stickerGroups');
   const stickerStore = tx.objectStore('stickers');
   const conversationSettingsStore = tx.objectStore('conversationSettings');
-  const [users, messages, voomPosts, conversationMemories, settings, stickerGroups, stickers, conversationSettings] = await Promise.all([
+  const [users, messages, voomPosts, settings, stickerGroups, stickers, conversationSettings] = await Promise.all([
     userStore.getAll(),
     messageStore.getAll(),
     voomStore.getAll(),
-    memoryStore.getAll(),
     settingsStore.get('main'),
     stickerGroupStore.getAll(),
     stickerStore.getAll(),
@@ -675,10 +921,6 @@ async function pruneLegacyDefaultData() {
   voomPosts
     .filter((post) => legacyDefaultVoomPostIds.has(post.id) || legacyDefaultCharacterIds.has(post.charId) || (post.conversationId && legacyDefaultConversationIds.has(post.conversationId)))
     .forEach((post) => void voomStore.delete(post.id));
-  conversationMemories
-    .filter((memory) => legacyDefaultConversationIds.has(memory.conversationId))
-    .forEach((memory) => void memoryStore.delete(memory.id));
-
   removedStickerGroupIds.forEach((id) => void stickerGroupStore.delete(id));
   stickers
     .filter((sticker) => isLegacyGanadiSticker(sticker) || sticker.groupIds.some((id) => removedStickerGroupIds.has(id) || isRecentStickerGroupId(id)))
@@ -701,7 +943,7 @@ export async function loadSnapshot() {
   await seedDatabase();
   await pruneLegacyDefaultData();
   const db = await getDb();
-  const [users, characters, conversations, messages, voomPosts, profileThemes, profileHomepages, smallTheaterTopics, smallTheaters, fanficBooks, fanficChapters, fanficComments, fanficTopics, fanficGenerationJobs, musicFavoriteTracks, musicCommentThreads, worldBooks, stickerGroups, stickers, conversationSettings, conversationMemories, generatedImages, favorites, walletAccounts, walletTransactions, shopStorefronts, shopProducts, shopCartItems, shopWishlistItems, shopOrders, shopMoments, settings] = await Promise.all([
+  const [users, characters, conversations, messages, voomPosts, profileThemes, profileHomepages, smallTheaterTopics, smallTheaters, fanficBooks, fanficChapters, fanficComments, fanficTopics, fanficGenerationJobs, musicFavoriteTracks, musicCommentThreads, worldBooks, stickerGroups, stickers, conversationSettings, memoryEpisodes, memoryEntities, memoryAssertions, memoryEdges, memoryThemes, memoryStateSnapshots, memoryEmbeddings, generatedImages, favorites, walletAccounts, walletTransactions, shopStorefronts, shopProducts, shopCartItems, shopWishlistItems, shopOrders, shopMoments, settings] = await Promise.all([
     db.getAll('user'),
     db.getAll('characters'),
     db.getAll('conversations'),
@@ -722,7 +964,13 @@ export async function loadSnapshot() {
     db.getAll('stickerGroups'),
     db.getAll('stickers'),
     db.getAll('conversationSettings'),
-    db.getAll('conversationMemories'),
+    db.getAll('memoryEpisodes'),
+    db.getAll('memoryEntities'),
+    db.getAll('memoryAssertions'),
+    db.getAll('memoryEdges'),
+    db.getAll('memoryThemes'),
+    db.getAll('memoryStateSnapshots'),
+    db.getAll('memoryEmbeddings'),
     db.getAll('generatedImages'),
     db.getAll('favorites'),
     db.getAll('walletAccounts'),
@@ -757,7 +1005,13 @@ export async function loadSnapshot() {
     stickerGroups,
     stickers,
     conversationSettings,
-    conversationMemories,
+    memoryEpisodes,
+    memoryEntities,
+    memoryAssertions,
+    memoryEdges,
+    memoryThemes,
+    memoryStateSnapshots,
+    memoryEmbeddings,
     generatedImages,
     favorites,
     walletAccounts,
@@ -873,9 +1127,33 @@ export async function replaceSnapshot(snapshot: AppSnapshot) {
   void conversationSettingsStore.clear();
   snapshot.conversationSettings.forEach((entry) => void conversationSettingsStore.put(toPersistableValue(entry)));
 
-  const conversationMemoryStore = tx.objectStore('conversationMemories');
-  void conversationMemoryStore.clear();
-  snapshot.conversationMemories.forEach((entry) => void conversationMemoryStore.put(toPersistableValue(entry)));
+  const memoryEpisodeStore = tx.objectStore('memoryEpisodes');
+  void memoryEpisodeStore.clear();
+  (snapshot.memoryEpisodes ?? []).forEach((entry) => void memoryEpisodeStore.put(toPersistableValue(entry)));
+
+  const memoryEntityStore = tx.objectStore('memoryEntities');
+  void memoryEntityStore.clear();
+  (snapshot.memoryEntities ?? []).forEach((entry) => void memoryEntityStore.put(toPersistableValue(entry)));
+
+  const memoryAssertionStore = tx.objectStore('memoryAssertions');
+  void memoryAssertionStore.clear();
+  (snapshot.memoryAssertions ?? []).forEach((entry) => void memoryAssertionStore.put(toPersistableValue(entry)));
+
+  const memoryEdgeStore = tx.objectStore('memoryEdges');
+  void memoryEdgeStore.clear();
+  (snapshot.memoryEdges ?? []).forEach((entry) => void memoryEdgeStore.put(toPersistableValue(entry)));
+
+  const memoryThemeStore = tx.objectStore('memoryThemes');
+  void memoryThemeStore.clear();
+  (snapshot.memoryThemes ?? []).forEach((entry) => void memoryThemeStore.put(toPersistableValue(entry)));
+
+  const memoryStateStore = tx.objectStore('memoryStateSnapshots');
+  void memoryStateStore.clear();
+  (snapshot.memoryStateSnapshots ?? []).forEach((entry) => void memoryStateStore.put(toPersistableValue(entry)));
+
+  const memoryEmbeddingStore = tx.objectStore('memoryEmbeddings');
+  void memoryEmbeddingStore.clear();
+  (snapshot.memoryEmbeddings ?? []).forEach((entry) => void memoryEmbeddingStore.put(toPersistableValue(entry)));
 
   const generatedImageStore = tx.objectStore('generatedImages');
   void generatedImageStore.clear();

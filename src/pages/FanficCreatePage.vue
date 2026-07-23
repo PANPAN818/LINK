@@ -29,7 +29,7 @@
           </button>
         </div>
         <p v-if="!appStore.charactersForActiveUser.length" class="panel-notice">当前账号还没有可用角色，请先添加并绑定角色。</p>
-        <p class="privacy-note"><ShieldCheck :size="15" /> 只读取双方真名与人物设定；不读取聊天、记忆、世界书、头像描述或原背景。</p>
+        <p class="privacy-note"><ShieldCheck :size="15" /> 只读取双方真名、人物设定与所选角色绑定且启用的局部世界书；不读取聊天、记忆、全局世界书或头像描述。</p>
       </section>
 
       <section v-else-if="step === 2" class="wizard-panel topic-panel">
@@ -100,7 +100,7 @@
           <fieldset><legend>计划篇幅</legend><button v-for="option in chapterOptions" :key="option.value" type="button" :class="{ selected: preferences.chapterTarget === option.value }" @click="preferences.chapterTarget = option.value">{{ option.label }}</button></fieldset>
         </div>
         <label class="wide-field"><span>不要出现</span><input v-model="boundaryDraft" maxlength="240" placeholder="用逗号分隔，例如：背叛、重伤、开放式结局" /></label>
-        <label class="wide-field"><span>额外方向（可选）</span><textarea v-model="preferences.extraGuidance" maxlength="600" rows="4" placeholder="例如：感情慢一点，悬疑更强，第一章从雨夜开始"></textarea></label>
+        <label class="wide-field"><span>额外方向（可选）</span><textarea v-model="preferences.extraGuidance" maxlength="600" rows="4" placeholder="例如：第一章先把冲突摆出来，感情慢一点，每章结尾留一个必须追下去的问题"></textarea></label>
       </section>
 
       <section v-else class="wizard-panel confirm-panel">
@@ -112,8 +112,8 @@
         </article>
         <article v-if="selectedTopic" class="confirm-topic"><small>{{ selectedTopic.source === 'trend' ? '联网趋势灵感' : selectedTopic.categoryLabel ? `${selectedTopic.categoryLabel} / ${selectedTopic.subcategory}` : '原创题材' }}</small><strong>{{ selectedTopic.title }}</strong><p>{{ selectedTopic.hook }}</p></article>
         <dl class="confirm-settings"><div><dt>基调</dt><dd>{{ preferences.tone }}</dd></div><div><dt>视角</dt><dd>{{ preferences.pov }}</dd></div><div><dt>结局</dt><dd>{{ preferences.endingPreference }}</dd></div><div><dt>篇幅</dt><dd>{{ preferences.chapterTarget }} 章 · 每章约 2500 字</dd></div></dl>
-        <ul class="original-rules"><li><Check :size="14" /> 所有剧情、地点、身份、职业、能力、关系起点与世界规则从零原创</li><li><Check :size="14" /> 后续写作不再读取原设定，只使用抽象人物 DNA 与本书事实账本</li><li><Check :size="14" /> 第一章正文、高潮锚点、章评与书评同批生成并一起保存</li></ul>
-        <label class="consent-row"><input v-model="consent" type="checkbox" /><span>同意将双方真名与人物设定发送给当前配置的文本模型，仅用于人物气质抽象。</span></label>
+        <ul class="original-rules"><li><Check :size="14" /> 所有剧情、地点、身份、职业、能力、关系起点与世界规则从零原创</li><li><Check :size="14" /> 后续写作不再读取原设定或局部世界书原文，只使用抽象人物 DNA 与本书事实账本</li><li><Check :size="14" /> 第一章正文、高潮锚点、章评与书评同批生成并一起保存</li></ul>
+        <label class="consent-row"><input v-model="consent" type="checkbox" /><span>同意将双方真名、人物设定与所选角色绑定且启用的局部世界书发送给当前文本模型，仅用于人物气质抽象。</span></label>
         <p v-if="createError" class="error-note">{{ createError }}</p>
       </section>
     </main>
@@ -162,14 +162,14 @@ const createError = ref('');
 const boundaryDraft = ref('');
 const consent = ref(false);
 const creating = ref(false);
-const preferences = reactive({ tone: '细腻电影感', pov: '第三人称双视角', endingPreference: 'HE 圆满结局', chapterTarget: 12, contentBoundaries: [] as string[], extraGuidance: '' });
+const preferences = reactive({ tone: '爽感连载 · 开局即冲突', pov: '第三人称双线推进', endingPreference: 'HE 圆满收束', chapterTarget: 12, contentBoundaries: [] as string[], extraGuidance: '' });
 const customTopic = reactive({ title: '', hook: '', setting: '', conflict: '', relationship: '', tags: [] as string[] });
 
 const steps = [{ id: 1, label: '主角' }, { id: 2, label: '题材' }, { id: 3, label: '方向' }, { id: 4, label: '确认' }];
 const topicTabs = [{ id: 'built-in' as const, label: '内置原创' }, { id: 'trend' as const, label: '联网趋势' }, { id: 'custom' as const, label: '自定义' }];
-const toneOptions = ['细腻电影感', '轻松治愈', '高压悬疑', '酸涩慢热', '轻喜剧', '诗性克制'];
-const povOptions = ['第三人称双视角', '第一人称交替', '第三人称限知'];
-const endingOptions = ['HE 圆满结局', 'OE 余韵结局', 'BE 遗憾结局'];
+const toneOptions = ['爽感连载 · 开局即冲突', '轻松甜宠 · 高频互动', '强情节悬疑 · 章末钩子', '酸甜拉扯 · 慢热升温', '轻喜剧打脸 · 节奏快', '事业升级 · 大女主'];
+const povOptions = ['第三人称双线推进', '第一人称交替', '第三人称限知'];
+const endingOptions = ['HE 圆满收束', 'OE 留有余味', 'BE 遗憾收束'];
 const chapterOptions = [{ value: 8, label: '短篇 · 8章' }, { value: 12, label: '中篇 · 12章' }, { value: 20, label: '长篇 · 20章' }];
 
 const selectedCharacter = computed(() => appStore.charactersForActiveUser.find((character) => character.id === selectedCharacterId.value) ?? null);

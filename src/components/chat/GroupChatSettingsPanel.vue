@@ -76,17 +76,10 @@
     </section>
 
     <section v-if="activeTab === 'memory'" class="panel-section">
-      <section class="memory-hero"><div><span>Group Memory</span><strong>{{ memoryRecords.length }}</strong><p>{{ visibleMessageCount }} 条可见消息 · {{ memoryRecords.length }} 份群聊总结</p></div></section>
+      <section class="memory-hero"><div><span>Group Memory</span><strong>—</strong><p>{{ visibleMessageCount }} 条群聊消息仍完整保留</p></div></section>
       <section class="settings-block">
-        <header class="section-header"><div><span>Automation</span><strong>群聊记忆策略</strong></div></header>
-        <label class="switch-card"><input :checked="chatSettings.memory.enabled" type="checkbox" @change="updateMemory('enabled', $event)" /><span class="switch-track"></span><div><strong>启用群聊记忆</strong><span>群内角色共同读取本群上下文，并保留跨会话记忆。</span></div></label>
-        <label class="switch-card"><input :checked="chatSettings.memory.autoSummarize" type="checkbox" @change="updateMemory('autoSummarize', $event)" /><span class="switch-track"></span><div><strong>自动总结</strong><span>按群聊楼层生成只属于当前群的记忆摘要。</span></div></label>
-        <label class="field compact-field"><span>每多少楼生成群聊总结</span><input :value="chatSettings.memory.summarizeEvery" inputmode="numeric" min="1" type="number" @change="updateSummarizeEvery" /><small>长群聊达到该楼数时自动归档。</small></label>
-      </section>
-      <section class="settings-block">
-        <header class="section-header"><div><span>Timeline</span><strong>群聊总结</strong></div><em>{{ memoryRecords.length }} 条</em></header>
-        <div v-if="memoryRecords.length" class="memory-list"><article v-for="record in memoryRecords.slice().sort((a,b) => b.updatedAt-a.updatedAt)" :key="record.id"><span>{{ record.mode === 'offline' ? '群聊线下' : '群聊线上' }} · {{ record.startFloor }}–{{ record.endFloor }}F</span><p>{{ record.summary }}</p></article></div>
-        <p v-else class="empty-note">当前群还没有生成群聊总结。</p>
+        <header class="section-header"><div><span>Character brains</span><strong>群聊角色记忆正在准备</strong></div></header>
+        <p class="empty-note">人类式记忆必须让每个群成员分别以自己的视角形成独立 brain。当前单角色 GraphRAG 不会冒充群成员共同记忆，旧“群聊总结”也不再作为运行入口。</p>
       </section>
     </section>
 
@@ -140,7 +133,7 @@
 import { computed, reactive, ref, watch } from 'vue';
 import { useAppStore } from '@/stores/appStore';
 import AvatarCropperModal from '@/components/image/AvatarCropperModal.vue';
-import type { ChatAppearanceSettings, ChatMemorySettings, ChatModelScope, Conversation, GroupMember, VoomFrequency } from '@/types/domain';
+import type { ChatAppearanceSettings, ChatModelScope, Conversation, GroupMember, VoomFrequency } from '@/types/domain';
 import { readImageFileFromInput } from '@/utils/imageFile';
 
 export type GroupSettingsTab = 'group' | 'members' | 'memory' | 'appearance' | 'ai';
@@ -162,7 +155,6 @@ const canManage = computed(() => isJoined.value && (currentMember.value?.role ==
 const activeMembers = computed(() => conversation.value?.groupMembers?.filter((member) => (member.membershipStatus ?? 'active') === 'active') ?? []);
 const existingCharacterIds = computed(() => new Set(conversation.value?.groupMembers?.filter((member) => member.identityType === 'character').map((member) => member.identityId) ?? []));
 const invitableCharacters = computed(() => store.charactersForActiveUser.filter((character) => !existingCharacterIds.value.has(character.id)));
-const memoryRecords = computed(() => store.conversationMemories.filter((record) => record.conversationId === props.conversationId));
 const visibleMessageCount = computed(() => store.messagesForConversation(props.conversationId).filter((message) => !message.contextOnly).length);
 const fallbackAvatar = `data:image/svg+xml;utf8,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="18" fill="#eaf5ee"/><circle cx="25" cy="27" r="10" fill="#79b88e"/><circle cx="43" cy="29" r="8" fill="#9ac9aa"/><path d="M10 57c2-13 11-20 22-20s20 7 22 20" fill="#79b88e"/></svg>')}`;
 const leadAvatar = computed(() => activeMembers.value.find((member) => member.identityType === 'character' && member.avatar)?.avatar || fallbackAvatar);
@@ -199,8 +191,6 @@ async function readNpcAvatar(memberId: string, event: Event) { const image = awa
 async function applyAvatarCrop(value: string) { const memberId = avatarEditorNpcMemberId.value; if (memberId) await saveNpcAvatar(memberId, value); else { profileDraft.avatar = value; await saveAvatar(value); } avatarEditorNpcMemberId.value = null; }
 async function savePersonalPreferences() { await store.updateGroupPersonalPreferences(props.conversationId, personalDraft); }
 async function inviteMembers() { if (!inviteIds.value.length) return; inviting.value = true; try { await store.inviteCharactersToGroup(props.conversationId, inviteIds.value); inviteIds.value = []; } finally { inviting.value = false; } }
-async function updateMemory(key: keyof Pick<ChatMemorySettings, 'enabled' | 'autoSummarize'>, event: Event) { await saveSettings({ ...chatSettings.value, memory: { ...chatSettings.value.memory, [key]: (event.target as HTMLInputElement).checked } }); }
-async function updateSummarizeEvery(event: Event) { const value = Math.max(1, Math.round(Number((event.target as HTMLInputElement).value) || 1)); await saveSettings({ ...chatSettings.value, memory: { ...chatSettings.value.memory, summarizeEvery: value } }); }
 async function updateAppearanceColor(key: keyof Pick<ChatAppearanceSettings, 'backgroundColor' | 'userBubbleColor' | 'characterBubbleColor'>, event: Event) { await saveSettings({ ...chatSettings.value, appearance: { ...chatSettings.value.appearance, [key]: (event.target as HTMLInputElement).value } }); }
 async function updateAppearanceToggle(key: keyof Pick<ChatAppearanceSettings, 'showMessageTime' | 'showReadStatus' | 'showUserAvatar' | 'showOnlyFirstAvatarInReply'>, event: Event) { await saveSettings({ ...chatSettings.value, appearance: { ...chatSettings.value.appearance, [key]: (event.target as HTMLInputElement).checked } }); }
 async function updateModel(scope: Extract<ChatModelScope, 'online' | 'offline'>, event: Event) { await saveSettings({ ...chatSettings.value, modelOverrides: { ...chatSettings.value.modelOverrides, [scope]: (event.target as HTMLInputElement).value.trim() } }); }

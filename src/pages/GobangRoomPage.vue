@@ -10,18 +10,20 @@
           </figure>
           <span class="gobang-room-versus"><i></i>VS<i></i></span>
           <figure>
-            <img :src="character.avatar" :alt="characterName" />
+            <button
+              class="gobang-character-avatar"
+              :class="{ 'has-unread-mind': hasUnreadMindState }"
+              type="button"
+              :aria-label="`查看${characterName}心声`"
+              @click="openMindState"
+            >
+              <img :src="character.avatar" :alt="characterName" />
+              <span v-if="hasUnreadMindState" class="gobang-mind-dot" aria-hidden="true"></span>
+            </button>
             <figcaption><strong>{{ characterName }}</strong><small>{{ characterStoneLabel }}</small></figcaption>
           </figure>
         </div>
       </section>
-
-      <div class="gobang-room-pills">
-        <span v-if="narrationEnabled" class="gobang-narration-pill"><Sparkles :size="12" />旁白模式已开启</span>
-        <button class="gobang-mind-button" type="button" :aria-label="`查看${characterName}心声`" @click="openMindState">
-          <Heart :size="13" />查看心声
-        </button>
-      </div>
 
       <GobangGamePanel
         class="gobang-room-board"
@@ -30,23 +32,33 @@
         :user-name="userName"
         :busy="gobangBusy"
         :disabled="interactionLocked"
-        :round-number="roundNumber"
         @place="placeStone"
         @retry="retryCharacterMove"
         @undo="undoMove"
         @resign="resignMatch"
         @new-game="goBack"
       />
+    </main>
 
-      <section class="gobang-room-conversation" aria-label="棋局对话">
+    <Transition name="gobang-conversation-scrim">
+      <button v-if="conversationOpen" class="gobang-conversation-scrim" type="button" aria-label="关闭桌边会话" @click="closeConversation" />
+    </Transition>
+
+    <Transition name="gobang-conversation-drawer">
+      <section v-if="conversationOpen" class="gobang-room-conversation" aria-label="桌边会话">
         <header>
-          <span><MessageCircleMore :size="15" />桌边对话</span>
-          <small>同步写入当前会话</small>
+          <div>
+            <strong><MessageCircleMore :size="15" />桌边会话</strong>
+            <small>{{ sessionMessages.length ? `${sessionMessages.length} 条记录` : '还没有记录' }}</small>
+          </div>
+          <button type="button" aria-label="收起桌边会话" @click="closeConversation">
+            <ChevronDown :size="18" />
+          </button>
         </header>
         <div ref="transcriptRef" class="gobang-room-transcript">
           <div v-if="!sessionMessages.length" class="gobang-room-empty">
             <span>落子与对白会出现在这里</span>
-            <small>可以先发送多条，再请求角色回复</small>
+            <small>发送后可单独记录，也可以再请求角色回复</small>
           </div>
           <MessageBubble
             v-for="message in sessionMessages"
@@ -61,12 +73,27 @@
           <div v-if="replyWaiting" class="gobang-room-typing"><i></i><i></i><i></i><span>{{ characterName }} 正在回复</span></div>
         </div>
       </section>
-    </main>
+    </Transition>
 
-    <form class="gobang-room-composer" @submit.prevent="sendAndReply">
-      <input v-model="draft" maxlength="500" :disabled="interactionLocked" placeholder="在棋桌边说点什么…" />
-      <button class="gobang-send-only" type="button" :disabled="interactionLocked || !draft.trim()" @click="sendOnly">发送</button>
-      <button class="gobang-reply-button" type="submit" :disabled="interactionLocked || replyWaiting">
+    <button
+      v-if="!conversationOpen"
+      class="gobang-conversation-trigger"
+      :class="{ 'has-update': hiddenConversationUpdate }"
+      type="button"
+      aria-label="打开桌边会话"
+      @click="openConversation"
+    >
+      <MessageCircleMore :size="15" />
+      <span>桌边会话</span>
+      <small>{{ sessionMessages.length || '0' }}</small>
+      <em v-if="conversationPreview">{{ conversationPreview }}</em>
+      <ChevronUp :size="16" />
+    </button>
+
+    <form class="gobang-room-composer" @submit.prevent="sendOnly">
+      <input v-model="draft" maxlength="500" :disabled="interactionLocked" enterkeyhint="send" placeholder="在棋桌边说点什么…" />
+      <button class="gobang-send-only" type="submit" :disabled="interactionLocked || !draft.trim()">发送</button>
+      <button class="gobang-reply-button" type="button" aria-label="请求角色回复" :disabled="interactionLocked || replyWaiting" @click="sendAndReply">
         <Send :size="17" />
       </button>
     </form>
@@ -93,15 +120,16 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
-import { CircleOff, Heart, MessageCircleMore, Send, Sparkles } from 'lucide-vue-next';
+import { ChevronDown, ChevronUp, CircleOff, MessageCircleMore, Send } from 'lucide-vue-next';
 import AppModal from '@/components/common/AppModal.vue';
 import CharacterProfileSheet from '@/components/chat/CharacterProfileSheet.vue';
 import GobangGamePanel from '@/components/chat/GobangGamePanel.vue';
 import MessageBubble from '@/components/chat/MessageBubble.vue';
 import { useAppStore } from '@/stores/appStore';
-import type { CharacterProfile, ChatGobangAttachment, ChatMessage } from '@/types/domain';
+import type { CharacterProfile, ChatGobangAttachment } from '@/types/domain';
 import { getCharacterAiName, getCharacterDisplayName } from '@/utils/character';
-import { defaultProfileAvatar, getUserAiName, getUserDisplayName } from '@/utils/profile';
+import { firstUnreadCharacterMessageId, scrollMessageContainerToUnreadOrBottom } from '@/utils/messageScroll';
+import { defaultProfileAvatar, getUserAiName, getUserDisplayName, normalizeVisualProfile } from '@/utils/profile';
 import { applyGobangMove, gobangStoneForPlayer, resignGobangGame, undoGobangRound } from '@/utils/gobang';
 
 const props = defineProps<{ id: string; messageId: string }>();
@@ -111,6 +139,8 @@ const transcriptRef = ref<HTMLElement | null>(null);
 const draft = ref('');
 const gobangBusy = ref(false);
 const showMindState = ref(false);
+const conversationOpen = ref(false);
+const hiddenConversationUpdate = ref(false);
 let gobangRequestController: AbortController | null = null;
 let gobangRunId = 0;
 
@@ -119,13 +149,24 @@ const character = computed(() => conversation.value ? store.characterById(conver
 const conversationUser = computed(() => {
   const currentConversation = conversation.value;
   const currentCharacter = character.value;
-  if (!currentConversation || !currentCharacter) return store.user ?? undefined;
-  return store.userById(currentConversation.userId || currentCharacter.boundUserId) ?? store.user ?? undefined;
+  if (!currentConversation || !currentCharacter) return undefined;
+  const userId = currentConversation.userId || currentCharacter.boundUserId;
+  const user = userId ? store.userById(userId) : null;
+  if (!user) return undefined;
+  const profile = normalizeVisualProfile(currentCharacter.boundUserProfile, user);
+  return {
+    ...user,
+    avatar: profile.avatar || user.avatar,
+    profile: normalizeVisualProfile({
+      ...profile,
+      nickname: user.nickname,
+      bio: user.signature
+    }, user)
+  };
 });
 const gameMessage = computed(() => store.messagesForConversation(props.id).find((message) => message.id === props.messageId && message.gobang) ?? null);
 const game = computed(() => gameMessage.value?.gobang ?? null);
 const chatSettings = computed(() => store.settingsForConversation(props.id));
-const narrationEnabled = computed(() => Boolean(chatSettings.value.narrationModeEnabled));
 const characterName = computed(() => character.value ? getCharacterDisplayName(character.value) : '角色');
 const characterAiName = computed(() => character.value ? getCharacterAiName(character.value) : '角色');
 const userName = computed(() => getUserDisplayName(conversationUser.value ?? store.user));
@@ -136,9 +177,14 @@ const sessionMessages = computed(() => store.messagesForConversation(props.id)
   .sort((left, right) => left.createdAt - right.createdAt));
 const replyWaiting = computed(() => store.isConversationReplying(props.id));
 const interactionLocked = computed(() => gobangBusy.value || replyWaiting.value || game.value?.status !== 'active');
-const roundNumber = computed(() => Math.max(1, store.messagesForConversation(props.id).filter((message) => message.gobang).findIndex((message) => message.id === props.messageId) + 1));
 const userStoneLabel = computed(() => game.value?.userStone === 'black' ? '黑棋' : '白棋');
 const characterStoneLabel = computed(() => game.value && gobangStoneForPlayer(game.value, 'char') === 'black' ? '黑棋' : '白棋');
+const hasUnreadMindState = computed(() => Boolean(character.value?.mindState?.lines.length
+  && character.value.mindState.updatedAt > character.value.mindState.readAt));
+const conversationPreview = computed(() => {
+  const content = sessionMessages.value.at(-1)?.content.replace(/\s+/g, ' ').trim() ?? '';
+  return content.length > 18 ? `${content.slice(0, 18)}…` : content;
+});
 
 function resultNarration(currentGame: ChatGobangAttachment) {
   if (currentGame.status === 'user-won') return `[棋局结束] ${userAiName.value}在第 ${currentGame.moves.length} 手连成五子并获胜。`;
@@ -157,9 +203,27 @@ async function appendResultFloor(currentGame: ChatGobangAttachment) {
   });
 }
 
-async function scrollTranscript() {
+async function scrollTranscript(options: { preferUnread?: boolean; unreadMessageId?: string } = {}) {
   await nextTick();
-  if (transcriptRef.value) transcriptRef.value.scrollTop = transcriptRef.value.scrollHeight;
+  const transcript = transcriptRef.value;
+  if (!transcript) return;
+  if (options.preferUnread) {
+    scrollMessageContainerToUnreadOrBottom(transcript, sessionMessages.value, options.unreadMessageId);
+  } else {
+    transcript.scrollTop = transcript.scrollHeight;
+  }
+  if (conversationOpen.value) await store.markConversationRead(props.id);
+}
+
+async function openConversation() {
+  const unreadMessageId = firstUnreadCharacterMessageId(sessionMessages.value);
+  conversationOpen.value = true;
+  hiddenConversationUpdate.value = false;
+  await scrollTranscript({ preferUnread: true, unreadMessageId });
+}
+
+function closeConversation() {
+  conversationOpen.value = false;
 }
 
 async function letCharacterMove() {
@@ -240,12 +304,13 @@ async function sendOnly() {
   if (!content || interactionLocked.value) return;
   draft.value = '';
   await appendUserFloor(content);
-  await scrollTranscript();
+  await openConversation();
 }
 
 async function sendAndReply() {
   const currentGame = game.value;
   if (!currentGame || interactionLocked.value) return;
+  await openConversation();
   const content = draft.value.trim();
   if (content) {
     draft.value = '';
@@ -290,14 +355,17 @@ onMounted(async () => {
   store.setActiveConversation(props.id);
   if (conversation.value?.activeMode !== 'online') await store.updateConversationMode(props.id, 'online');
   if (gameMessage.value) await store.recoverInterruptedGobangMessage(gameMessage.value.id);
-  await scrollTranscript();
+  hiddenConversationUpdate.value = Boolean(firstUnreadCharacterMessageId(sessionMessages.value));
   const currentGame = game.value;
   if (currentGame && (currentGame.invitationStatus ?? 'accepted') === 'accepted' && currentGame.status === 'active' && currentGame.turn === 'char' && currentGame.apiState?.status === 'idle') {
     await letCharacterMove();
   }
 });
 
-watch(() => sessionMessages.value.length, () => void scrollTranscript());
+watch(() => sessionMessages.value.length, (nextLength, previousLength) => {
+  if (nextLength > previousLength && !conversationOpen.value) hiddenConversationUpdate.value = true;
+  if (conversationOpen.value) void scrollTranscript();
+});
 
 onBeforeUnmount(() => {
   gobangRunId += 1;
@@ -378,5 +446,249 @@ onBeforeUnmount(() => {
 @media (min-width: 720px) {
   .gobang-room-main { padding-top: 22px; }
   .gobang-room-composer { right: max(0px, calc((100% - 680px) / 2)); left: max(0px, calc((100% - 680px) / 2)); border: 1px solid rgba(31,40,38,.08); border-bottom: 0; border-radius: 22px 22px 0 0; }
+}
+
+.gobang-room {
+  position: relative;
+  height: 100%;
+  min-height: 0;
+  padding-bottom: 0;
+}
+
+.gobang-room-main {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  min-height: 0;
+  overflow: hidden;
+  padding: calc(8px + var(--safe-top)) 12px calc(112px + var(--safe-bottom));
+}
+
+.gobang-room-hero {
+  flex: 0 0 auto;
+  gap: 12px;
+  margin: 2px auto 14px;
+}
+
+.gobang-room-players {
+  grid-template-columns: minmax(0, 1fr) 74px minmax(0, 1fr);
+}
+
+.gobang-room-players figure { gap: 7px; }
+
+.gobang-room-players figure > img,
+.gobang-character-avatar {
+  width: 54px;
+  height: 54px;
+}
+
+.gobang-character-avatar {
+  position: relative;
+  display: block;
+  padding: 0;
+  border: 0;
+  border-radius: 18px;
+  background: transparent;
+  line-height: 0;
+}
+
+.gobang-character-avatar img {
+  width: 54px;
+  height: 54px;
+  border: 3px solid rgba(255,255,255,.9);
+  border-radius: 18px;
+  object-fit: cover;
+  box-shadow: 0 9px 26px rgba(36,55,48,.16);
+}
+
+.gobang-character-avatar.has-unread-mind::before {
+  position: absolute;
+  z-index: 1;
+  inset: -6px;
+  border: 2px solid rgba(205,91,126,.82);
+  border-radius: 21px;
+  content: '';
+  animation: gobang-mind-pulse 1.8s ease-out infinite;
+  pointer-events: none;
+}
+
+.gobang-mind-dot {
+  position: absolute;
+  z-index: 2;
+  top: -4px;
+  right: -4px;
+  width: 10px;
+  height: 10px;
+  border: 2px solid #f2f5f0;
+  border-radius: 50%;
+  background: #d5567c;
+  box-shadow: 0 2px 6px rgba(150,51,84,.35);
+}
+
+.gobang-room-players figcaption strong { font-size: 12px; }
+.gobang-room-players figcaption small { font-size: 9px; }
+.gobang-room-versus { gap: 7px; font-size: 10px; }
+
+.gobang-room-board {
+  flex: 1 1 auto;
+  width: 100%;
+  max-width: 560px;
+  min-height: 0;
+  margin: 0 auto;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.gobang-room-board :deep(.gobang-panel) { gap: 8px; }
+.gobang-room-board :deep(.gobang-board) { max-width: 100%; }
+
+.gobang-conversation-scrim {
+  position: absolute;
+  z-index: 4;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  background: rgba(30,41,36,.08);
+  backdrop-filter: blur(2px);
+}
+
+.gobang-room-conversation {
+  position: absolute;
+  z-index: 7;
+  right: 10px;
+  bottom: calc(70px + var(--safe-bottom));
+  left: 10px;
+  display: flex;
+  flex-direction: column;
+  width: auto;
+  height: min(44vh, 348px);
+  max-height: calc(var(--app-height) - var(--safe-top) - var(--safe-bottom) - 112px);
+  min-height: 150px;
+  margin: 0;
+  overflow: hidden;
+  border: 1px solid rgba(31,40,38,.1);
+  border-radius: 22px;
+  background: rgba(255,255,255,.94);
+  box-shadow: 0 18px 46px rgba(43,61,54,.22);
+  backdrop-filter: blur(22px) saturate(1.2);
+}
+
+.gobang-room-conversation > header {
+  flex: 0 0 auto;
+  padding: 10px 12px 9px 14px;
+}
+
+.gobang-room-conversation > header > div {
+  display: grid;
+  gap: 2px;
+}
+
+.gobang-room-conversation > header strong {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 850;
+}
+
+.gobang-room-conversation > header small { font-size: 8px; }
+
+.gobang-room-conversation > header button {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border-radius: 10px;
+  color: #6c7872;
+  background: #eef2ee;
+}
+
+.gobang-room-transcript {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
+  padding: 9px 10px 12px;
+}
+
+.gobang-conversation-trigger {
+  position: absolute;
+  z-index: 6;
+  right: 50%;
+  bottom: calc(72px + var(--safe-bottom));
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 132px;
+  max-width: calc(100% - 28px);
+  min-height: 32px;
+  padding: 6px 8px 6px 11px;
+  overflow: hidden;
+  border: 1px solid rgba(31,40,38,.1);
+  border-radius: 999px;
+  color: #3d4c45;
+  background: rgba(255,255,255,.91);
+  box-shadow: 0 8px 22px rgba(43,61,54,.14);
+  transform: translateX(50%);
+  backdrop-filter: blur(18px);
+}
+
+.gobang-conversation-trigger span { flex: 0 0 auto; font-size: 10px; font-weight: 850; }
+.gobang-conversation-trigger small { flex: 0 0 auto; color: #6f8178; font-size: 9px; }
+.gobang-conversation-trigger em { min-width: 0; overflow: hidden; color: #8a9790; font-size: 8px; font-style: normal; text-overflow: ellipsis; white-space: nowrap; }
+.gobang-conversation-trigger svg:last-child { flex: 0 0 auto; margin-left: auto; color: #75847c; }
+.gobang-conversation-trigger.has-update { border-color: rgba(205,91,126,.35); animation: gobang-conversation-pulse 1.8s ease-in-out infinite; }
+
+.gobang-room-composer {
+  position: absolute;
+  z-index: 8;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  padding: 8px 12px calc(8px + var(--safe-bottom));
+}
+
+.gobang-room-composer input { height: 40px; border-radius: 14px; }
+.gobang-send-only { min-width: 42px; padding: 0 9px; }
+.gobang-reply-button { width: 40px; height: 40px; border-radius: 13px; }
+
+.gobang-conversation-scrim-enter-active,
+.gobang-conversation-scrim-leave-active { transition: opacity .2s ease; }
+.gobang-conversation-scrim-enter-from,
+.gobang-conversation-scrim-leave-to { opacity: 0; }
+.gobang-conversation-drawer-enter-active,
+.gobang-conversation-drawer-leave-active { transition: opacity .22s ease, transform .22s ease; }
+.gobang-conversation-drawer-enter-from,
+.gobang-conversation-drawer-leave-to { opacity: 0; transform: translateY(18px); }
+
+@keyframes gobang-mind-pulse {
+  0% { opacity: .72; transform: scale(.94); }
+  80%, 100% { opacity: 0; transform: scale(1.2); }
+}
+
+@keyframes gobang-conversation-pulse {
+  0%, 100% { box-shadow: 0 8px 22px rgba(43,61,54,.14); }
+  50% { box-shadow: 0 8px 24px rgba(205,91,126,.32); }
+}
+
+@media (max-height: 700px) and (max-width: 639px) {
+  .gobang-room-main { padding-top: calc(5px + var(--safe-top)); }
+  .gobang-room-hero { margin-bottom: 4px; }
+  .gobang-room-players figure > img,
+  .gobang-character-avatar { width: 43px; height: 43px; }
+  .gobang-room-players figcaption strong { font-size: 10px; }
+  .gobang-room-board :deep(.gobang-panel) { gap: 5px; }
+  .gobang-room-board :deep(.gobang-turn-status) { min-height: 23px; }
+  .gobang-room-board :deep(.gobang-turn-status h2) { font-size: 13px; }
+  .gobang-room-board :deep(.gobang-actions > button) { min-height: 32px !important; }
+}
+
+@media (min-width: 720px) {
+  .gobang-room-main { padding: 22px 18px calc(118px + var(--safe-bottom)); }
+  .gobang-room-conversation { right: max(10px, calc((100% - 600px) / 2)); left: max(10px, calc((100% - 600px) / 2)); }
+  .gobang-conversation-trigger { bottom: calc(78px + var(--safe-bottom)); }
+  .gobang-room-composer { right: max(0px, calc((100% - 680px) / 2)); left: max(0px, calc((100% - 680px) / 2)); }
 }
 </style>

@@ -28,13 +28,9 @@
     </template>
 
     <template v-else>
-      <header class="gobang-game-head">
-        <div class="gobang-game-title">
-          <span class="gobang-kicker">LINK PLAY · ROUND {{ roundNumber }}</span>
-          <h2>{{ statusTitle }}</h2>
-          <p>{{ statusDetail }}</p>
-        </div>
-        <span class="gobang-status-chip" :class="[`gobang-status-chip--${game.status}`, { 'gobang-status-chip--failed': apiFailure }]">{{ statusChip }}</span>
+      <header class="gobang-turn-status" :class="{ failed: apiFailure }" aria-live="polite">
+        <span v-if="statusLabel" class="gobang-turn-status-label">{{ statusLabel }}</span>
+        <h2>{{ statusTitle }}</h2>
       </header>
 
       <div class="gobang-board-shell">
@@ -56,17 +52,12 @@
             </span>
           </button>
         </div>
-        <span v-if="isRequesting" class="gobang-thinking"><i></i><i></i><i></i>{{ characterName }} 正在看棋</span>
       </div>
 
-      <section v-if="apiFailure" class="gobang-api-error" role="alert">
-        <span><strong>角色没有完成这一手</strong><small>{{ apiErrorText }}</small></span>
-        <button type="button" :disabled="disabled || isRequesting" @click="emit('retry')">重新调用 API</button>
-      </section>
-
-      <div class="gobang-actions">
+      <div class="gobang-actions" :class="{ 'gobang-actions--finished': game.status !== 'active' }">
         <template v-if="game.status === 'active'">
-          <button type="button" :disabled="isRequesting || disabled || !canUndo" @click="emit('undo')">悔一步</button>
+          <button v-if="apiFailure" class="gobang-retry-action" type="button" :title="apiErrorText" :disabled="disabled || isRequesting" @click="emit('retry')">重新落子</button>
+          <button v-else type="button" :disabled="isRequesting || disabled || !canUndo" @click="emit('undo')">悔一步</button>
           <button class="gobang-danger-action" type="button" :disabled="isRequesting || disabled" @click="emit('resign')">认输</button>
         </template>
         <button v-else class="gobang-primary-action" type="button" :disabled="disabled" @click="emit('new-game')">
@@ -90,7 +81,6 @@ const props = defineProps<{
   userName: string;
   busy?: boolean;
   disabled?: boolean;
-  roundNumber?: number;
 }>();
 
 const emit = defineEmits<{
@@ -143,35 +133,30 @@ const statusTitle = computed(() => {
   if (!props.game) return '';
   if (props.game.status === 'user-won') return '你赢下了这一局';
   if (props.game.status === 'char-won') return `${props.characterName} 赢了`;
-  if (props.game.status === 'draw') return '棋盘落满，平局';
+  if (props.game.status === 'draw') return '棋盘落满';
   if (props.game.status === 'resigned') return '你收起了棋子';
-  if (apiFailure.value) return `${props.characterName} 没有完成落子`;
-  if (isRequesting.value) return `${props.characterName} 正在落子`;
+  if (apiFailure.value) return `${props.characterName} 没有完成落子 · 请重试`;
+  if (isRequesting.value) return `${props.characterName} 正在落子 · 思考中`;
   if (props.game.turn === 'char') return `等待 ${props.characterName} 落子`;
-  return '轮到你了';
+  return '轮到你了 · 你的回合';
 });
-const statusDetail = computed(() => {
+const statusLabel = computed(() => {
   if (!props.game) return '';
-  if (props.game.status === 'active') return `${props.game.moves.length + 1} 手 · 使用线上聊天模型`;
-  return `共落下 ${props.game.moves.length} 手`;
-});
-const statusChip = computed(() => {
-  if (!props.game) return '';
-  if (props.game.status === 'active') {
-    if (apiFailure.value) return 'API 失败';
-    return isRequesting.value ? '思考中' : props.game.turn === 'char' ? '待落子' : '你的回合';
-  }
   if (props.game.status === 'user-won') return '胜';
   if (props.game.status === 'char-won') return '负';
-  if (props.game.status === 'draw') return '和';
-  return '已认输';
+  if (props.game.status === 'draw') return '平局';
+  if (props.game.status === 'resigned') return '已认输';
+  return '';
 });
 </script>
 
 <style scoped>
 .gobang-panel {
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: 13px;
+  min-height: 0;
+  height: 100%;
   color: #242126;
 }
 
@@ -319,42 +304,48 @@ const statusChip = computed(() => {
   box-shadow: 0 12px 24px rgba(36, 33, 38, 0.18);
 }
 
-.gobang-game-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 3px 2px 0;
-}
-
-.gobang-game-title { min-width: 0; }
-.gobang-game-head h2 { font-size: 19px; }
-
-.gobang-status-chip {
+.gobang-turn-status {
   flex: 0 0 auto;
-  padding: 5px 8px;
-  border-radius: 999px;
-  background: #f0e5d7;
-  color: #8a5b37;
-  font-size: 9px;
-  font-weight: 950;
+  display: grid;
+  min-height: 28px;
+  place-items: center;
+  padding: 0 10px;
+  text-align: center;
 }
 
-.gobang-status-chip--user-won { background: #e8f7ed; color: #138341; }
-.gobang-status-chip--char-won,
-.gobang-status-chip--resigned { background: #f3eef0; color: #7a626b; }
-.gobang-status-chip--failed { background: #ffe8eb; color: #b73347; }
+.gobang-turn-status h2 {
+  margin: 0;
+  color: #2d292d;
+  font-size: 15px;
+  font-weight: 920;
+  letter-spacing: -0.02em;
+}
+
+.gobang-turn-status-label {
+  color: #7c6f75;
+  font-size: 12px;
+  font-weight: 900;
+  line-height: 1.2;
+}
+
+.gobang-turn-status.failed h2 { color: #b13b4d; }
 
 .gobang-board-shell {
   position: relative;
-  display: grid;
-  justify-items: center;
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 0;
+  container-type: size;
 }
 
 .gobang-board {
+  flex: 0 1 auto;
   display: grid;
   grid-template-columns: repeat(15, 1fr);
-  width: min(100%, 370px);
+  width: min(100%, 100cqh, 370px);
+  aspect-ratio: 1;
   padding: 10px;
   overflow: hidden;
   border: 1px solid rgba(95, 58, 31, 0.25);
@@ -428,94 +419,14 @@ const statusChip = computed(() => {
   content: '';
 }
 
-.gobang-thinking {
-  position: absolute;
-  z-index: 5;
-  bottom: 9px;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 6px 9px;
-  border-radius: 999px;
-  background: rgba(30, 28, 31, 0.86);
-  color: #ffffff;
-  font-size: 9px;
-  font-weight: 850;
-  backdrop-filter: blur(10px);
-}
-
-.gobang-thinking i {
-  width: 3px;
-  height: 3px;
-  border-radius: 50%;
-  background: currentColor;
-  animation: gobang-thinking 0.9s infinite ease-in-out;
-}
-
-.gobang-thinking i:nth-child(2) { animation-delay: 0.15s; }
-.gobang-thinking i:nth-child(3) { animation-delay: 0.3s; }
-
-.gobang-note {
-  display: flex;
-  align-items: flex-start;
-  gap: 6px;
-  margin: 0;
-  padding: 8px 10px;
-  border-radius: 11px;
-  background: rgba(255, 255, 255, 0.68);
-  color: #746d76;
-  font-size: 10px;
-  font-weight: 700;
-}
-
-.gobang-note svg { flex: 0 0 auto; color: #ba8051; }
-
-.gobang-dialogue span {
-  display: grid;
-  gap: 2px;
-}
-
-.gobang-dialogue strong {
-  color: #4b4148;
-  font-size: 9px;
-}
-
-.gobang-api-error {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 10px;
-  padding: 10px;
-  border: 1px solid rgba(200, 67, 84, 0.16);
-  border-radius: 12px;
-  background: #fff4f5;
-}
-
-.gobang-api-error span {
-  display: grid;
-  gap: 3px;
-  min-width: 0;
-}
-
-.gobang-api-error strong { color: #a63445; font-size: 10px; }
-.gobang-api-error small { color: #8f6c72; font-size: 9px; line-height: 1.4; overflow-wrap: anywhere; }
-
-.gobang-api-error button {
-  min-height: 32px !important;
-  padding: 0 10px !important;
-  border: 0;
-  border-radius: 10px !important;
-  background: #b83e50;
-  color: #ffffff;
-  font-size: 9px !important;
-  font-weight: 900;
-}
-
 .gobang-actions {
+  flex: 0 0 auto;
   display: grid;
   grid-template-columns: repeat(2, 1fr);
   gap: 8px;
 }
+
+.gobang-actions--finished { transform: translateY(-6px); }
 
 .gobang-actions > button {
   min-height: 38px !important;
@@ -525,13 +436,9 @@ const statusChip = computed(() => {
 }
 
 .gobang-actions > .gobang-danger-action { background: #fff0f2; color: #cf4b5d; }
+.gobang-actions > .gobang-retry-action { background: #fff0e5; color: #a86127; }
 .gobang-actions > .gobang-primary-action { grid-column: 1 / -1; background: #242126; color: #ffffff; }
 .gobang-actions button:disabled { opacity: 0.42; }
-
-@keyframes gobang-thinking {
-  0%, 70%, 100% { transform: translateY(0); opacity: 0.4; }
-  35% { transform: translateY(-2px); opacity: 1; }
-}
 
 @media (max-width: 360px) {
   .gobang-board { padding: 8px; }

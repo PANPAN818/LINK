@@ -85,7 +85,16 @@
             </div>
           </template>
           <template v-else-if="message.gobang">
-            <section class="gobang-message-card" :class="[`gobang-message-card--${message.gobang.status}`, { 'gobang-message-card--api-failed': gobangApiFailed }]" aria-label="五子棋对局">
+            <section
+              class="gobang-message-card"
+              :class="[
+                `gobang-message-card--${message.gobang.status}`,
+                {
+                  'gobang-message-card--api-failed': gobangApiFailed
+                }
+              ]"
+              aria-label="五子棋对局"
+            >
               <span class="gobang-message-head">
                 <span>
                   <small>LINK PLAY</small>
@@ -725,7 +734,7 @@ const canRespondCallCard = computed(() => props.message.call?.direction === 'inc
 const gobangPreviewCells = computed(() => {
   const game = props.message.gobang;
   if (!game) return [];
-  const latestMove = game.moves.at(-1);
+  const latestMove = game.moves[game.moves.length - 1];
   const startRow = Math.max(0, Math.min(6, (latestMove?.row ?? 7) - 4));
   const startColumn = Math.max(0, Math.min(6, (latestMove?.column ?? 7) - 4));
   const moveMap = new Map(game.moves.map((move) => [`${move.row}:${move.column}`, move]));
@@ -761,7 +770,7 @@ const gobangCardDetail = computed(() => {
   if (invitationStatus === 'pending') return game.direction === 'incoming' ? '接受后进入独立棋局页面' : '角色会根据当前会话决定是否接受';
   if (invitationStatus === 'rejected') return '本局没有开始';
   if (invitationStatus === 'cancelled') return '邀请没有生效';
-  return `${game.moves.length} 手 · 线上聊天模型 · 点此${game.status === 'active' ? '继续' : '查看'}`;
+  return `当前${game.moves.length} 手，点此${game.status === 'active' ? '继续' : '查看'}`;
 });
 const canRespondGobangCard = computed(() => props.message.gobang?.direction === 'incoming' && props.message.gobang.invitationStatus === 'pending');
 const gobangApiFailed = computed(() => ['failed', 'interrupted'].includes(props.message.gobang?.apiState?.status ?? ''));
@@ -1548,8 +1557,8 @@ onBeforeUnmount(() => {
 }
 
 .bubble.gobang {
-  width: min(222px, 64vw);
-  min-width: min(202px, 58vw);
+  width: min(178px, 52vw);
+  min-width: min(158px, 46vw);
   background: transparent;
   border: 0;
   box-shadow: 0 10px 24px rgba(72, 45, 27, 0.13);
@@ -1592,10 +1601,10 @@ onBeforeUnmount(() => {
 
 .gobang-message-card {
   display: grid;
-  gap: 7px;
+  gap: 6px;
   min-width: 0;
   overflow: hidden;
-  padding: 9px;
+  padding: 7px;
   border: 1px solid rgba(95, 58, 31, 0.14);
   border-radius: inherit;
   background:
@@ -1628,13 +1637,13 @@ onBeforeUnmount(() => {
 }
 
 .gobang-message-head strong {
-  font-size: 13px;
+  font-size: 11px;
   font-weight: 950;
   letter-spacing: -0.03em;
 }
 
 .gobang-message-head em {
-  padding: 3px 6px;
+  padding: 3px 5px;
   border-radius: 999px;
   background: rgba(160, 101, 57, 0.11);
   color: #8c5b36;
@@ -1652,9 +1661,9 @@ onBeforeUnmount(() => {
   display: grid;
   grid-template-columns: repeat(9, 1fr);
   width: 100%;
-  padding: 6px;
+  padding: 5px;
   border: 1px solid rgba(95, 58, 31, 0.22);
-  border-radius: 9px;
+  border-radius: 7px;
   background: linear-gradient(145deg, #e9c18d, #d49c58);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.42);
 }
@@ -1700,8 +1709,8 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 
-.gobang-message-footer strong { color: #332a24; font-size: 10px; font-weight: 930; }
-.gobang-message-footer small { color: #8b7c70; font-size: 8px; font-weight: 720; }
+.gobang-message-footer strong { color: #332a24; font-size: 9px; font-weight: 930; }
+.gobang-message-footer small { color: #8b7c70; font-size: 7px; font-weight: 720; }
 .gobang-message-footer svg { flex: 0 0 auto; color: #9e7557; }
 
 .call-message-card {

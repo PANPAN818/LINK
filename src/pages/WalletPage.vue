@@ -45,7 +45,7 @@
           <strong>Orders</strong>
           <small>{{ userOrders.length }} 笔订单</small>
         </button>
-        <button type="button" @click="openShopSection('moments')">
+        <button type="button" @click="openShopSection('gift')">
           <span class="shortcut-icon tone-lilac"><Gift :size="20" /></span>
           <strong>Gifts</strong>
           <small>礼物与卡片</small>
@@ -57,65 +57,13 @@
           <ShoppingBasket :size="25" />
         </span>
         <span class="couple-shopping-copy">
-          <small>OUR LITTLE LIST</small>
-          <strong>共同购物</strong>
-          <em>共享购物车 · 心愿清单 · 纪念日采购</em>
+          <small>MY SHOPPING BAG</small>
+          <strong>我的全局购物</strong>
+          <em>不混入角色关系购物车与愿望单</em>
         </span>
         <span class="couple-shopping-count">{{ userCart.length }}</span>
         <ChevronRight :size="18" />
       </button>
-
-      <section class="wallet-section">
-        <div class="section-title">
-          <div>
-            <small>THEIR OWN LIFE</small>
-            <h2>角色经济</h2>
-          </div>
-          <span>{{ roleEconomies.length }} accounts</span>
-        </div>
-
-        <div class="role-economy-list">
-          <article v-for="entry in roleEconomies" :key="entry.character.id" class="role-economy-card">
-            <div class="role-economy-head">
-              <img :src="entry.character.avatar" :alt="entry.character.nickname || entry.character.name" />
-              <span>
-                <strong>{{ entry.character.nickname || entry.character.name }}</strong>
-                <small>{{ entry.wallet.generatedAt ? 'AI 经济画像 · ' : '' }}{{ entry.wallet.spendingTraits[0] || '有自己的消费习惯' }}</small>
-              </span>
-              <em>{{ formatCompactMoney(entry.wallet.balanceCents) }}</em>
-            </div>
-            <div class="economy-metrics">
-              <span><small>Monthly</small><strong>{{ formatCompactMoney(entry.wallet.monthlyIncomeCents) }}</strong></span>
-              <span><small>Gift budget</small><strong>{{ formatCompactMoney(entry.wallet.giftAllowanceCents) }}</strong></span>
-            </div>
-            <div class="saving-progress">
-              <span :style="{ width: `${savingProgress(entry.wallet.balanceCents, entry.wallet.savingsGoalCents)}%` }"></span>
-            </div>
-            <p>存钱目标 {{ formatCompactMoney(entry.wallet.savingsGoalCents) }} · {{ entry.wallet.spendingTraits[1] || '按自己的节奏生活' }}</p>
-          </article>
-        </div>
-      </section>
-
-      <section v-if="recentRoleOrders.length" class="wallet-section">
-        <div class="section-title">
-          <div>
-            <small>FROM THEM TO YOU</small>
-            <h2>最近的心意</h2>
-          </div>
-          <button type="button" @click="openShopSection('orders')">See all</button>
-        </div>
-        <button v-for="order in recentRoleOrders.slice(0, 3)" :key="order.id" class="order-row" type="button" @click="openOrder(order.id)">
-          <span class="order-mark">{{ order.items[0]?.mark || (order.kind === 'takeout' ? '🥡' : '🎁') }}</span>
-          <span class="order-copy">
-            <strong>{{ order.kind === 'takeout' ? `${order.purchaserName} 给你点了外卖` : `${order.purchaserName} 送来的心意` }}</strong>
-            <small>{{ order.storeName }} · {{ order.items.map((item) => item.title).join('、') }}</small>
-          </span>
-          <span class="order-price">
-            <strong>{{ formatMoney(order.totalCents) }}</strong>
-            <small>{{ orderStatusLabel(order.status) }}</small>
-          </span>
-        </button>
-      </section>
 
       <section class="wallet-section wallet-activity">
         <div class="section-title">
@@ -146,7 +94,6 @@ import { useRouter } from 'vue-router';
 import { ArrowDownLeft, ArrowUpRight, ChevronRight, Eye, EyeOff, Gift, Heart, ReceiptText, ShoppingBag, ShoppingBasket, Store } from 'lucide-vue-next';
 import { useAppStore } from '@/stores/appStore';
 import { useCommerceStore } from '@/stores/commerceStore';
-import type { CommerceOrderStatus } from '@/types/commerce';
 
 const router = useRouter();
 const appStore = useAppStore();
@@ -158,32 +105,14 @@ const userWallet = computed(() => commerceStore.walletForUser(activeUserId.value
 const userTransactions = computed(() => userWallet.value ? commerceStore.transactionsForWallet(userWallet.value.id) : []);
 const userCart = computed(() => commerceStore.cartForUser(activeUserId.value));
 const userWishlist = computed(() => commerceStore.wishlistForUser(activeUserId.value));
-const userOrders = computed(() => commerceStore.recentOrders.filter((order) => order.userId === activeUserId.value));
-const recentRoleOrders = computed(() => userOrders.value.filter((order) => order.purchaserType === 'character'));
-const roleEconomies = computed(() => appStore.charactersForActiveUser.flatMap((character) => {
-  const wallet = commerceStore.walletForCharacter(character.id);
-  return wallet ? [{ character, wallet }] : [];
-}));
+const userOrders = computed(() => commerceStore.recentOrders.filter((order) => order.userId === activeUserId.value && order.purchaserType === 'user' && !order.conversationId && !order.relationshipCharacterId));
 
 function formatMoney(cents: number) {
   return new Intl.NumberFormat('zh-CN', { style: 'currency', currency: 'CNY', minimumFractionDigits: 2 }).format(cents / 100);
 }
 
-function formatCompactMoney(cents: number) {
-  return new Intl.NumberFormat('zh-CN', { style: 'currency', currency: 'CNY', notation: 'compact', maximumFractionDigits: 1 }).format(cents / 100);
-}
-
 function formatDate(timestamp: number) {
   return new Intl.DateTimeFormat('zh-CN', { month: '2-digit', day: '2-digit' }).format(timestamp);
-}
-
-function savingProgress(balance: number, goal: number) {
-  if (!goal) return 0;
-  return Math.min(100, Math.max(4, Math.round(balance / goal * 100)));
-}
-
-function orderStatusLabel(status: CommerceOrderStatus) {
-  return { paid: '已付款', preparing: '准备中', delivering: '配送中', delivered: '已送达', cancelled: '已取消' }[status];
 }
 
 function openShop() {
@@ -192,10 +121,6 @@ function openShop() {
 
 function openShopSection(section: string) {
   void router.push({ name: 'wallet-shop', query: { section } });
-}
-
-function openOrder(orderId: string) {
-  void router.push({ name: 'wallet-shop', query: { order: orderId } });
 }
 
 onMounted(async () => {

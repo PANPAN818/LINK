@@ -131,12 +131,6 @@ export interface SmallTheaterGenerationResult {
   model?: string;
 }
 
-export interface ConversationSummaryIdentityRule {
-  role: 'user' | 'character';
-  canonicalName: string;
-  aliases: string[];
-}
-
 export interface ImageGenerationOverrides {
   positivePrompt?: string;
   negativePrompt?: string;
@@ -2202,6 +2196,50 @@ export async function requestTextGeneration(settings: AppSettings | undefined, p
   return callTextApi(settings, prompt, modelOverride, [], options);
 }
 
+export async function requestTextEmbedding(
+  settings: AppSettings | undefined,
+  input: string,
+  modelOverride = '',
+  embeddingModel = '',
+  signal?: AbortSignal
+): Promise<number[]> {
+  return (await requestTextEmbeddings(settings, [input], modelOverride, embeddingModel, signal))[0] ?? [];
+}
+
+export async function requestTextEmbeddings(
+  settings: AppSettings | undefined,
+  inputs: string[],
+  modelOverride = '',
+  embeddingModel = '',
+  signal?: AbortSignal
+): Promise<number[][]> {
+  requireTextGenerationConfig(settings, modelOverride, '记忆向量化');
+  const resolved = getResolvedTextApiConfig(settings, modelOverride);
+  const endpoint = resolved.endpoint.replace(/\/chat\/completions\/?(?:\?.*)?$/i, '/embeddings');
+  if (endpoint === resolved.endpoint) throw new Error('当前 API 路径无法推导 Embeddings 端点，请使用以 /chat/completions 结尾的 OpenAI 兼容地址。');
+  const requestInit: RequestInit = {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(resolved.apiKey ? { Authorization: `Bearer ${resolved.apiKey}` } : {})
+    },
+    signal,
+    body: JSON.stringify({
+      model: embeddingModel.trim() || resolved.model,
+      input: inputs.map((input) => input.slice(0, 12_000))
+    })
+  };
+  const { response } = await fetchTextEndpoint(endpoint, requestInit);
+  if (!response.ok) throw new Error(await createApiErrorMessage(response, '记忆 Embeddings API 请求失败'));
+  const data = await readJsonPayload(response, '记忆 Embeddings API 返回异常');
+  const rows = Array.isArray(data.data) ? [...data.data].sort((left, right) => Number(left?.index ?? 0) - Number(right?.index ?? 0)) : [];
+  const vectors = rows.map((row) => row?.embedding);
+  if (vectors.length !== inputs.length || vectors.some((vector) => !Array.isArray(vector) || !vector.length || vector.some((value: unknown) => !Number.isFinite(Number(value))))) {
+    throw new Error('记忆 Embeddings API 没有返回有效向量。');
+  }
+  return vectors.map((vector) => vector.map(Number));
+}
+
 async function callTextApi(settings: AppSettings | undefined, prompt: string, modelOverride = '', imageParts: TextApiContentPart[] = [], options: TextGenerationOptions = {}) {
   const resolved = getResolvedTextApiConfig(settings, modelOverride);
   if (!resolved.endpoint.trim()) return '';
@@ -2560,10 +2598,7 @@ export async function generateImageByProvider(
   return generatePollinationsImage(settings, overrides);
 }
 
-export async function generateRoleplayReply(input: GenerateReplyInput): Promise<string> {
-  requireTextGenerationConfig(input.settings, input.modelOverride, '角色回复');
-  const prompt = buildPrompt(input);
-  const apiReply = await callTextApi(input.settings, prompt, input.modelOverride, await getPreparedVisualImageParts(input));
+export function normalizeRoleplayReplyPayload(apiReply: string, input: GenerateReplyInput): string {
   if (apiReply) {
     try {
       const parsed = JSON.parse(extractJsonContent(apiReply)) as unknown;
@@ -2659,6 +2694,13 @@ export async function generateRoleplayReply(input: GenerateReplyInput): Promise<
     }
   }
   throw new Error('角色回复模型没有返回内容。');
+}
+
+export async function generateRoleplayReply(input: GenerateReplyInput): Promise<string> {
+  requireTextGenerationConfig(input.settings, input.modelOverride, '角色回复');
+  const prompt = buildPrompt(input);
+  const apiReply = await callTextApi(input.settings, prompt, input.modelOverride, await getPreparedVisualImageParts(input));
+  return normalizeRoleplayReplyPayload(apiReply, input);
 }
 
 export async function generateVoomPost(context: PromptContext, settings?: AppSettings, modelOverride = ''): Promise<Omit<VoomPost, 'id' | 'createdAt'>> {
@@ -2758,7 +2800,7 @@ function buildCoupleSpacePrompt(input: { context: PromptContext; previousSnapsho
     buildPrompt(input.context, { includeAvailableStickers: false }),
     `现在为 ${userName} 与 ${characterName} 的「情侣守护空间」生成一次角色生活状态快照。`,
     `这是双方授权查看的角色互动模拟，不是真实 GPS、系统监控或设备取证。请根据角色设定、世界书、记忆、近期聊天、当前时间与角色生活轨迹，创造可信且有连续性的状态；不要声称读取真实手机权限，不要替 ${userName} 行动。`,
-    `身份硬性规则：${characterName} 是角色真名，${userName} 是用户真名。所有字段只要提到双方中的任何一人，都必须直接写对应真名；禁止用昵称、备注、“你”、“他”、“她”、“TA”、“用户”、“角色”或“对方”代替。NPC 必须有具体姓名或明确身份。`,
+    `身份称谓规则：${characterName} 是角色真名，${userName} 是用户真名。NPC 按情境使用具体姓名或明确身份。`,
     previousSnapshot,
     `内容要求：
   1. location 必须覆盖生成时刻往前完整 24 小时，按时间顺序给出 8–12 个 route 节点，包含睡眠、起床、吃饭、工作/学习、通勤、社交、办事、休闲等真实生活节奏。每段写开始/结束时间、地点、活动分类、发生了什么、同行者、留下的生活痕迹，以及可选的未说出口想法。不能只给三四个概览点。
@@ -2769,7 +2811,7 @@ function buildCoupleSpacePrompt(input: { context: PromptContext; previousSnapsho
   6. moments 给出 6–10 个未在当前聊天出现的生活片段，覆盖不同时段和情绪，每条写分类、完整细节和可选的“没发给 ${userName}”内容。
   7. 所有时间、地点、路线、应用、联系人、通知、搜索、相册、订单和片段必须内部一致；不要每次都生成完美约会、全员只聊恋爱或极端戏剧。地名可以来自设定，设定不足时创造符合世界观的地点，不要把未知信息说成现实事实。`,
     `只输出以下结构的 JSON，不要输出 Markdown、代码块或解释：
-  {"location":{"place":"当前地点","address":"地址或场景描述","status":"正在做什么","distance":"${characterName}与${userName}的距离描述","transport":"交通方式","eta":"预计到达或下一站","stayMinutes":35,"route":[{"name":"地点","time":"07:10","endTime":"08:00","kind":"start|pass|stay|arrival","category":"sleep|home|travel|work|meal|social|errand|leisure","detail":"这一段完整发生了什么","companion":"具体姓名或独自一人","trace":"票据/物品/照片/气味等生活痕迹","privateThought":"可留空的私下想法"}]},"device":{"battery":76,"charging":false,"screenStatus":"using|locked|idle","lastUnlockedAt":"18:42","lastLockedAt":"18:39","usageMinutes":286,"activeApp":"应用或用途","network":"当前网络","networkHistory":[{"name":"网络名称","time":"17:10","kind":"wifi|cellular|offline"}],"appUsage":[{"app":"应用名","minutes":52,"lastUsedAt":"18:40","detail":"具体用来做什么"}],"notifications":[{"app":"应用名","time":"18:31","title":"通知标题","preview":"通知预览","unread":true}],"chats":[{"contact":"联系人姓名","relation":"与${characterName}的关系","avatarEmoji":"emoji","updatedAt":"18:25","unread":2,"summary":"这段聊天的来龙去脉","messages":[{"sender":"character|contact","time":"18:20","text":"具体消息"}]}],"footprints":[{"kind":"search|browser|map|shopping","time":"16:20","title":"搜索词或页面标题","detail":"看到了什么","reason":"为什么点开"}],"gallery":[{"time":"15:30","title":"照片标题","detail":"画面和拍摄原因","emoji":"emoji","palette":["#fbd3e1","#d8cff8"]}],"notes":[{"folder":"文件夹","title":"标题","content":"完整内容","updatedAt":"14:10","pinned":false}],"lifeRecords":[{"kind":"alarm|calendar|order|music|draft","time":"13:00","title":"记录标题","detail":"具体内容","status":"状态"}]},"bond":{"mood":"心情短语","moodEmoji":"emoji","missLevel":82,"syncScore":91,"nextPlan":"下一件想与${userName}一起做的事","whisper":"${characterName}对${userName}的悄悄话","daySummary":"聊天之外完整一天的总结","hiddenThought":"${characterName}没发给${userName}的话","keywords":["关键词1","关键词2","关键词3"]},"moments":[{"time":"17:45","category":"生活分类","title":"片段标题","detail":"没有出现在聊天里的完整生活细节","emoji":"emoji","unspoken":"可留空的没发给${userName}的话"}]}`
+  {"location":{"place":"当前地点","address":"地址或场景描述","status":"正在做什么","distance":"彼此的距离描述","transport":"交通方式","eta":"预计到达或下一站","stayMinutes":35,"route":[{"name":"地点","time":"07:10","endTime":"08:00","kind":"start|pass|stay|arrival","category":"sleep|home|travel|work|meal|social|errand|leisure","detail":"这一段完整发生了什么","companion":"具体姓名或独自一人","trace":"票据/物品/照片/气味等生活痕迹","privateThought":"可留空的私下想法"}]},"device":{"battery":76,"charging":false,"screenStatus":"using|locked|idle","lastUnlockedAt":"18:42","lastLockedAt":"18:39","usageMinutes":286,"activeApp":"应用或用途","network":"当前网络","networkHistory":[{"name":"网络名称","time":"17:10","kind":"wifi|cellular|offline"}],"appUsage":[{"app":"应用名","minutes":52,"lastUsedAt":"18:40","detail":"具体用来做什么"}],"notifications":[{"app":"应用名","time":"18:31","title":"通知标题","preview":"通知预览","unread":true}],"chats":[{"contact":"联系人姓名","relation":"与角色的关系","avatarEmoji":"emoji","updatedAt":"18:25","unread":2,"summary":"这段聊天的来龙去脉","messages":[{"sender":"character|contact","time":"18:20","text":"具体消息"}]}],"footprints":[{"kind":"search|browser|map|shopping","time":"16:20","title":"搜索词或页面标题","detail":"看到了什么","reason":"为什么点开"}],"gallery":[{"time":"15:30","title":"照片标题","detail":"画面和拍摄原因","emoji":"emoji","palette":["#fbd3e1","#d8cff8"]}],"notes":[{"folder":"文件夹","title":"标题","content":"完整内容","updatedAt":"14:10","pinned":false}],"lifeRecords":[{"kind":"alarm|calendar|order|music|draft","time":"13:00","title":"记录标题","detail":"具体内容","status":"状态"}]},"bond":{"mood":"心情短语","moodEmoji":"emoji","missLevel":82,"syncScore":91,"nextPlan":"下一件想一起做的事","whisper":"角色口吻悄悄话","daySummary":"聊天之外完整一天的总结","hiddenThought":"没发给对方的话","keywords":["关键词1","关键词2","关键词3"]},"moments":[{"time":"17:45","category":"生活分类","title":"片段标题","detail":"没有出现在聊天里的完整生活细节","emoji":"emoji","unspoken":"可留空的没发给对方的话"}]}`
   ].filter(Boolean).join('\n\n');
 }
 
@@ -3205,97 +3247,6 @@ export async function generateMusicCommentThread(input: {
   } catch {
     return [];
   }
-}
-
-function normalizeSummaryNameToken(value: string) {
-  return value.replace(/\s+/g, ' ').trim();
-}
-
-function escapeRegExp(value: string) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-function uniqueSummaryNames(names: string[], canonicalName: string) {
-  const canonicalKey = normalizeSummaryNameToken(canonicalName).toLocaleLowerCase();
-  const seen = new Set<string>();
-  return names
-    .map(normalizeSummaryNameToken)
-    .filter((name) => {
-      const key = name.toLocaleLowerCase();
-      if (!name || key === canonicalKey || seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    });
-}
-
-function renderConversationSummaryIdentityPrompt(rules: ConversationSummaryIdentityRule[] | undefined) {
-  const normalizedRules = (rules ?? [])
-    .map((rule) => ({
-      ...rule,
-      canonicalName: normalizeSummaryNameToken(rule.canonicalName),
-      aliases: uniqueSummaryNames(rule.aliases, rule.canonicalName)
-    }))
-    .filter((rule) => rule.canonicalName);
-
-  if (!normalizedRules.length) return '';
-
-  return [
-    '人物称谓统一规则（最高优先级）：',
-    '1. 用户和角色的真名是唯一人物标识。',
-    '2. plot、echo、Markdown 角色表的“名字”列、mermaid graph 节点和关系边都必须只使用真名。',
-    '3. 看到非真名称呼时，全部改写为对应真名；不要把它保留为另一个人物：',
-    ...normalizedRules.map((rule) => {
-      const roleLabel = rule.role === 'user' ? '用户' : '角色';
-      return `- ${roleLabel}真名：${rule.canonicalName}`;
-    })
-  ].join('\n');
-}
-
-function normalizeConversationSummaryIdentityNames(summary: string, rules: ConversationSummaryIdentityRule[] | undefined) {
-  if (!summary || !rules?.length) return summary;
-  return rules.reduce((text, rule) => {
-    const canonicalName = normalizeSummaryNameToken(rule.canonicalName);
-    if (!canonicalName) return text;
-    return uniqueSummaryNames(rule.aliases, canonicalName).reduce((nextText, alias) => {
-      if (alias.length < 2) return nextText;
-      return nextText.replace(new RegExp(escapeRegExp(alias), 'g'), canonicalName);
-    }, text);
-  }, summary);
-}
-
-export async function generateConversationSummary(input: {
-  messages: string;
-  previousSummary: string;
-  identityRules?: ConversationSummaryIdentityRule[];
-  timeAwareness?: ConversationTimeAwarenessSettings;
-  timeAwarenessUserName?: string;
-  timelineContext?: string;
-  settings?: AppSettings;
-  modelOverride?: string;
-  promptOverride?: string;
-}) {
-  const includeTimeline = Boolean(input.timeAwareness?.enabled);
-  const timeAwarenessPrompt = includeTimeline
-    ? renderTimeAwarenessPrompt(input.timeAwareness, { userName: input.timeAwarenessUserName || '用户' })
-    : '';
-  const basePrompt = input.promptOverride?.trim() || [
-    '停止剧情，停止输出其他所有内容，开始执行五十楼回忆录。',
-    '请把下面聊天楼层整理成由摘要、角色表组成的长期记忆。摘要必须包含 time、location、plot、echo；角色表必须使用 Markdown 表格和基础 mermaid 关系图。',
-    'plot 使用流水账形式，全面记录本次剧情、新名词、新信息和关键伏笔；echo 记录 1-2 句重要对白并明确涉及人物；不要评价、升华或代替角色继续剧情。'
-  ].join('\n');
-  const identityPrompt = renderConversationSummaryIdentityPrompt(input.identityRules);
-  const previousSummary = normalizeConversationSummaryIdentityNames(input.previousSummary, input.identityRules);
-  const messages = normalizeConversationSummaryIdentityNames(input.messages, input.identityRules);
-  const prompt = [
-    basePrompt,
-    identityPrompt,
-    timeAwarenessPrompt,
-    previousSummary ? `已有记忆文本（用于避免重复、衔接时间线和保留伏笔）：\n${previousSummary}` : '已有记忆文本：暂无。',
-    includeTimeline && input.timelineContext ? `待总结楼层时间线：\n${input.timelineContext}` : '',
-    `待总结聊天：\n${messages}`
-  ].filter(Boolean).join('\n\n');
-  const apiReply = await callTextApi(input.settings, prompt, input.modelOverride);
-  return normalizeConversationSummaryIdentityNames(apiReply || messages.slice(0, 1400), input.identityRules);
 }
 
 export function shouldAutoGenerateMoment(frequency: VoomFrequency) {

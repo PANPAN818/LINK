@@ -1,6 +1,6 @@
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
 import { isNativeBackupSaveAvailable, saveNativeBackupArchive } from '@/services/nativeBackup';
-import type { AppSettings, AppSnapshot, CharacterProfile, ChatImageAttachment, ChatImageCandidate, ChatMessage, ChatMessageQuote, ChatVoiceAttachment, ConversationMemoryRecord, FavoriteMessageRecord, GeneratedImageRecord, Sticker, VoomImageCandidate, VoomPost, WorldBookEntry } from '@/types/domain';
+import type { AppSettings, AppSnapshot, CharacterProfile, ChatImageAttachment, ChatImageCandidate, ChatMessage, ChatMessageQuote, ChatVoiceAttachment, FavoriteMessageRecord, GeneratedImageRecord, Sticker, VoomImageCandidate, VoomPost, WorldBookEntry } from '@/types/domain';
 
 export interface LinkBackupFile {
   app: 'LINK';
@@ -46,7 +46,13 @@ export const linkBackupSnapshotArrayKeys: Array<keyof Omit<AppSnapshot, 'setting
   'stickerGroups',
   'stickers',
   'conversationSettings',
-  'conversationMemories',
+  'memoryEpisodes',
+  'memoryEntities',
+  'memoryAssertions',
+  'memoryEdges',
+  'memoryThemes',
+  'memoryStateSnapshots',
+  'memoryEmbeddings',
   'generatedImages',
   'favorites',
   'walletAccounts',
@@ -179,14 +185,6 @@ function sanitizeGeneratedImageForBackup(record: GeneratedImageRecord): Generate
   return record;
 }
 
-function sanitizeMemoryForBackup(record: ConversationMemoryRecord): ConversationMemoryRecord {
-  return {
-    ...record,
-    vector: [],
-    entries: record.entries?.map((entry) => ({ ...entry, vector: [] }))
-  };
-}
-
 function sanitizeFavoriteForBackup(record: FavoriteMessageRecord): FavoriteMessageRecord {
   return {
     ...record,
@@ -248,7 +246,7 @@ function sanitizeSnapshotForBackup(snapshot: AppSnapshot): AppSnapshot {
   safeSnapshot.generatedImages = safeSnapshot.generatedImages
     .map((record) => sanitizeGeneratedImageForBackup(record))
     .filter((record) => record.imageUrl);
-  safeSnapshot.conversationMemories = safeSnapshot.conversationMemories.map((record) => sanitizeMemoryForBackup(record));
+  safeSnapshot.memoryEmbeddings = [];
   safeSnapshot.favorites = (safeSnapshot.favorites ?? []).map((record) => sanitizeFavoriteForBackup(record));
   safeSnapshot.settings = sanitizeSettingsForBackup(safeSnapshot.settings);
   return safeSnapshot;

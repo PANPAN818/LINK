@@ -159,7 +159,7 @@
         </section>
 
         <section v-if="callTranscriptMessages.length || callReplyWaiting" ref="callSubtitleListRef" class="call-subtitles" aria-label="通话字幕">
-          <article v-for="message in callTranscriptMessages" :key="message.id" :class="['call-subtitle', message.sender, { narration: message.displayStyle === 'narration' }]">
+          <article v-for="message in callTranscriptMessages" :key="message.id" :data-message-id="message.id" :class="['call-subtitle', message.sender, { narration: message.displayStyle === 'narration' }]">
             <span>{{ callMessageText(message) }}</span>
           </article>
           <article v-if="callReplyWaiting" class="call-subtitle char call-subtitle-waiting" aria-label="正在等待角色回复">
@@ -328,60 +328,65 @@
 
     <AppModal v-model="showActionMenu" title="更多操作" :show-header="false" variant="ins">
       <section class="action-menu">
-        <button type="button" @click="openCharacterProfile">
-          <span>角色主页</span>
-        </button>
-        <button type="button" @click="openProfileThemes">
-          <span>主页自定义</span>
-        </button>
-        <button type="button" @click="openUserProfile">
-          <span>我的主页</span>
-        </button>
-        <button type="button" :disabled="chatActionLocked" @click="openLocationPanel">
-          <span>发送定位</span>
-        </button>
-        <button type="button" @click="openCoupleSpace">
-          <span>情侣守护</span>
-        </button>
-        <button type="button" :disabled="chatActionLocked" @click="openTransferPanel">
-          <span>转账</span>
-        </button>
-        <button type="button" :disabled="chatActionLocked" @click="openMusicListenInvitePanel">
-          <span>邀请一起听</span>
-        </button>
-        <button type="button" :disabled="chatActionLocked" @click="startOutgoingCall('voice')">
-          <span>语音通话</span>
-        </button>
-        <button type="button" :disabled="chatActionLocked" @click="startOutgoingCall('video')">
-          <span>视频通话</span>
-        </button>
-        <button type="button" @click="openModelSwitch">
-          <span>模型切换</span>
-        </button>
-        <button type="button" :class="{ busy: currentConversationReplying }" :aria-disabled="currentConversationReplying" @click="regenerateReply">
-          <span>重新回复</span>
-        </button>
-        <button type="button" :disabled="chatActionLocked" @click="openNarrationPanel">
-          <span>添加旁白</span>
-        </button>
-        <button type="button" :disabled="chatActionLocked" @click="startGobangInvitation">
-          <span>五子棋</span>
-        </button>
-        <button type="button" :class="{ busy: generatingVoom }" :aria-disabled="generatingVoom" @click="generateVoomPost">
-          <span>{{ generatingVoom ? '生成中' : '生成 VOOM' }}</span>
-        </button>
-        <button type="button" @click="openSmallTheater">
-          <span>小剧场</span>
-        </button>
-        <button class="danger-menu-action" type="button" :disabled="chatActionLocked" @click="openDeleteFriendConfirm">
-          <span>删除好友</span>
-        </button>
-        <button class="danger-menu-action" type="button" :disabled="chatActionLocked" @click="openBlockFriendConfirm">
-          <span>拉黑好友</span>
-        </button>
-        <button class="danger-menu-action" type="button" :disabled="chatActionLocked" @click="openClearHistoryConfirm">
-          <span>清空记忆</span>
-        </button>
+        <header class="action-menu-intro">
+          <small>MORE WITH {{ characterDisplayName.toUpperCase() }}</small>
+          <strong>和 {{ characterDisplayName }} 的专属空间</strong>
+          <span>角色相关的经济、购物和礼物只保存在这段关系里。</span>
+        </header>
+
+        <section class="action-menu-group action-menu-group--relationship">
+          <div class="action-menu-group-title"><span><small>OUR PRIVATE LIFE</small><strong>与 TA 的生活</strong></span><em>角色独立</em></div>
+          <div class="action-menu-grid action-menu-grid--relationship">
+            <button type="button" @click="openRelationshipCommerce('economy')"><span>TA 的钱包</span><small>角色经济与流水</small></button>
+            <button type="button" @click="openRelationshipCommerce('cart')"><span>共同购物</span><small>你们的独立购物车</small></button>
+            <button type="button" @click="openRelationshipCommerce('wishlist')"><span>共同愿望</span><small>只属于当前关系</small></button>
+            <button type="button" @click="openRelationshipCommerce('gift')"><span>礼物与卡片</span><small>送给彼此的心意</small></button>
+            <button type="button" @click="openRelationshipCommerce('stores')"><span>TA 的店铺</span><small>角色经营与上新</small></button>
+            <button type="button" @click="openRelationshipCommerce('orders')"><span>关系订单</span><small>共同消费与回跳</small></button>
+          </div>
+        </section>
+
+        <section class="action-menu-group">
+          <div class="action-menu-group-title"><span><small>CHAT TOOLS</small><strong>聊天工具</strong></span></div>
+          <div class="action-menu-grid">
+            <button type="button" :disabled="chatActionLocked" @click="openLocationPanel"><span>发送定位</span></button>
+            <button type="button" :disabled="chatActionLocked" @click="openTransferPanel"><span>转账</span></button>
+            <button type="button" :disabled="chatActionLocked" @click="openMusicListenInvitePanel"><span>邀请一起听</span></button>
+            <button type="button" :disabled="chatActionLocked" @click="startOutgoingCall('voice')"><span>语音通话</span></button>
+            <button type="button" :disabled="chatActionLocked" @click="startOutgoingCall('video')"><span>视频通话</span></button>
+          </div>
+        </section>
+
+        <section class="action-menu-group">
+          <div class="action-menu-group-title"><span><small>CONTENT TOOLS</small><strong>内容工具</strong></span></div>
+          <div class="action-menu-grid">
+            <button type="button" @click="openModelSwitch"><span>模型切换</span></button>
+            <button type="button" :class="{ busy: currentConversationReplying }" :aria-disabled="currentConversationReplying" @click="regenerateReply"><span>重新回复</span></button>
+            <button type="button" :disabled="chatActionLocked" @click="openNarrationPanel"><span>添加旁白</span></button>
+            <button type="button" :disabled="chatActionLocked" @click="startGobangInvitation"><span>五子棋</span></button>
+            <button type="button" :class="{ busy: generatingVoom }" :aria-disabled="generatingVoom" @click="generateVoomPost"><span>{{ generatingVoom ? '生成中' : '生成 VOOM' }}</span></button>
+            <button type="button" @click="openSmallTheater"><span>小剧场</span></button>
+          </div>
+        </section>
+
+        <section class="action-menu-group">
+          <div class="action-menu-group-title"><span><small>PROFILES</small><strong>主页与关系</strong></span></div>
+          <div class="action-menu-grid">
+            <button type="button" @click="openCharacterProfile"><span>角色主页</span></button>
+            <button type="button" @click="openProfileThemes"><span>主页自定义</span></button>
+            <button type="button" @click="openUserProfile"><span>我的主页</span></button>
+            <button type="button" @click="openCoupleSpace"><span>情侣守护</span></button>
+          </div>
+        </section>
+
+        <section class="action-menu-group action-menu-group--danger">
+          <div class="action-menu-group-title"><span><small>RELATIONSHIP MANAGEMENT</small><strong>关系管理</strong></span></div>
+          <div class="action-menu-grid">
+            <button class="danger-menu-action" type="button" :disabled="chatActionLocked" @click="openDeleteFriendConfirm"><span>删除好友</span></button>
+            <button class="danger-menu-action" type="button" :disabled="chatActionLocked" @click="openBlockFriendConfirm"><span>拉黑好友</span></button>
+            <button class="danger-menu-action" type="button" :disabled="chatActionLocked" @click="openClearHistoryConfirm"><span>清空记忆</span></button>
+          </div>
+        </section>
       </section>
     </AppModal>
 
@@ -728,6 +733,7 @@ import { getCharacterAiName, getCharacterDisplayName, getFriendRelationship } fr
 import { collectCharacterPhotoImages, createCharacterPhotoRecord, normalizeCharacterPhotoRecords, normalizeHiddenSourcePhotoKeys } from '@/utils/characterPhotos';
 import { readChatImageFile } from '@/utils/imageFile';
 import { useKeyboardScrollGuard } from '@/utils/keyboardScrollGuard';
+import { firstUnreadCharacterMessageId, scrollMessageContainerToUnreadOrBottom } from '@/utils/messageScroll';
 import { defaultProfileAvatar, getUserAiName, normalizeUserProfile, normalizeVisualProfile } from '@/utils/profile';
 import { normalizeRingtoneSettings } from '@/utils/settings';
 import { defaultImageNegativePrompt, getImagePromptPresetForProvider, getSelectedImageModelOption } from '@/utils/settings';
@@ -977,6 +983,7 @@ const callBusy = ref(false);
 const callReplyTextPending = ref(false);
 const callReplyPendingCallId = ref('');
 const callReplyPendingCharCount = ref(0);
+const callUnreadStartMessageId = ref('');
 const callFloatPosition = computed({
   get: () => store.activeCall?.conversationId === props.id ? store.activeCall.floatPosition : defaultCallFloatPosition,
   set: (position: { x: number; y: number }) => store.patchActiveCall(props.id, { floatPosition: position })
@@ -1719,6 +1726,8 @@ function resumeActiveCallFromStore() {
   syncCallAmbientPlayback();
   if (call.status === 'active' && !call.muted) void startCallTranscription();
   syncActiveCallMetadata();
+  if (callMinimized.value) callUnreadStartMessageId.value = firstUnreadCharacterMessageId(callTranscriptMessages.value);
+  else void scrollCallTranscript({ preferUnread: true });
 }
 
 onMounted(async () => {
@@ -1779,8 +1788,17 @@ watch(currentConversationReplying, (replying) => {
   if (!replying) void drainCallReplyQueue();
 });
 
-watch(() => callTranscriptMessages.value.length, () => {
-  if (activeCall.value) void scrollCallTranscriptToBottom();
+watch(() => callTranscriptMessages.value.map((message) => message.id), (_messageIds, previousMessageIds) => {
+  if (activeCall.value) {
+    if (callMinimized.value) {
+      const previousIds = new Set(previousMessageIds);
+      const newTranscriptMessages = callTranscriptMessages.value.filter((message) => !previousIds.has(message.id));
+      const firstNewUnreadMessageId = firstUnreadCharacterMessageId(newTranscriptMessages);
+      if (!callUnreadStartMessageId.value && firstNewUnreadMessageId) callUnreadStartMessageId.value = firstNewUnreadMessageId;
+    } else {
+      void scrollCallTranscript();
+    }
+  }
   if (!callReplyTextPending.value || !callReplyPendingCallId.value || activeCall.value?.callId !== callReplyPendingCallId.value) return;
   const charMessageCount = callTranscriptMessages.value.filter((message) => message.sender === 'char').length;
   if (charMessageCount > callReplyPendingCharCount.value) clearCallReplyTextPending();
@@ -2390,7 +2408,7 @@ async function flushCallSpeechFinalText() {
   if (!call || call.status !== 'active' || call.muted || !content) return;
   if (!callInputFocused.value) callInputDraft.value = '';
   await store.appendUserCallMessage(props.id, content, call.callId, call.mode);
-  await scrollCallTranscriptToBottom();
+  await scrollCallTranscript();
   const scene = call.mode === 'video' ? '视频通话' : '语音通话';
   void requestCallReply(`当前正在${scene}中，${callUserAiName.value}刚刚直接说：“${content}”。请让${callCharacterAiName.value}像真实通话一样用适合朗读的短句回应；可以连续发送多个短句，每个短句会显示成字幕并播放 TTS。不要替${callUserAiName.value}补充未说出口的动作、位置或心理。`);
 }
@@ -2627,11 +2645,15 @@ function isCallSubtitleMessage(message: ChatMessage) {
   return Boolean(message.voice?.transcript.trim() || message.content.trim());
 }
 
-async function scrollCallTranscriptToBottom() {
+async function scrollCallTranscript(options: { preferUnread?: boolean; unreadMessageId?: string } = {}) {
   await nextTick();
   const transcriptList = callSubtitleListRef.value;
   if (!transcriptList) return;
-  transcriptList.scrollTop = transcriptList.scrollHeight;
+  if (options.preferUnread) {
+    scrollMessageContainerToUnreadOrBottom(transcriptList, callTranscriptMessages.value, options.unreadMessageId);
+  } else {
+    transcriptList.scrollTop = transcriptList.scrollHeight;
+  }
 }
 
 function closeActiveCall() {
@@ -2647,6 +2669,7 @@ function closeActiveCall() {
   clearCallInputBlurTimer();
   callReplyQueue.value = [];
   clearCallReplyTextPending();
+  callUnreadStartMessageId.value = '';
   activeCall.value = null;
   callMinimized.value = false;
   callInputDraft.value = '';
@@ -2680,6 +2703,7 @@ function clampCallFloatPosition(x: number, y: number) {
 function minimizeActiveCall() {
   if (!activeCall.value) return;
   callFloatPosition.value = clampCallFloatPosition(callFloatPosition.value.x, callFloatPosition.value.y);
+  callUnreadStartMessageId.value = '';
   callMinimized.value = true;
 }
 
@@ -2688,8 +2712,11 @@ function restoreCallFromFloat() {
     suppressCallFloatClick = false;
     return;
   }
+  const unreadMessageId = callUnreadStartMessageId.value || firstUnreadCharacterMessageId(callTranscriptMessages.value);
   callMinimized.value = false;
-  void scrollCallTranscriptToBottom();
+  void scrollCallTranscript({ preferUnread: true, unreadMessageId }).finally(() => {
+    callUnreadStartMessageId.value = '';
+  });
 }
 
 function startCallFloatDrag(event: PointerEvent) {
@@ -2782,7 +2809,7 @@ async function drainCallReplyQueue() {
     clearCallReplyTextPending();
     const newMessages = (Array.isArray(generatedMessages) ? generatedMessages : store.messagesForConversation(props.id).filter((message) => !existingMessageIds.has(message.id)))
       .filter((message) => message.callId === queuedReply.callId && message.sender === 'char');
-    await scrollCallTranscriptToBottom();
+    await scrollCallTranscript();
     await playCallVoiceMessages(newMessages);
   } finally {
     clearCallReplyTextPending();
@@ -2988,7 +3015,7 @@ async function sendCallInput() {
   if (!call || callInputDisabled.value || !content) return;
   callInputDraft.value = '';
   await store.appendUserCallMessage(props.id, content, call.callId, call.mode);
-  await scrollCallTranscriptToBottom();
+  await scrollCallTranscript();
 }
 
 async function submitCallReply() {
@@ -2998,7 +3025,7 @@ async function submitCallReply() {
   if (content) {
     callInputDraft.value = '';
     await store.appendUserCallMessage(props.id, content, call.callId, call.mode);
-    await scrollCallTranscriptToBottom();
+    await scrollCallTranscript();
   }
   const scene = call.mode === 'video' ? '视频通话' : '语音通话';
   const userCue = content ? `${callUserAiName.value}刚在通话里说：“${content}”。` : `${callUserAiName.value}点击了“回复”，希望${callCharacterAiName.value}回应当前通话里最近还未回应的内容。`;
@@ -3348,14 +3375,14 @@ function createLinkMapLabel(address: string, fallback: string) {
 function openCardDetail(message: ChatMessage) {
   if (message.shopShare) {
     const share = message.shopShare;
-    if (share.orderId) void router.push({ name: 'wallet-shop', query: { order: share.orderId } });
-    else if (share.momentId) void router.push({ name: 'wallet-shop', query: { section: 'moments', moment: share.momentId } });
-    else if (share.storeId) void router.push({ name: 'wallet-shop', query: { store: share.storeId, ...(share.productId ? { product: share.productId } : {}) } });
-    else void router.push({ name: 'wallet-shop', query: { ...(share.productId ? { product: share.productId } : {}) } });
+    if (share.orderId) void router.push({ name: 'wallet-shop', query: relationshipCommerceQuery({ order: share.orderId }) });
+    else if (share.momentId) void router.push({ name: 'wallet-shop', query: relationshipCommerceQuery({ section: 'moments', moment: share.momentId }) });
+    else if (share.storeId) void router.push({ name: 'wallet-shop', query: relationshipCommerceQuery({ store: share.storeId, ...(share.productId ? { product: share.productId } : {}) }) });
+    else void router.push({ name: 'wallet-shop', query: relationshipCommerceQuery({ ...(share.productId ? { product: share.productId } : {}) }) });
     return;
   }
   if (message.commerce?.orderId) {
-    void router.push({ name: 'wallet-shop', query: { order: message.commerce.orderId } });
+    void router.push({ name: 'wallet-shop', query: relationshipCommerceQuery({ order: message.commerce.orderId }) });
     return;
   }
   if (message.theaterLink?.theaterId) {
@@ -3544,6 +3571,19 @@ function openCoupleSpace() {
   void router.push({ name: 'couple-space', params: { id: props.id } });
 }
 
+function relationshipCommerceQuery(extra: Record<string, string> = {}) {
+  const currentCharacter = character.value;
+  const currentConversation = conversation.value;
+  if (!currentCharacter || !currentConversation) return extra;
+  return { character: currentCharacter.id, conversation: currentConversation.id, ...extra };
+}
+
+function openRelationshipCommerce(section: 'economy' | 'cart' | 'wishlist' | 'gift' | 'stores' | 'orders') {
+  if (!character.value || !conversation.value) return;
+  showActionMenu.value = false;
+  void router.push({ name: 'wallet-shop', query: relationshipCommerceQuery({ section }) });
+}
+
 async function openCharacterProfile() {
   showActionMenu.value = false;
   showProfile.value = true;
@@ -3721,12 +3761,6 @@ async function requestGobangInvitationResponse(message: ChatMessage) {
 async function startGobangInvitation() {
   if (chatActionLocked.value) return;
   showActionMenu.value = false;
-  const localOnlineModel = store.modelOverridesForConversation(props.id).online.trim();
-  const globalOnlineModel = store.settings?.modelOverrides.online.trim() ?? '';
-  if (!store.hasConfiguredTextModel(localOnlineModel || globalOnlineModel)) {
-    store.showConfigAlert('请先配置可用的线上聊天 API 模型，再发起五子棋邀请。角色回应和落子都不会使用本地模拟。', '需要配置 API 模型');
-    return;
-  }
   const existing = [...store.messagesForConversation(props.id)].reverse().find((message) => {
     const game = message.gobang;
     if (!game) return false;
@@ -3748,7 +3782,6 @@ async function startGobangInvitation() {
   const message = await store.appendUserGobangMessage(props.id, game);
   if (!message) return;
   await scrollMessagesToBottom();
-  await requestGobangInvitationResponse(message);
 }
 
 async function acceptGobangInvitation(message: ChatMessage) {
@@ -5957,6 +5990,81 @@ onBeforeUnmount(() => {
 
 .action-menu {
   display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+
+.action-menu-intro {
+  display: grid;
+  gap: 5px;
+  padding: 2px 3px 0;
+}
+
+.action-menu-intro small,
+.action-menu-group-title small {
+  color: #9b7f88;
+  font-size: 8px;
+  font-weight: 900;
+  letter-spacing: 0.13em;
+}
+
+.action-menu-intro strong {
+  color: #332e30;
+  font-size: 17px;
+  font-weight: 900;
+}
+
+.action-menu-intro > span {
+  color: #8a8184;
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.action-menu-group {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding-top: 13px;
+  border-top: 1px solid rgba(64, 53, 57, 0.08);
+}
+
+.action-menu-group--relationship {
+  padding: 13px;
+  border: 1px solid rgba(134, 99, 111, 0.11);
+  border-radius: 18px;
+  background: linear-gradient(145deg, rgba(239, 221, 226, 0.76), rgba(230, 235, 226, 0.7));
+}
+
+.action-menu-group-title {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.action-menu-group-title > span {
+  display: grid;
+  gap: 3px;
+}
+
+.action-menu-group-title strong {
+  color: #484043;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.action-menu-group-title em {
+  padding: 4px 7px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.62);
+  color: #846d75;
+  font-size: 8px;
+  font-style: normal;
+  font-weight: 900;
+}
+
+.action-menu-grid {
+  display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
 }
@@ -6131,6 +6239,21 @@ onBeforeUnmount(() => {
   font-weight: 800;
   text-align: center;
   line-height: 1.2;
+}
+
+.action-menu-grid--relationship button {
+  align-content: center;
+  gap: 4px;
+  min-height: 66px;
+  background: rgba(255, 255, 255, 0.68);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.48);
+}
+
+.action-menu-grid--relationship button small {
+  color: #988b8f;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1.25;
 }
 
 .action-menu button span {

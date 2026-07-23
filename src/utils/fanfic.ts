@@ -1,4 +1,4 @@
-import type { CharacterProfile, FanficBook, FanficCreativeDna, FanficStoryBible, UserProfile } from '@/types/domain';
+import type { CharacterProfile, FanficBook, FanficCreativeDna, FanficStoryBible, UserProfile, WorldBookEntry } from '@/types/domain';
 
 const directOverlapLength = 12;
 const defaultPalette = ['#f2d7d9', '#dce7de', '#f8f1e4'];
@@ -15,6 +15,29 @@ function uniqueStrings(values: unknown, limit = 12) {
   return [...new Set(values.map((value) => String(value ?? '').trim()).filter(Boolean))].slice(0, limit);
 }
 
+export function selectFanficLocalWorldBooks(character: Pick<CharacterProfile, 'localWorldBookIds'>, worldBooks: WorldBookEntry[]) {
+  const boundIds = new Set(character.localWorldBookIds ?? []);
+  return worldBooks.filter((book) => book.scope === 'local' && book.enabled && boundIds.has(book.id));
+}
+
+export function serializeFanficLocalWorldBooks(worldBooks: WorldBookEntry[]) {
+  return worldBooks
+    .filter((book) => book.scope === 'local' && book.enabled)
+    .map((book) => ({
+      title: book.title,
+      entries: (book.entries.length ? book.entries : [{ title: book.title, content: book.content, enabled: true }])
+        .filter((entry) => entry.enabled && (entry.title.trim() || entry.content.trim()))
+        .map((entry) => ({ title: entry.title, content: entry.content }))
+    }))
+    .filter((book) => book.entries.length);
+}
+
+export function getFanficLocalWorldBookSourceText(worldBooks: WorldBookEntry[]) {
+  return serializeFanficLocalWorldBooks(worldBooks)
+    .flatMap((book) => book.entries.map((entry) => `【${book.title || '未命名局部世界书'} / ${entry.title || '未命名条目'}】\n${entry.content}`))
+    .join('\n\n');
+}
+
 export function requireFanficTrueNames(user: Pick<UserProfile, 'name'>, character: Pick<CharacterProfile, 'name'>) {
   const userName = user.name.trim();
   const characterName = character.name.trim();
@@ -24,8 +47,8 @@ export function requireFanficTrueNames(user: Pick<UserProfile, 'name'>, characte
   return { userName, characterName };
 }
 
-export function createFanficProfileFingerprint(user: Pick<UserProfile, 'name' | 'description'>, character: Pick<CharacterProfile, 'name' | 'description'>) {
-  const source = `${user.name}\u0000${user.description}\u0000${character.name}\u0000${character.description}`;
+export function createFanficProfileFingerprint(user: Pick<UserProfile, 'name' | 'description'>, character: Pick<CharacterProfile, 'name' | 'description'>, additionalSourceText = '') {
+  const source = `${user.name}\u0000${user.description}\u0000${character.name}\u0000${character.description}\u0000${additionalSourceText}`;
   let hash = 2166136261;
   for (let index = 0; index < source.length; index += 1) {
     hash ^= source.charCodeAt(index);
@@ -38,9 +61,13 @@ function findDirectOverlap(generatedText: string, sourceText: string) {
   const generated = normalizeComparableText(generatedText);
   const source = normalizeComparableText(sourceText);
   if (source.length < directOverlapLength || generated.length < directOverlapLength) return '';
+  const generatedFragments = new Set<string>();
+  for (let index = 0; index <= generated.length - directOverlapLength; index += 1) {
+    generatedFragments.add(generated.slice(index, index + directOverlapLength));
+  }
   for (let index = 0; index <= source.length - directOverlapLength; index += 1) {
     const fragment = source.slice(index, index + directOverlapLength);
-    if (generated.includes(fragment)) return fragment;
+    if (generatedFragments.has(fragment)) return fragment;
   }
   return '';
 }
@@ -56,15 +83,20 @@ export function validateFanficOriginality(input: {
   characterDescription: string;
   creativeDna?: FanficCreativeDna;
   allowedNames?: string[];
+  additionalSourceTexts?: Array<{ label: string; text: string }>;
 }): FanficOriginalityResult {
   const userOverlap = findDirectOverlap(input.generatedText, input.userDescription);
   if (userOverlap) return { valid: false, reason: `正文与用户设定存在直接文字重合：“${userOverlap}”` };
   const characterOverlap = findDirectOverlap(input.generatedText, input.characterDescription);
   if (characterOverlap) return { valid: false, reason: `正文与角色设定存在直接文字重合：“${characterOverlap}”` };
+  for (const source of input.additionalSourceTexts ?? []) {
+    const overlap = findDirectOverlap(input.generatedText, source.text);
+    if (overlap) return { valid: false, reason: `正文与${source.label || '补充设定'}存在直接文字重合：“${overlap}”` };
+  }
 
   const normalizedGenerated = normalizeComparableText(input.generatedText);
   const allowedNames = new Set((input.allowedNames ?? []).map(normalizeComparableText));
-  const forbiddenCarryovers = uniqueStrings(input.creativeDna?.forbiddenCarryovers, 24)
+  const forbiddenCarryovers = uniqueStrings(input.creativeDna?.forbiddenCarryovers, 48)
     .filter((entry) => normalizeComparableText(entry).length >= 3)
     .filter((entry) => !allowedNames.has(normalizeComparableText(entry)));
   const forbiddenMatch = forbiddenCarryovers.find((entry) => normalizedGenerated.includes(normalizeComparableText(entry)));
@@ -78,7 +110,7 @@ export function normalizeFanficCreativeDna(value: Partial<FanficCreativeDna> | n
     characterTraits: uniqueStrings(value?.characterTraits, 8),
     chemistry: uniqueStrings(value?.chemistry, 8),
     narrativeBoundaries: uniqueStrings(value?.narrativeBoundaries, 10),
-    forbiddenCarryovers: uniqueStrings(value?.forbiddenCarryovers, 24)
+    forbiddenCarryovers: uniqueStrings(value?.forbiddenCarryovers, 48)
   };
 }
 
@@ -99,8 +131,8 @@ export function normalizeFanficBook(book: FanficBook): FanficBook {
   return {
     ...book,
     tags: uniqueStrings(book.tags, 8),
-    tone: String(book.tone ?? '').trim() || '细腻电影感',
-    pov: String(book.pov ?? '').trim() || '第三人称双视角',
+    tone: String(book.tone ?? '').trim() || '爽感连载 · 开局即冲突',
+    pov: String(book.pov ?? '').trim() || '第三人称双线推进',
     contentBoundaries: uniqueStrings(book.contentBoundaries, 12),
     creativeDna: normalizeFanficCreativeDna(book.creativeDna),
     storyBible: {

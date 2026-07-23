@@ -12,7 +12,7 @@ import {
   type FanficCreationPreferences
 } from '@/services/fanfic';
 import type { FanficBook, FanficChapter, FanficComment, FanficGenerationJob, FanficTopic } from '@/types/domain';
-import { createFanficProfileFingerprint, createProceduralFanficCover, normalizeFanficBook, requireFanficTrueNames, validateFanficOriginality } from '@/utils/fanfic';
+import { createFanficProfileFingerprint, createProceduralFanficCover, getFanficLocalWorldBookSourceText, normalizeFanficBook, requireFanficTrueNames, selectFanficLocalWorldBooks, validateFanficOriginality } from '@/utils/fanfic';
 import { createId } from '@/utils/id';
 import { hydrateStoredMediaRefs } from '@/utils/mediaStorage';
 import { useAppStore } from './appStore';
@@ -219,6 +219,7 @@ export const useFanficStore = defineStore('fanfic', () => {
     const character = appStore.characters.find((entry) => entry.id === book.characterId);
     const user = appStore.users.find((entry) => entry.id === book.userId);
     if (!character || !user) throw new Error('这本小说绑定的用户或角色已不存在。');
+    const localWorldBookText = getFanficLocalWorldBookSourceText(selectFanficLocalWorldBooks(character, appStore.worldBooks));
     job = await updateJob(job, { stage: 'writing', label: `正在生成第 ${order} 章与高潮评论`, progress: 56, error: '' });
     let bundle = await generateFanficChapterWithComments({
       book,
@@ -232,7 +233,8 @@ export const useFanficStore = defineStore('fanfic', () => {
       userDescription: user.description,
       characterDescription: character.description,
       creativeDna: book.creativeDna,
-      allowedNames: [book.userName, book.characterName]
+      allowedNames: [book.userName, book.characterName],
+      additionalSourceTexts: localWorldBookText ? [{ label: '角色绑定局部世界书', text: localWorldBookText }] : []
     });
     if (!originality.valid) {
       job = await updateJob(job, { label: '原创检查未通过，正在重写本章与评论', progress: 66 });
@@ -248,7 +250,8 @@ export const useFanficStore = defineStore('fanfic', () => {
         userDescription: user.description,
         characterDescription: character.description,
         creativeDna: book.creativeDna,
-        allowedNames: [book.userName, book.characterName]
+        allowedNames: [book.userName, book.characterName],
+        additionalSourceTexts: localWorldBookText ? [{ label: '角色绑定局部世界书', text: localWorldBookText }] : []
       });
       if (!originality.valid) throw new Error(`原创检查未通过：${originality.reason}`);
     }
@@ -280,11 +283,13 @@ export const useFanficStore = defineStore('fanfic', () => {
     if (!topic) throw new Error('请选择一个题材。');
     if (!appStore.settings) throw new Error('应用设置尚未加载。');
     const { userName, characterName } = requireFanficTrueNames(user, character);
+    const localWorldBooks = selectFanficLocalWorldBooks(character, appStore.worldBooks);
+    const localWorldBookText = getFanficLocalWorldBookSourceText(localWorldBooks);
     const bookId = createId('fanfic_book');
     let job = createJob(bookId, 1);
     await saveJob(job);
     try {
-      const creativeDna = await distillFanficCreativeDna({ user, character, userName, characterName, settings: appStore.settings });
+      const creativeDna = await distillFanficCreativeDna({ user, character, userName, characterName, localWorldBooks, settings: appStore.settings });
       job = await updateJob(job, { stage: 'planning', label: '正在创建全新世界与全书大纲', progress: 24 });
       const plan = await generateFanficBookPlan({ userName, characterName, creativeDna, topic, preferences: input.preferences, settings: appStore.settings });
       const now = Date.now();
@@ -316,7 +321,7 @@ export const useFanficStore = defineStore('fanfic', () => {
         storyBible: plan.storyBible,
         outline: plan.outline,
         continuity: [],
-        profileFingerprint: createFanficProfileFingerprint(user, character),
+        profileFingerprint: createFanficProfileFingerprint(user, character, localWorldBookText),
         createdAt: now,
         updatedAt: now
       });

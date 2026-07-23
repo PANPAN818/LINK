@@ -1,6 +1,7 @@
 export type ChatMode = 'online' | 'offline';
 
 import type { ChatCommerceAttachment, ChatShopShareAttachment, ShopCartItem, ShopMoment, ShopOrder, ShopProduct, ShopStorefront, ShopWishlistItem, WalletAccount, WalletTransaction } from './commerce';
+import type { MemoryAssertion, MemoryEdge, MemoryEmbeddingCache, MemoryEntity, MemoryEpisode, MemoryStateSnapshot, MemoryTheme } from './memory';
 
 export type AppTab = 'home' | 'voom' | 'music' | 'fanfic' | 'wallet';
 
@@ -421,20 +422,16 @@ export interface ChatAppearanceSettings {
 
 export interface ChatMemorySettings {
   enabled: boolean;
-  autoSummarize: boolean;
-  summarizeEvery: number;
-  summaryModel: string;
-  summaryPrompt: string;
-  mergeSummaryPrompt: string;
-  vectorMemoryEnabled: boolean;
-  hideSummarizedMessages: boolean;
-  grandSummaryHiddenStartFloor: number;
-  grandSummaryVisibleTailFloors: number;
-  autoGrandSummaryEnabled: boolean;
-  grandSummaryEvery: number;
-  autoMergeEnabled: boolean;
-  autoMergeThreshold: number;
-  autoMergeBatchSize: number;
+  compressionEnabled: boolean;
+  autoCapture: boolean;
+  captureEvery: number;
+  recentMessageLimit: number;
+  recallTokenBudget: number;
+  growthEnabled: boolean;
+  naturalForgettingEnabled: boolean;
+  reflectionEnabled: boolean;
+  embeddingEnabled: boolean;
+  embeddingModel: string;
 }
 
 export interface ConversationTimeAwarenessSettings {
@@ -505,56 +502,6 @@ export interface ConversationSettings {
   timeAwareness: ConversationTimeAwarenessSettings;
   proactiveReply: ConversationProactiveReplySettings;
   offline: ConversationOfflineSettings;
-}
-
-export type ConversationMemoryEntryType = 'fact' | 'preference' | 'promise' | 'conflict' | 'plot' | 'relationship' | 'boundary' | 'emotion' | 'world';
-export type ConversationMemoryEntryStatus = 'active' | 'open' | 'resolved' | 'superseded' | 'cancelled';
-export type ConversationMemoryTimeBasis = 'message-time' | 'model-time' | 'memory-created' | 'user-edited';
-
-export interface ConversationMemoryEntry {
-  id: string;
-  type: ConversationMemoryEntryType;
-  status: ConversationMemoryEntryStatus;
-  subject: string;
-  content: string;
-  owner?: string;
-  counterparty?: string;
-  due?: string;
-  resolution?: string;
-  evidenceFloors: number[];
-  lastTouchedFloor: number;
-  occurredAt?: number;
-  occurredEndAt?: number;
-  timeLabel?: string;
-  timeBasis?: ConversationMemoryTimeBasis;
-  importance: number;
-  vector?: number[];
-  createdAt: number;
-  updatedAt: number;
-  expiresAt?: number;
-}
-
-export interface ConversationMemoryRecord {
-  id: string;
-  conversationId: string;
-  mode: ChatMode;
-  kind: 'short-term' | 'long-term';
-  startFloor: number;
-  endFloor: number;
-  hiddenStartFloor: number;
-  hiddenEndFloor: number;
-  summary: string;
-  tokenCount: number;
-  vector: number[];
-  entries?: ConversationMemoryEntry[];
-  sourceMessageIds: string[];
-  model: string;
-  summaryRole?: 'memoir' | 'incremental-grand' | 'full-grand';
-  isMergedSummary?: boolean;
-  mergedFrom?: ConversationMemoryRecord[];
-  createdAt: number;
-  updatedAt: number;
-  compressedAt?: number;
 }
 
 export type GroupMemberIdentityType = 'user' | 'character' | 'npc';
@@ -1018,6 +965,13 @@ export interface FanficStoryBible {
   motifs: string[];
 }
 
+export interface FanficTopicSeed {
+  openingProblem: string;
+  immediateGoal: string;
+  escalation: string;
+  readerPromise: string;
+}
+
 export interface FanficTopic {
   id: string;
   source: FanficTopicSource;
@@ -1032,6 +986,7 @@ export interface FanficTopic {
   categoryLabel?: string;
   subcategory?: string;
   builtIn?: boolean;
+  commercialSeed?: FanficTopicSeed;
   createdAt: number;
   expiresAt?: number;
 }
@@ -1611,7 +1566,13 @@ export interface AppSnapshot {
   stickerGroups: StickerGroup[];
   stickers: Sticker[];
   conversationSettings: ConversationSettings[];
-  conversationMemories: ConversationMemoryRecord[];
+  memoryEpisodes: MemoryEpisode[];
+  memoryEntities: MemoryEntity[];
+  memoryAssertions: MemoryAssertion[];
+  memoryEdges: MemoryEdge[];
+  memoryThemes: MemoryTheme[];
+  memoryStateSnapshots: MemoryStateSnapshot[];
+  memoryEmbeddings: MemoryEmbeddingCache[];
   generatedImages: GeneratedImageRecord[];
   favorites: FavoriteMessageRecord[];
   walletAccounts?: WalletAccount[];
@@ -1636,6 +1597,7 @@ export interface PromptContext {
   worldBooks: WorldBookEntry[];
   conversationSummary: string;
   memorySummary?: string;
+  historyMessageLimit?: number;
   stickerVisionEnabled?: boolean;
   narrationModeEnabled?: boolean;
   offlineInvitationEnabled?: boolean;
